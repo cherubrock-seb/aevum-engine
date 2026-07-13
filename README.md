@@ -3,11 +3,11 @@
 Aevum is an experimental OpenCL arithmetic engine for modular calculations modulo a Mersenne number `M_p = 2^p - 1`.
 
 It is a modified derivative of GPUOwl/PRPLL. The main change is architectural: the original application-oriented GPU arithmetic has been exposed as a reusable register engine with a small C ABI. The API is designed so programs such as PrMers can adapt it to an interface similar in spirit to Marin's `engine::Reg` abstraction.
- 
+
 Aevum is not an official GPUOwl, PRPLL or Marin release.
 
 ## Project idea
- 
+
 The project combines two useful ideas:
 
 - GPUOwl/PRPLL arithmetic and the paired integer NTT path over `GF(M31^2) x GF(M61^2)`
@@ -169,3 +169,9 @@ This README is a technical packaging recommendation, not legal advice.
 ## Status
 
 Aevum is experimental. It has produced matching PRP residues and correct P-1 results in PrMers testing, but performance depends strongly on exponent size, transform choice, GPU architecture and workload. Automatic Marin/Aevum selection is therefore recommended in PrMers.
+
+## 0.3.4 build identity and portability update
+
+When Aevum is embedded as `third_party/aevum` inside another Git repository, the build now reports `v0.3.4` instead of accidentally using the parent repository commit hash. When built from the standalone Aevum repository, a matching tag or the Aevum repository commit identity is used.
+
+The same update keeps the portable macOS shared-library path: AppleClang/libc++ uses the real `std::filesystem` declaration, the linker uses `-dynamiclib`, and the API loader tests do not require `libdl` on macOS. No arithmetic API or GPU kernel semantics changed in 0.3.4.

@@ -11,12 +11,19 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
+AEVUM_VERSION ?= v0.3.4
 
+# Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
+# AppleClang and is fully supported by the engine build.
+CXX ?= c++
+
+DL_LIBS = -ldl
+ENGINE_LINK_FLAGS = -shared -Wl,-Bsymbolic
+EXAMPLE_RPATH = -Wl,-rpath,'$$ORIGIN/../$(ENGINE_BIN)'
 ifeq ($(HOST_OS), Darwin)
-# Real GCC (not clang), needed for 128-bit floats and std::filesystem::path
-CXX ?= g++-15
-else
-CXX ?= g++
+DL_LIBS =
+ENGINE_LINK_FLAGS = -dynamiclib
+EXAMPLE_RPATH = -Wl,-rpath,@loader_path/../$(ENGINE_BIN)
 endif
 
 ifeq ($(CUDA), 1)
@@ -36,11 +43,12 @@ else
  endif
 endif
 
-ifneq ($(findstring MINGW, $(HOST_OS)), MINGW)
- COMMON_FLAGS = -Wall $(CUDAFLAGS) -std=c++20 -static-libstdc++ -static-libgcc
-else
-# For mingw-64 use this:
- COMMON_FLAGS = -Wall $(CUDAFLAGS) -std=c++20 -static-libstdc++ -static-libgcc -static
+COMMON_FLAGS = -Wall $(CUDAFLAGS) -std=c++20
+ifneq ($(HOST_OS),Darwin)
+ COMMON_FLAGS += -static-libstdc++ -static-libgcc
+ ifeq ($(findstring MINGW,$(HOST_OS)),MINGW)
+  COMMON_FLAGS += -static
+ endif
 endif
 # -fext-numeric-literals
 
@@ -84,7 +92,7 @@ ENGINE_LIB = $(ENGINE_BIN)/libaevum_engine.so
 engine-lib: $(ENGINE_LIB)
 
 $(ENGINE_LIB): $(ENGINE_OBJS)
-	$(CXX) -shared -Wl,-Bsymbolic -o $@ $^ $(LIBPATH) $(OPENCL_LIBS) -ldl
+	$(CXX) $(ENGINE_LINK_FLAGS) -o $@ $^ $(LIBPATH) $(OPENCL_LIBS) $(DL_LIBS)
 
 $(ENGINE_BIN)/%.o: src/%.cpp
 	@mkdir -p $(dir $@) $(ENGINE_DEPDIR)
@@ -106,7 +114,7 @@ $(BIN)/aevum-amd: ${OBJS}
 
 .PHONY: test-small-factor-gpu
 test-small-factor-gpu: engine-lib
-	$(CXX) -O2 -std=c++20 tests/engine_small_factor_gpu_test.cpp -ldl -o build-tests/aevum-engine-small-factor-gpu-test
+	$(CXX) -O2 -std=c++20 tests/engine_small_factor_gpu_test.cpp $(DL_LIBS) -o build-tests/aevum-engine-small-factor-gpu-test
 	build-tests/aevum-engine-small-factor-gpu-test build-engine/libaevum_engine.so $${AEVUM_TEST_DEVICE:-0} .
 
 clean:
@@ -131,12 +139,14 @@ $(DEPDIR)/%.d: ;
 src/version.cpp : src/version.inc
 
 src/version.inc: FORCE
-	@if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
-	  desc=$$(git describe --tags --long --dirty --always --match 'v/aevum/*' 2>/dev/null || git rev-parse --short HEAD); \
-	  echo "\"$$(basename $$desc)\"" > $(BIN)/version.new; \
+	@repo_root=$$(git rev-parse --show-toplevel 2>/dev/null || true); \
+	here=$$(pwd -P); \
+	if [ -n "$$repo_root" ] && [ "$$(cd "$$repo_root" && pwd -P)" = "$$here" ]; then \
+	  desc=$$(git describe --tags --dirty --always --match 'v/aevum/*' --match 'v0.*' 2>/dev/null || echo "$(AEVUM_VERSION)"); \
 	else \
-	  echo '"v/aevum/0.3.3"' > $(BIN)/version.new; \
-	fi
+	  desc="$(AEVUM_VERSION)"; \
+	fi; \
+	echo "\"$$desc\"" > $(BIN)/version.new
 	@diff -q -N $(BIN)/version.new $@ >/dev/null || mv $(BIN)/version.new $@
 	@echo Version: `cat $@`
 
@@ -155,7 +165,7 @@ test-engine-api: engine-lib $(ENGINE_API_TEST)
 
 $(ENGINE_API_TEST): tests/engine_api_load_test.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) -O2 -std=c++20 $< -ldl -o $@
+	$(CXX) -O2 -std=c++20 $< $(DL_LIBS) -o $@
 
 HOST_TEST := build-tests/aevum-host-gf-test
 STATE_TEST := build-tests/aevum-state-compact-test
@@ -191,7 +201,7 @@ examples: $(EXAMPLE_TARGETS)
 
 $(EXAMPLE_BIN)/%: examples/%.cpp examples/example_common.h src/EngineApi.h $(ENGINE_LIB)
 	@mkdir -p $(EXAMPLE_BIN)
-	$(CXX) -O2 -std=c++20 -Isrc $< -L$(ENGINE_BIN) -laevum_engine -Wl,-rpath,'$$ORIGIN/../$(ENGINE_BIN)' -o $@
+	$(CXX) -O2 -std=c++20 -Isrc $< $(ENGINE_LIB) $(EXAMPLE_RPATH) -o $@
 
 test-examples-gpu: examples
 	$(EXAMPLE_BIN)/fft_plans
