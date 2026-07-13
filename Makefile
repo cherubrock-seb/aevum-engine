@@ -57,7 +57,7 @@ STRIP=-s
 
 endif
 
-SRCS1 = fs.cpp Trig.cpp TuneEntry.cpp Primes.cpp tune.cpp CycleFile.cpp TrigBufCache.cpp Event.cpp Queue.cpp TimeInfo.cpp Profile.cpp bundle.cpp Saver.cpp KernelCompiler.cpp Kernel.cpp gpuid.cpp File.cpp Proof.cpp log.cpp Worktodo.cpp common.cpp main.cpp Gpu.cpp clwrap.cpp Task.cpp timeutil.cpp Args.cpp state.cpp Signal.cpp FFTConfig.cpp AllocTrac.cpp sha3.cpp md5.cpp version.cpp
+SRCS1 = fs.cpp Trig.cpp TuneEntry.cpp Primes.cpp tune.cpp CycleFile.cpp TrigBufCache.cpp Event.cpp Queue.cpp TimeInfo.cpp Profile.cpp bundle.cpp Saver.cpp KernelCompiler.cpp Kernel.cpp gpuid.cpp File.cpp Proof.cpp log.cpp Worktodo.cpp common.cpp main.cpp Gpu.cpp clwrap.cpp Task.cpp timeutil.cpp Args.cpp state.cpp Signal.cpp FFTConfig.cpp AllocTrac.cpp sha3.cpp md5.cpp version.cpp EngineApi.cpp
 
 SRCS2 = test.cpp
 
@@ -70,24 +70,47 @@ DEPFLAGS = -MT $@ -MMD -MP -MF $(DEPDIR)/$*.Td
 COMPILE.cc = $(CXX) $(DEPFLAGS) $(CXXFLAGS) $(CPPFLAGS) $(TARGET_ARCH) -c
 POSTCOMPILE = @mv -f $(DEPDIR)/$*.Td $(DEPDIR)/$*.d && touch $@
 
-all: prpll
+all: aevum
 
-prpll: $(BIN)/prpll
 
-amd: $(BIN)/prpll-amd
+ENGINE_BIN = build-engine
+ENGINE_SRCS = $(filter-out main.cpp,$(SRCS1))
+ENGINE_OBJS = $(ENGINE_SRCS:%.cpp=$(ENGINE_BIN)/%.o)
+ENGINE_DEPDIR := $(ENGINE_BIN)/.d
+ENGINE_FLAGS = -O3 -DNDEBUG -Wall -std=c++20 -fPIC -fvisibility=hidden -DAEVUM_ENGINE_LIBRARY
+ENGINE_LIB = $(ENGINE_BIN)/libaevum_engine.so
+
+.PHONY: engine-lib
+engine-lib: $(ENGINE_LIB)
+
+$(ENGINE_LIB): $(ENGINE_OBJS)
+	$(CXX) -shared -Wl,-Bsymbolic -o $@ $^ $(LIBPATH) $(OPENCL_LIBS) -ldl
+
+$(ENGINE_BIN)/%.o: src/%.cpp
+	@mkdir -p $(dir $@) $(ENGINE_DEPDIR)
+	$(CXX) $(ENGINE_FLAGS) $(CPPFLAGS) -MMD -MP -MF $(ENGINE_DEPDIR)/$*.d -c $< -o $@
+
+aevum: $(BIN)/aevum
+
+amd: $(BIN)/aevum-amd
 
 #$(BIN)/test: $(BIN)/test.o
 #	$(CXX) $(CXXFLAGS) -o $@ $< $(LIBPATH) ${STRIP}
 
-$(BIN)/prpll: ${OBJS}
+$(BIN)/aevum: ${OBJS}
 	$(CXX) $(CXXFLAGS) -o $@ ${OBJS} $(LIBPATH) $(OPENCL_LIBS) ${STRIP}
 
 # Instead of linking with libOpenCL, link with libamdocl64
-$(BIN)/prpll-amd: ${OBJS}
+$(BIN)/aevum-amd: ${OBJS}
 	$(CXX) $(CXXFLAGS) -o $@ ${OBJS} $(LIBPATH) -lamdocl64 -L/opt/rocm/lib ${STRIP}
 
+.PHONY: test-small-factor-gpu
+test-small-factor-gpu: engine-lib
+	$(CXX) -O2 -std=c++20 tests/engine_small_factor_gpu_test.cpp -ldl -o build-tests/aevum-engine-small-factor-gpu-test
+	build-tests/aevum-engine-small-factor-gpu-test build-engine/libaevum_engine.so $${AEVUM_TEST_DEVICE:-0} .
+
 clean:
-	rm -rf build-debug build-release build-cuda
+	rm -rf build-debug build-release build-cuda build-engine build-tests build-examples
 
 $(BIN)/%.o : src/%.cpp $(DEPDIR)/%.d
 	$(COMPILE.cc) $(OUTPUT_OPTION) $<
@@ -108,11 +131,69 @@ $(DEPDIR)/%.d: ;
 src/version.cpp : src/version.inc
 
 src/version.inc: FORCE
-	echo \"`basename \`git describe --tags --long --dirty --always --match v/prpll/*\``\" > $(BIN)/version.new
-	diff -q -N $(BIN)/version.new $@ >/dev/null || mv $(BIN)/version.new $@
-	echo Version: `cat $@`
+	@if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
+	  desc=$$(git describe --tags --long --dirty --always --match 'v/aevum/*' 2>/dev/null || git rev-parse --short HEAD); \
+	  echo "\"$$(basename $$desc)\"" > $(BIN)/version.new; \
+	else \
+	  echo '"v/aevum/0.3.3"' > $(BIN)/version.new; \
+	fi
+	@diff -q -N $(BIN)/version.new $@ >/dev/null || mv $(BIN)/version.new $@
+	@echo Version: `cat $@`
 
 FORCE:
 
 include $(wildcard $(patsubst %,$(DEPDIR)/%.d,$(basename $(SRCS1))))
 # include $(wildcard $(patsubst %,$(DEPDIR)/%.d,$(basename $(SRCS2))))
+
+
+
+ENGINE_API_TEST := build-tests/aevum-engine-api-load-test
+
+.PHONY: test-engine-api
+test-engine-api: engine-lib $(ENGINE_API_TEST)
+	$(ENGINE_API_TEST) $(ENGINE_LIB)
+
+$(ENGINE_API_TEST): tests/engine_api_load_test.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) -O2 -std=c++20 $< -ldl -o $@
+
+HOST_TEST := build-tests/aevum-host-gf-test
+STATE_TEST := build-tests/aevum-state-compact-test
+
+.PHONY: test test-host test-gpu
+
+test: test-host
+
+test-host: $(HOST_TEST) $(STATE_TEST)
+	bash tests/source_audit.sh
+	$(HOST_TEST)
+	$(STATE_TEST)
+
+$(HOST_TEST): tests/host_gf_test.cpp
+	@mkdir -p build-tests
+	$(CXX) -O3 -std=c++20 -Wall -Wextra $< -o $@
+
+$(STATE_TEST): tests/state_compact_wrap_test.cpp src/state.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 -Wall -Wextra -Isrc $^ -o $@
+
+test-gpu: $(BIN)/aevum
+	bash tests/gpu_prp_smoke.sh $(BIN)/aevum
+
+-include $(wildcard $(ENGINE_DEPDIR)/*.d)
+
+EXAMPLE_BIN := build-examples
+EXAMPLE_NAMES := fft_plans register_ops power_chain
+EXAMPLE_TARGETS := $(addprefix $(EXAMPLE_BIN)/,$(EXAMPLE_NAMES))
+
+.PHONY: examples test-examples-gpu
+examples: $(EXAMPLE_TARGETS)
+
+$(EXAMPLE_BIN)/%: examples/%.cpp examples/example_common.h src/EngineApi.h $(ENGINE_LIB)
+	@mkdir -p $(EXAMPLE_BIN)
+	$(CXX) -O2 -std=c++20 -Isrc $< -L$(ENGINE_BIN) -laevum_engine -Wl,-rpath,'$$ORIGIN/../$(ENGINE_BIN)' -o $@
+
+test-examples-gpu: examples
+	$(EXAMPLE_BIN)/fft_plans
+	$(EXAMPLE_BIN)/register_ops $${AEVUM_TEST_DEVICE:-0} .
+	$(EXAMPLE_BIN)/power_chain $${AEVUM_TEST_DEVICE:-0} .

@@ -39,6 +39,24 @@ KERNEL(256) isEqual(global i64 *in1, global i64 *in2, P(int) outEqual) {
 }
 #endif
 
+#if REGADD
+KERNEL(256) regAdd(P(Word) dst, CP(Word) src) {
+  for (u32 p = get_global_id(0); p < NWORDS; p += get_global_size(0)) dst[p] += src[p];
+}
+#endif
+
+#if REGSUB
+KERNEL(256) regSub(P(Word) dst, CP(Word) src) {
+  for (u32 p = get_global_id(0); p < NWORDS; p += get_global_size(0)) dst[p] -= src[p];
+}
+#endif
+
+#if REGSUBVALUE
+KERNEL(1) regSubValue(P(Word) dst, u32 value) {
+  if (get_global_id(0) == 0) dst[0] -= (Word)value;
+}
+#endif
+
 #if TEST_KERNEL
 // Generate a small unused kernel so developers can look at how well individual macros assemble and optimize
 kernel void testKernel(global int* in, global double* out) {

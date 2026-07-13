@@ -1,3 +1,4 @@
+#include "version.h"
 // Copyright (C) Mihai Preda
 
 #include "Args.h"
@@ -100,9 +101,9 @@ bool Args::hasFlag(const string& key) const { return flags.find(key) != flags.en
 
 void Args::printHelp() {
   printf(R"(
-PRPLL is "PRobable Prime and Lucas-Lehmer Categorizer", AKA "Purple-cat"
+Aevum is an OpenCL/CUDA engine for Mersenne PRP and Lucas-Lehmer tests.
 
-PRPLL is an OpenCL/CUDA (GPU) program for primality testing Mersenne numbers (of the form 2^n - 1).
+Its arithmetic path is restricted to the paired NTT over GF(M31^2) and GF(M61^2).
 
 To check that OpenCL is installed correctly use the command "clinfo". If clinfo does not find any
 devices or otherwise fails, this program will not run.
@@ -111,28 +112,28 @@ This program is tested on Linux/ROCm (AMD GPUs); it also runs on Windows and on 
 
 For information about Mersenne primes search see https://www.mersenne.org/
 
-Run "prpll -h"; If this displays a list of OpenCL devices, it means that PRPLL is detecting the GPUs
+Run "aevum -h"; if this displays OpenCL devices, Aevum is detecting the GPUs
 and should be able to run.
 
 
 Worktodo:
-PRPLL keeps the active tasks in per-worker files worktodo-0.txt, worktodo-1.txt etc in the local directory.
+Aevum keeps the active tasks in per-worker files worktodo-0.txt, worktodo-1.txt etc in the local directory.
 These per-worker files are supplied from the global worktodo.txt file if -pool is used.
 In turn the global worktodo.txt can be supplied through the primenet.py script,
-either the one located at gpuowl/tools/primenet.py or https://download.mersenne.ca/AutoPrimeNet
+using a compatible PrimeNet work fetcher
 
 It is also possible to manually add exponents by adding lines of the form "PRP=118063003" to worktodo-<N>.txt
 
 
 The configuration options listed below can be passed on the command line or can be put in a file
-named "config.txt" in the prpll run directory.
+named "config.txt" in the Aevum run directory.
 
 
 -h                 : print general help, list of FFTs, list of devices
 -info <fft>        : print detailed information about the given FFT; e.g. -h 1K:13:256
--dir <folder>      : specify local work directory (containing worktodo.txt, results.txt, config.txt, gpuowl.log)
+-dir <folder>      : specify local work directory (containing worktodo.txt, results.txt, config.txt, aevum.log)
 -pool <dir>        : specify a directory with the shared (pooled) worktodo.txt and results.txt
-                     Multiple PRPLL instances, each in its own directory, can share a pool of assignments and report
+                     Multiple Aevum instances, each in its own directory, can share a pool of assignments and report
                      the results back to the common pool.
 -verbose           : print more log, useful for developers
 -version           : print only the version and exit
@@ -168,7 +169,7 @@ named "config.txt" in the prpll run directory.
 -cache             : use binary kernel cache; useful with repeated use of -roeTune and -tune
 -roe               : measure the Round-Off Error (Z) for more iterations (slow)
 
--use <define>      : comma separated list of defines for configuring gpuowl.cl, such as:
+-use <define>      : comma separated list of defines for configuring the Aevum kernels, such as:
   -use FAST_BARRIER: on AMD Radeon VII and older AMD GPUs, use a faster barrier().  This option
                      may not work on Nvidia GPUs or on RDNA AMD GPUs where it produces errors
                      (which are nevertheless detected).
@@ -289,7 +290,7 @@ void Args::parse(const string& line) {
       printHelp();
       throw "help";
     } else if (key == "-version") {
-      // log("PRPLL %s\n", VERSION);
+      log("Aevum %s\n", VERSION);
       throw "version";
     } else if (key == "-info") {
       if (s.empty()) {

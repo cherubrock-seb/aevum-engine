@@ -5,6 +5,7 @@
 #include "log.h"
 #include "timeutil.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 
@@ -55,10 +56,58 @@ std::vector<u32> compactBits(const vector<Word> &dataVect, u64 E) {
   assert(haveBits);
   out.push_back(outWord);
 
-  for (int p = 0; carry; ++p) {
-    i64 v = i64(out[p]) + carry;
-    out[p] = v & 0xffffffff;
-    carry = v >> 32;
+  const u32 topBits = u32(E & 31u);
+  const u32 topMask = topBits ? ((u32(1) << topBits) - 1u) : 0xffffffffu;
+  if (topBits) out.back() &= topMask;
+
+  auto is_zero = [&]() {
+    return std::all_of(out.begin(), out.end(), [](u32 v) { return v == 0u; });
+  };
+
+  auto is_modulus = [&]() {
+    for (size_t i = 0; i + 1 < out.size(); ++i) {
+      if (out[i] != 0xffffffffu) return false;
+    }
+    return out.back() == topMask;
+  };
+
+  auto set_modulus_minus_one = [&]() {
+    for (size_t i = 0; i + 1 < out.size(); ++i) out[i] = 0xffffffffu;
+    out.back() = topMask;
+    out[0] -= 1u;
+  };
+
+  auto increment_mod_mersenne = [&]() {
+    if (is_modulus()) std::fill(out.begin(), out.end(), 0u);
+    u64 c = 1;
+    for (size_t i = 0; i < out.size() && c; ++i) {
+      const u64 v = u64(out[i]) + c;
+      out[i] = u32(v);
+      c = v >> 32;
+    }
+    if (topBits) out.back() &= topMask;
+    if (c || is_modulus()) std::fill(out.begin(), out.end(), 0u);
+  };
+
+  auto decrement_mod_mersenne = [&]() {
+    if (is_zero()) {
+      set_modulus_minus_one();
+      return;
+    }
+    u64 borrow = 1;
+    for (size_t i = 0; i < out.size() && borrow; ++i) {
+      const u32 before = out[i];
+      out[i] = before - 1u;
+      borrow = before == 0u;
+    }
+    if (topBits) out.back() &= topMask;
+  };
+
+  if (is_modulus()) std::fill(out.begin(), out.end(), 0u);
+  if (carry > 0) {
+    for (u32 n = u32(carry); n != 0; --n) increment_mod_mersenne();
+  } else if (carry < 0) {
+    for (u32 n = u32(-i64(carry)); n != 0; --n) decrement_mod_mersenne();
   }
 
   assert(out.size() == (E - 1) / 32 + 1);

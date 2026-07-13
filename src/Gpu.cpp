@@ -24,6 +24,7 @@
 #include <array>
 #include <cinttypes>
 #include <cstring>
+#include <cstdlib>
 #include <cinttypes>
 
 #define _USE_MATH_DEFINES
@@ -819,6 +820,9 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   // 256
   K(kernIsEqual, "etc.cl", "isEqual", 256 * 256, "-DISEQUAL=1"),
   K(sum64,       "etc.cl", "sum64",   256 * 256, "-DSUM64=1"),
+  K(regAdd,      "etc.cl", "regAdd",      256 * 256, "-DREGADD=1"),
+  K(regSub,      "etc.cl", "regSub",      256 * 256, "-DREGSUB=1"),
+  K(regSubValue, "etc.cl", "regSubValue", 1,         "-DREGSUBVALUE=1"),
 
   K(testTrig, "selftest.cl", "testTrig", 256 * 256),
   K(testFFT4, "selftest.cl", "testFFT4", 256),
@@ -1316,8 +1320,66 @@ u32 Gpu::updateCarryPos(u32 bit) {
 
 vector<Buffer<Word>> Gpu::makeBufVector(u32 size) {
   vector<Buffer<Word>> r;
-  for (u32 i = 0; i < size; ++i) { r.emplace_back(timeBufVect, &queue, N); }
+  const size_t words = N * fft.WordSize / sizeof(Word);
+  for (u32 i = 0; i < size; ++i) { r.emplace_back(timeBufVect, &queue, words); }
   return r;
+}
+
+vector<Buffer<double>> Gpu::makeTransformBufVector(u32 size) {
+  vector<Buffer<double>> r;
+  const size_t transform_words = TOTAL_DATA_SIZE(fft, WIDTH, fft.shape.middle, SMALL_H, in_place, pad_size);
+  for (u32 i = 0; i < size; ++i) { r.emplace_back(timeBufVect, &queue, transform_words); }
+  return r;
+}
+
+void Gpu::regSync() { queue.finish(); }
+
+void Gpu::regCopy(Buffer<Word>& dst, const Buffer<Word>& src) { dst << src; }
+
+void Gpu::regWrite(Buffer<Word>& dst, const Words& words) { writeIn(dst, words); }
+
+Words Gpu::regRead(Buffer<Word>& src) { return readAndCompress(src); }
+
+void Gpu::regAddWords(Buffer<Word>& dst, const Buffer<Word>& src) { regAdd(dst, src); }
+
+void Gpu::regSubWords(Buffer<Word>& dst, const Buffer<Word>& src) { regSub(dst, src); }
+
+void Gpu::regSetU32(Buffer<Word>& dst, u32 value) { dst.set(static_cast<Word>(value)); }
+
+void Gpu::regSubU32(Buffer<Word>& dst, u32 value) { regSubValue(dst, value); }
+
+bool Gpu::regEqual(Buffer<Word>& lhs, Buffer<Word>& rhs) { return isEqual(lhs, rhs); }
+
+void Gpu::regSquare(Buffer<Word>& io, u32 factor) {
+  if (factor != 1) throw std::runtime_error("regSquare factor must be handled by EngineApi");
+  square(io, io, LEAD_NONE, LEAD_NONE, false, false);
+}
+
+void Gpu::regPrepare(Buffer<Word>& src) {
+  fftP(buf1, src);
+  fftMidIn(buf1);
+  replay();
+}
+
+void Gpu::regPrepare(Buffer<double>& prepared, Buffer<Word>& src) {
+  fftP(prepared, src);
+  fftMidIn(prepared);
+  replay();
+}
+
+void Gpu::regMulPrepared(Buffer<Word>& dst, u32 factor) {
+  if (factor != 1) throw std::runtime_error("regMulPrepared factor must be handled by EngineApi");
+  mul(dst, buf1, buf2, false);
+}
+
+void Gpu::regMulPrepared(Buffer<Word>& dst, Buffer<double>& prepared, u32 factor) {
+  if (factor != 1) throw std::runtime_error("regMulPrepared factor must be handled by EngineApi");
+  mul(dst, prepared, buf1, false);
+}
+
+void Gpu::regMul(Buffer<Word>& dst, Buffer<Word>& src, u32 factor) {
+  if (factor != 1) throw std::runtime_error("regMul factor must be handled by EngineApi");
+  modMul(dst, src, false);
 }
 
 pair<RoeInfo, RoeInfo> Gpu::readROE() {

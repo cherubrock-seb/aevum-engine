@@ -51,7 +51,7 @@ vector<FFTShape> FFTShape::multiSpec(const string& iniSpec) {
   vector<FFTShape> ret;
 
   for (const string &spec : split(iniSpec, ',')) {
-    enum FFT_TYPES fft_type = FFT64;
+    enum FFT_TYPES fft_type = FFT3161;
     auto parts = split(spec, ':');
     if (parseInt(parts[0]) < 60) {      // Look for a prefix specifying the FFT type
       fft_type = (enum FFT_TYPES) parseInt(parts[0]);
@@ -83,7 +83,7 @@ vector<FFTShape> FFTShape::multiSpec(const string& iniSpec) {
 
 vector<FFTShape> FFTShape::allShapes(u32 sizeFrom, u32 sizeTo) {
   vector<FFTShape> configs;
-  for (enum FFT_TYPES type : {FFT64, FFT3161, FFT3261, FFT61, FFT323161}) {
+  for (enum FFT_TYPES type : {FFT3161}) {
     for (u32 width : {256, 512, 1024, 4096}) {
       for (u32 height : {256, 512, 1024}) {
         if (width == 256 && height == 1024) { continue; } // Skip because we prefer width >= height
@@ -111,7 +111,7 @@ vector<FFTShape> FFTShape::allShapes(u32 sizeFrom, u32 sizeTo) {
 
 FFTShape::FFTShape(const string& spec) {
   assert(!spec.empty());
-  enum FFT_TYPES fft_type = FFT64;
+  enum FFT_TYPES fft_type = FFT3161;
   vector<string> v = split(spec, ':');
   if (parseInt(v[0]) < 60) {      // Look for a prefix specifying the FFT type
     fft_type = (enum FFT_TYPES) parseInt(v[0]);
@@ -208,7 +208,7 @@ bool FFTShape::isFavoredShape() const {
 FFTConfig::FFTConfig(const string& spec) {
   auto v = split(spec, ':');
 
-  enum FFT_TYPES fft_type = FFT64;
+  enum FFT_TYPES fft_type = FFT3161;
   if (parseInt(v[0]) < 60) {      // Look for a prefix specifying the FFT type
     fft_type = (enum FFT_TYPES) parseInt(v[0]);
     for (u32 i = 1; i < v.size(); ++i) v[i-1] = v[i];
@@ -301,30 +301,33 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
   // A FFT-spec was given, simply take the first FFT from the spec that can handle E
   if (!spec.empty()) {
     FFTConfig fft{spec};
+    if (fft.shape.fft_type != FFT3161) {
+      log("Aevum accepts only FFT type 1, GF(M31^2) x GF(M61^2).\n");
+      throw "Aevum FFT type";
+    }
     if (fft.maxExp() * args.fftOverdrive < E) {
       log("Warning: %s (max %" PRIu64 ") may be too small for %" PRIu64 "\n", fft.spec().c_str(), fft.maxExp(), E);
     }
     return fft;
   }
 
-  // No FFT-spec given, so choose from tune.txt the fastest FFT that can handle E
-  vector<TuneEntry> tunes = TuneEntry::readTuneFile(args);
-  for (const TuneEntry& e : tunes) {
-    // The first acceptable is the best as they're sorted by cost
-    if (E <= e.fft.maxExp() * args.fftOverdrive) { return e.fft; }
-  }
-
-  log("No FFTs found in tune.txt that can handle %" PRIu64 ". Consider tuning with -tune\n", E);
-
-  // Take the first FFT that can handle E
+  // The standard GPUOwl tune file contains FP64 shapes, including non-power-of-two
+  // middle dimensions.  Aevum is NTT-only, so select directly from FFT3161 shapes.
   for (const FFTShape& shape : FFTShape::allShapes()) {
+    if (shape.fft_type != FFT3161) continue;
     for (u32 v : {101, 202}) {
-      if (FFTConfig fft{shape, v, CARRY_AUTO}; fft.maxExp() * args.fftOverdrive >= E) { return fft; }
+      FFTConfig fft{shape, v, CARRY_AUTO};
+      const double bits_per_word = E / double(shape.size());
+      if (bits_per_word < fft.minBpw()) continue;
+      if (fft.maxExp() * args.fftOverdrive >= E) {
+        log("Aevum auto FFT: %s for exponent %" PRIu64 "\n", fft.spec().c_str(), E);
+        return fft;
+      }
     }
   }
 
-  log("No FFT found for %" PRIu64 "\n", E);
-  throw "No FFT";
+  log("No admissible FFT3161 plan for exponent %" PRIu64 "\n", E);
+  throw "No admissible FFT3161 plan";
 }
 
 

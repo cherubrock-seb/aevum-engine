@@ -1,65 +1,209 @@
-[![Actions Status](https://github.com/preda/gpuowl/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/preda/gpuowl/actions/workflows/ci.yml)
+# Aevum Engine
 
-## Must read papers
+Aevum is an experimental OpenCL arithmetic engine for modular calculations modulo a Mersenne number `M_p = 2^p - 1`.
 
-### Multiplication by FFT
+It is a modified derivative of GPUOwl/PRPLL. The main change is architectural: the original application-oriented GPU arithmetic has been exposed as a reusable register engine with a small C ABI. The API is designed so programs such as PrMers can adapt it to an interface similar in spirit to Marin's `engine::Reg` abstraction.
 
-- [Discrete Weighted Transforms and Large Integer Arithmetic](https://www.ams.org/journals/mcom/1994-62-205/S0025-5718-1994-1185244-1/S0025-5718-1994-1185244-1.pdf), Richard Crandall and Barry Fagin, 1994
-- [Rapid Multiplication Modulo the Sum And Difference of Highly Composite Numbers](https://www.daemonology.net/papers/fft.pdf), Colin Percival, 2002
+Aevum is not an official GPUOwl, PRPLL or Marin release.
 
-### P-1
+## Project idea
 
-- [An FFT Extension to the P-1 Factoring Algorithm](https://www.ams.org/journals/mcom/1990-54-190/S0025-5718-1990-1011444-3/S0025-5718-1990-1011444-3.pdf), Montgomerry & Silverman, 1990
-- [Improved Stage 2 to P+/-1 Factoring Algorithms](https://inria.hal.science/inria-00188192v3/document), Montgomerry & Kruppa, 2008
+The project combines two useful ideas:
 
+- GPUOwl/PRPLL arithmetic and the paired integer NTT path over `GF(M31^2) x GF(M61^2)`
+- a register-oriented engine model inspired by Marin, where algorithms manipulate opaque arithmetic registers through operations such as set, copy, square, multiply, add, subtract, import and export
 
-# PRPLL
+This is not a source-level merge of GPUOwl and Marin. Aevum is derived from GPUOwl/PRPLL. Marin is credited as the design inspiration for the external register-engine shape used by the adapter.
 
-## PRobable Prime and Lucas-Lehmer mersenne categorizer
-(pronounced *purrple categorizer*)
+## Authors and upstream projects
 
-PRPLL implements two primality tests for Mersenne numbers: PRP ("PRobable Prime") and LL ("Lucas-Lehmer") as the name suggests.
+- GPUOwl was originally written by Mihai Preda: https://github.com/preda/gpuowl
+- the imported upstream is George Woltman's GPUOwl/PRPLL fork: https://github.com/gwoltman/gpuowl
+- the imported base commit is `294cc485ac8cf53c8b69144a3039832eda573849`
+- Marin and its register engine were written by Yves Gallot: https://github.com/galloty/marin
+- the Aevum engine API, register adaptation and PrMers integration were added by cherubrock-seb: https://github.com/cherubrock-seb
 
-PRPLL is an OpenCL (GPU) and CUDA program for primality testing Mersenne numbers.
+The original upstream README is preserved as `README_GPUOWL.md`. Exact provenance is recorded in `UPSTREAM.md`, and Aevum-specific changes are listed in `MODIFICATIONS.md`.
 
+## Arithmetic backend
+
+The reusable engine path selects GPUOwl's paired integer NTT configuration:
+
+```text
+GF(M31^2) x GF(M61^2)
+```
+
+The public API is declared in:
+
+```text
+src/EngineApi.h
+```
+
+The shared library is:
+
+```text
+build-engine/libaevum_engine.so
+```
+
+## Register API
+
+The ABI exposes opaque engines and indexed registers. Important operations include:
+
+```c
+aevum_engine_create
+aevum_engine_destroy
+aevum_engine_set_u32
+aevum_engine_set_words
+aevum_engine_get_words
+aevum_engine_copy
+aevum_engine_prepare
+aevum_engine_square_mul
+aevum_engine_mul
+aevum_engine_add
+aevum_engine_sub_reg
+aevum_engine_sub_u32
+aevum_engine_equal
+```
+
+`aevum_engine_prepare` stores a transformed multiplicand for repeated multiplication. `aevum_engine_equal` compares two normalized register buffers directly on the GPU and avoids exporting very large residues for routine error checks. Register import and export use little-endian 32-bit words representing an integer modulo `2^p - 1`.
+
+Small factors used by `square_mul` and `mul` are applied in the integer register domain with a scratch register. Residue export canonicalizes the final signed carry modulo `2^p - 1` with bounded word access, including positive and negative cyclic carry cases.
 
 ## Build
 
-Invoke `make` in the source directory.
+Ubuntu or Debian dependencies:
 
+```bash
+sudo apt update
+sudo apt install -y g++ make ocl-icd-opencl-dev opencl-headers
+```
 
-## Use
-See `prpll -h` for the command line options.
+Build the shared engine:
 
+```bash
+make engine-lib -j"$(nproc)"
+```
+
+Build the original command-line application as well:
+
+```bash
+make -j"$(nproc)"
+```
+
+Build the examples:
+
+```bash
+make examples
+```
+
+## Tests
+
+Host arithmetic and source audit:
+
+```bash
+make test-host
+```
+
+Load the shared API and test automatic FFT3161 plan selection:
+
+```bash
+make test-engine-api
+```
+
+Run register examples on OpenCL device 0:
+
+```bash
+AEVUM_TEST_DEVICE=0 make test-examples-gpu
+```
+
+Run the focused small-factor GPU test:
+
+```bash
+AEVUM_TEST_DEVICE=0 make test-small-factor-gpu
+```
+
+## Examples
+
+### FFT plan selection
+
+```bash
+./build-examples/fft_plans
+```
+
+This prints the selected FFT3161 plan for several exponents without starting a long PRP run.
+
+### Register operations
+
+```bash
+./build-examples/register_ops 0 .
+```
+
+The sample checks:
+
+- `3^2 * 3 = 27`
+- prepared multiplication `7 * 5 * 2 = 70`
+- register add and subtract
+- register copy
+- word import and export
+
+### Verified power chain
+
+```bash
+./build-examples/power_chain 0 .
+```
+
+The sample executes repeated `square_mul` operations on the GPU and compares the complete exported integer with a CPU `boost::multiprecision::cpp_int` result. It also checks prepared multiplication followed by a small factor.
+
+## Use from PrMers
+
+PrMers loads Aevum as an optional in-process shared library through a small adapter derived from its existing `engine` interface.
+
+Recommended layout:
+
+```text
+PrMers/
+  src/aevum/EngineAevum.cpp
+  third_party/aevum/        optional source checkout or submodule
+```
+
+The long-term clean layout for public repositories is:
+
+1. publish this project as `cherubrock-seb/aevum-engine`, preferably as a fork of `gwoltman/gpuowl` so GitHub preserves the fork relationship and commit history
+2. keep Aevum under GPLv3
+3. keep PrMers under its existing MIT license for PrMers-authored files
+4. include only the MIT adapter and ABI declarations in PrMers, then fetch Aevum as an optional submodule or external build dependency
+5. when distributing a bundle or binary that includes Aevum, provide the complete corresponding Aevum source and comply with GPLv3
+
+## Publishing the GitHub repository
+
+The cleanest publication method is:
+
+```bash
+git clone https://github.com/gwoltman/gpuowl.git aevum-engine
+cd aevum-engine
+git remote rename origin upstream
+# create your GitHub fork first, then:
+git remote add origin https://github.com/cherubrock-seb/aevum-engine.git
+git checkout -b aevum-engine
+```
+
+Apply the Aevum changes as normal commits, preserve the upstream history, and tag releases using names such as:
+
+```bash
+git tag -a v/aevum/0.3.3 -m "Aevum register engine 0.3.3"
+git push origin aevum-engine --tags
+```
+
+Do not remove existing copyright headers. Keep `LICENSE`, `NOTICE`, `UPSTREAM.md`, `MODIFICATIONS.md`, and `README_GPUOWL.md` in the repository.
 
 ## License
 
-This project is licensed under the **GNU General Public License v3.0** - see [LICENSE](LICENSE) for details.
+Aevum is licensed under GNU GPL version 3 because it is a modified derivative of GPUOwl/PRPLL. See `LICENSE`.
 
+The GPL permits modification and redistribution, provided its conditions are followed. In particular, modified versions must be identified, copyright and license notices must be preserved, and corresponding source must be made available when binaries are conveyed.
 
-## Credits
+This README is a technical packaging recommendation, not legal advice.
 
-[PRPLL](https://github.com/preda/gpuowl) was originally authored (as gpuowl) by **Mihai Preda**.  **George Woltman** authored optimizations and NTT code contributions.  The CUDA backend was authored by **"Sherpa"** in honor of John Allen Frey.
+## Status
 
-
-## Why LL
-
-For Mersenne primes search, the PRP test is by far preferred over LL, such that LL is not used anymore for search.
-But LL is still used to verify a prime found by PRP (which is a very rare occurence).
-
-### Lucas-Lehmer (LL)
-This is a test that proves whether a Mersenne number is prime or not, but without providing a factor in the case where it is not prime.
-The Lucas-Lehmer test is very simple to describe: iterate the function f(x)=(x^2 - 2) modulo M(p) starting with the number 4. If
-after p-2 iterations the result is 0, then M(p) is certainly prime, otherwise M(p) is certainly not prime.
-
-Lucas-Lehmer, while a very efficient primality test, still takes a rather long time for large Mersenne numbers
-(on the order of weeks of intense compute), thus it is only applied to the Mersenne candidates that survived the cheaper preliminary
-filters TF and P-1.
-
-### PRP
-The probable prime test can prove that a candidate is composite (without providing a factor), but does not prove that a candidate
-is prime (only stating that it _probably_ is prime) -- although in practice the difference between probable prime and proved
-prime is extremely small for large Mersenne candidates.
-
-The PRP test is very similar computationally to LL: PRP iterates f(x) = x^2 modulo M(p) starting from 3. If after p iterations the result is 9 modulo M(p), then M(p) is probably prime, otherwise M(p) is certainly not prime. The cost
-of PRP is exactly the same as LL.
+Aevum is experimental. It has produced matching PRP residues and correct P-1 results in PrMers testing, but performance depends strongly on exponent size, transform choice, GPU architecture and workload. Automatic Marin/Aevum selection is therefore recommended in PrMers.

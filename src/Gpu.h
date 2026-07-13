@@ -158,6 +158,9 @@ private:
   Kernel readResidue;
   Kernel kernIsEqual;
   Kernel sum64;
+  Kernel regAdd;
+  Kernel regSub;
+  Kernel regSubValue;
 
   /* Weird test kernels */
   Kernel testTrig;
@@ -338,6 +341,23 @@ public:
   // return A^(2^n)
   Words expExp2(const Words& A, u32 n);
   vector<Buffer<Word>> makeBufVector(u32 size);
+  vector<Buffer<double>> makeTransformBufVector(u32 size);
+
+  void regSync();
+  void regCopy(Buffer<Word>& dst, const Buffer<Word>& src);
+  void regWrite(Buffer<Word>& dst, const Words& words);
+  Words regRead(Buffer<Word>& src);
+  void regSquare(Buffer<Word>& io, u32 factor = 1);
+  void regPrepare(Buffer<Word>& src);
+  void regPrepare(Buffer<double>& prepared, Buffer<Word>& src);
+  void regMulPrepared(Buffer<Word>& dst, u32 factor = 1);
+  void regMulPrepared(Buffer<Word>& dst, Buffer<double>& prepared, u32 factor = 1);
+  void regMul(Buffer<Word>& dst, Buffer<Word>& src, u32 factor = 1);
+  void regAddWords(Buffer<Word>& dst, const Buffer<Word>& src);
+  void regSubWords(Buffer<Word>& dst, const Buffer<Word>& src);
+  void regSetU32(Buffer<Word>& dst, u32 value);
+  void regSubU32(Buffer<Word>& dst, u32 value);
+  bool regEqual(Buffer<Word>& lhs, Buffer<Word>& rhs);
 
   void clear(bool isPRP);
 
