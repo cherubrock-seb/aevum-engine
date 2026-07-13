@@ -3,7 +3,7 @@
 Aevum is an experimental OpenCL arithmetic engine for modular calculations modulo a Mersenne number `M_p = 2^p - 1`.
 
 It is a modified derivative of GPUOwl/PRPLL. The main change is architectural: the original application-oriented GPU arithmetic has been exposed as a reusable register engine with a small C ABI. The API is designed so programs such as PrMers can adapt it to an interface similar in spirit to Marin's `engine::Reg` abstraction.
-
+ 
 Aevum is not an official GPUOwl, PRPLL or Marin release.
 
 ## Project idea
