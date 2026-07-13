@@ -7,7 +7,7 @@ It is a modified derivative of GPUOwl/PRPLL. The main change is architectural: t
 Aevum is not an official GPUOwl, PRPLL or Marin release.
 
 ## Project idea
-
+ 
 The project combines two useful ideas:
 
 - GPUOwl/PRPLL arithmetic and the paired integer NTT path over `GF(M31^2) x GF(M61^2)`
