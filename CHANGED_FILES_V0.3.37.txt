@@ -1,9 +1,0 @@
-CHANGED_FILES_V0.3.37.txt
-Makefile
-README.md
-README_V0.3.37_APPLE_GENERIC_MUL_SAFETY.md
-RELEASE_V0.3.37_APPLE_GENERIC_MUL_SAFETY.md
-src/EngineApi.cpp
-src/version.inc
-tests/apple_generic_mul_safety_test.py
-tests/source_audit.sh

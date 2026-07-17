@@ -1,5 +1,0 @@
-Aevum Engine v0.3.34 changes relative to v0.3.33:
-- Apple MIDDLE>=8 fftMiddleOutGF61 core/write staging;
-- exact local-memory reverse/reverseLine/pairMul line-pair kernel for Apple GF61 generic multiply;
-- exhaustive middle-out transpose and local-pair source tests;
-- no non-Apple arithmetic or queue changes.
