@@ -1,0 +1,14 @@
+Aevum Engine v0.3.20 changes relative to v0.3.19:
+
+Makefile
+README.md
+README_V0.3.20_APPLE_GF61_TAILZERO_SCALAR_STAGED_LDS.md
+CHANGED_FILES_V0.3.20.txt
+src/Gpu.cpp
+src/Gpu.h
+src/cl/tailsquare.cl
+src/bundle.cpp
+src/version.inc
+tests/apple_gf61_tailzero_staging_test.py
+tests/apple_opencl12_kernel_matrix_syntax.sh
+tests/source_audit.sh

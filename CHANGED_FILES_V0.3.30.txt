@@ -1,0 +1,10 @@
+Aevum Engine v0.3.30 changes relative to v0.3.29:
+Makefile
+README.md
+README_V0.3.30_APPLE_DETERMINISTIC_READ.md
+CHANGED_FILES_V0.3.30.txt
+src/Gpu.cpp
+src/version.inc
+tests/apple_gf61_tailmul_staging_test.py
+tests/apple_readchecked_double_sync_test.py
+tests/source_audit.sh

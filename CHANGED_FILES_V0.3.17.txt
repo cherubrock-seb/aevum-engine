@@ -1,0 +1,13 @@
+Aevum Engine v0.3.17 changed files relative to v0.3.16:
+
+Makefile
+README_V0.3.17_APPLE_GF61_MIDDLEIN_STAGED_LDS.md
+CHANGED_FILES_V0.3.17.txt
+src/Gpu.cpp
+src/Gpu.h
+src/cl/fftmiddlein.cl
+src/bundle.cpp
+src/version.inc
+README.md
+tests/apple_gf61_middlein_staging_test.py
+tests/source_audit.sh

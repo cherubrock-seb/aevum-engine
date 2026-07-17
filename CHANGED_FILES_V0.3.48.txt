@@ -1,0 +1,12 @@
+Aevum Engine v0.3.48
+
+- Makefile
+- src/version.inc
+- src/EngineApi.h
+- src/EngineApi.cpp
+- src/Gpu.h
+- src/Gpu.cpp
+- tests/source_audit.sh
+- tests/run_aevum_apple_stage_trace_v4.sh
+- README_V0.3.48_APPLE_STAGE_TRACE.md
+- HOTFIX_V0.3.47_TO_V0.3.48.md

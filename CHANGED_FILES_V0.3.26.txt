@@ -1,0 +1,13 @@
+Aevum Engine v0.3.26 changes relative to v0.3.25:
+
+src/cl/tailsquare.cl
+src/Gpu.cpp
+src/Gpu.h
+src/bundle.cpp
+src/version.inc
+Makefile
+README.md
+README_V0.3.26_APPLE_GF61_TAILZERO_DIRECT_WRITE.md
+CHANGED_FILES_V0.3.26.txt
+tests/apple_gf61_tailzero_staging_test.py
+tests/source_audit.sh

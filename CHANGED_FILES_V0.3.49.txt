@@ -1,0 +1,14 @@
+Aevum Engine v0.3.49
+
+- Makefile
+- src/version.inc
+- src/Gpu.h
+- src/Gpu.cpp
+- src/EngineApi.cpp
+- src/cl/fftp.cl
+- src/bundle.cpp
+- tests/apple_gf31_width_staging_test.py
+- tests/source_audit.sh
+- README_V0.3.49_APPLE_FULLY_GLOBAL_FFTP.md
+- HOTFIX_V0.3.48_TO_V0.3.49.md
+- CHANGED_FILES_V0.3.49.txt

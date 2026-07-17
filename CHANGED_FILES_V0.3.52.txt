@@ -1,0 +1,15 @@
+Aevum v0.3.52
+
+Modified:
+- Makefile
+- src/version.inc
+- src/Gpu.cpp
+- src/EngineApi.cpp
+- tests/state_compact_wrap_test.cpp
+- tests/source_audit.sh
+
+Added:
+- tests/apple_canonical_set_u32_test.py
+- README_V0.3.52_APPLE_CANONICAL_SETU32.md
+- HOTFIX_V0.3.51_TO_V0.3.52.md
+- CHANGED_FILES_V0.3.52.txt

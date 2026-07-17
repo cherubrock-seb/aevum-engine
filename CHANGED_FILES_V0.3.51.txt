@@ -1,0 +1,13 @@
+Aevum v0.3.51
+
+- Makefile
+- src/version.inc
+- src/Gpu.cpp
+- src/EngineApi.cpp
+- src/cl/transpose.cl
+- src/bundle.cpp
+- tests/apple_global_transpose_test.py
+- tests/source_audit.sh
+- README_V0.3.51_APPLE_GLOBAL_TRANSPOSE.md
+- HOTFIX_V0.3.50_TO_V0.3.51.md
+- CHANGED_FILES_V0.3.51.txt

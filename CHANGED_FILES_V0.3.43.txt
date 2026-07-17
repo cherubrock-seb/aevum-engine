@@ -1,0 +1,21 @@
+Base: Aevum source embedded in PrMers GitHub commit c013d582821af812b1b542b8874d62cede681d68,
+plus the existing Apple OpenCL 1.2 compile/launch compatibility layer.
+
+v0.3.43 functional changes:
+- src/EngineApi.cpp
+  - restore prepared cache on Apple
+  - Apple-only fail-closed unprepared multiplication
+  - Apple-only two-buffer non-aliasing small-factor doubling
+- src/Gpu.cpp
+  - Apple-only prepared fftHin + upstream tailMulLow routing
+- src/version.inc
+- Makefile
+- tests/apple_generic_mul_safety_test.py
+- tests/apple_prepared_tailmullow_routing_test.py
+- tests/gpu_init_order_test.py
+- tests/source_audit.sh
+- README_V0.3.43_APPLE_GITHUB_EXACT_PREPARED.md
+- RELEASE_V0.3.43_APPLE_GITHUB_EXACT_PREPARED.md
+
+No FFT selection, CRT modulus, weight, carry, square or non-Apple arithmetic
+branch is changed.

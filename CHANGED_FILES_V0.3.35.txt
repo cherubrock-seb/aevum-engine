@@ -1,0 +1,19 @@
+Aevum Engine v0.3.35 changes relative to v0.3.34:
+
+Modified:
+- Makefile
+- README.md
+- src/Gpu.cpp
+- src/Gpu.h
+- src/bundle.cpp
+- src/cl/fftmiddleout.cl
+- src/cl/tailmul.cl
+- src/version.inc
+- tests/apple_gf61_middleout_staging_test.py
+- tests/apple_gf61_tailmul_staging_test.py
+- tests/source_audit.sh
+
+Added:
+- README_V0.3.35_APPLE_SCALAR_PAIR_MIDOUT.md
+- RELEASE_V0.3.35_APPLE_SCALAR_PAIR_MIDOUT.md
+- CHANGED_FILES_V0.3.35.txt

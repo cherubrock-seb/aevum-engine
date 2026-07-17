@@ -1,0 +1,10 @@
+CHANGED_FILES_V0.3.36.txt
+Makefile
+README.md
+README_V0.3.36_APPLE_SPECIAL_TRIG_FIX.md
+RELEASE_V0.3.36_APPLE_SPECIAL_TRIG_FIX.md
+src/bundle.cpp
+src/cl/tailmul.cl
+src/version.inc
+tests/apple_gf61_tailmul_staging_test.py
+tests/source_audit.sh
