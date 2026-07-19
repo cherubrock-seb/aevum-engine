@@ -45,6 +45,53 @@ The shared library is:
 build-engine/libaevum_engine.so
 ```
 
+## Native PFA plans
+
+The engine also supports Good-Thomas mixed lengths `3 * 2^m` and `9 * 2^m`
+for the paired `GF(M31^2) x GF(M61^2)` path. The power-of-two rows keep the
+existing half-real transform and the odd axis is handled by small radix-3 or
+radix-9 butterflies. The inverse width stage scatters directly into the normal
+Aevum carry order.
+
+`pfa:auto` selects radix 3 or radix 9 when the real Aevum stock/PFA
+transform ratio reaches the validated gate. `pfa:3` and `pfa:9` remain
+available for validation or benchmarking. The same OpenCL path is available on Linux, Windows and macOS;
+Apple remains an explicit Aevum opt-in in PrMers.
+
+<a id="native-pfa-automatic-selection-ranges"></a>
+### Native PFA automatic selection ranges
+
+The table below is the current default `pfa:auto` policy with the normal
+`fftOverdrive = 1.0`. The limits are exponent values `p` for `M_p = 2^p - 1`.
+They are checked by the plan-policy test at the exact boundaries.
+
+| Automatic plan | Exponent range `p` | Selected Aevum plan | Transform words | Stock/PFA ratio |
+|---|---:|---|---:|---:|
+| Radix 3 | 10,627,319–15,724,707 | `pfa3:1:256:3:256:101` | 393,216 | 1.333x |
+| Radix 3 | 21,071,135–31,284,264 | `pfa3:1:256:3:512:101` | 786,432 | 1.333x |
+| Radix 9 | 41,922,069–46,560,704 | `pfa9:1:256:9:256:101` | 1,179,648 | 1.778x |
+| Radix 3 | 46,560,705–62,080,936 | `pfa3:1:512:3:512:101` | 1,572,864 | 1.333x |
+| Radix 9 | 83,194,017–92,625,960 | `pfa9:1:256:9:512:101` | 2,359,296 | 1.778x |
+| Radix 3 | 92,625,961–123,343,992 | `pfa3:1:512:3:1K:101` | 3,145,728 | 1.333x |
+| Radix 9 | 165,507,233–183,789,168 | `pfa9:1:512:9:512:101` | 4,718,592 | 1.778x |
+| Radix 3 | 183,789,169–244,737,648 | `pfa3:1:1K:3:1K:101` | 6,291,456 | 1.333x |
+| Radix 9 | 328,414,017–365,879,616 | `pfa9:1:512:9:1K:101` | 9,437,184 | 1.778x |
+| Radix 3 | 365,879,617–487,210,368 | `pfa3:1:4K:3:512:101` | 12,582,912 | 1.333x |
+| Radix 9 | 653,808,129–725,153,152 | `pfa9:1:1K:9:1K:101` | 18,874,368 | 1.778x |
+| Radix 3 | 725,153,153–965,612,672 | `pfa3:1:4K:3:1K:101` | 25,165,824 | 1.333x |
+| Radix 9 | 1,295,872,129–1,440,869,120 | `pfa9:1:4K:9:512:101` | 37,748,736 | 1.778x |
+| Radix 9 | 2,574,967,041–2,862,863,872 | `pfa9:1:4K:9:1K:101` | 75,497,472 | 1.778x |
+
+All other admissible exponent ranges use the normal power-of-two Aevum plan.
+The automatic gates are `1.30x` for radix 3 and `1.60x` for radix 9.
+The explicit radix options remain available for validation and benchmarking.
+
+Background and development notes:
+
+- https://www.mersenneforum.org/node/1110517/page4
+- https://github.com/cherubrock-seb/PrMers/tree/main/docs/mersenne2_mixed_crt_2d_half_fast
+- https://github.com/cherubrock-seb/PrMers/tree/main/docs/prmers-bananantt-split
+
 ## Register API
 
 The ABI exposes opaque engines and indexed registers. Important operations include:
