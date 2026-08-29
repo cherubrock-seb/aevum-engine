@@ -1,7 +1,7 @@
 {
-  "root": "aevum-engine-v0.3.78-workload-plan-policy-audit-fix",
-  "version": "v0.3.78-workload-plan-policy-audit-fix",
-  "feature": "throughput-cost auto selector, validated power-of-two lead cache, opt-in PFA9 carry/fftP bridge",
+  "root": "aevum-engine-v0.3.79-pfa9-resident-v8",
+  "version": "v0.3.79-pfa9-resident-v8",
+  "feature": "type-4 PFA9 resident V8 Good-Thomas chain and workload-aware plan policy",
   "file_count": 248,
   "files": [
     ".github/dependabot.yml",
