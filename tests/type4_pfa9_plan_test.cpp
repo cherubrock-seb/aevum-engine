@@ -1,6 +1,7 @@
 #include "FFTConfig.h"
 #include "Args.h"
 #include <cstdarg>
+#include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -18,6 +19,44 @@ std::vector<std::string> split(const std::string& text, char delimiter) {
 
 int main() {
   Args args(true);
+
+#if defined(_WIN32)
+  _putenv_s("AEVUM_RADIX1K", "");
+#else
+  unsetenv("AEVUM_RADIX1K");
+#endif
+
+  FFTShape radix1kDefault{FFT3161, 1024, 2, 1024};
+  if (radix1kDefault.nW() != 4 || radix1kDefault.nH() != 4)
+    throw std::runtime_error("radix1k safe-default/explicit-override policy mismatch");
+
+#if defined(_WIN32)
+  _putenv_s("AEVUM_RADIX1K", "8");
+#else
+  setenv("AEVUM_RADIX1K", "8", 1);
+#endif
+  FFTShape radix1kForced8{FFT3161, 1024, 2, 1024};
+  if (radix1kForced8.nW() != 8 || radix1kForced8.nH() != 8)
+    throw std::runtime_error("AEVUM_RADIX1K=8 did not enable radix8");
+
+  FFTShape radix256Forced8{FFT3161, 256, 2, 256};
+  if (radix256Forced8.nW() != 4 || radix256Forced8.nH() != 4)
+    throw std::runtime_error("AEVUM_RADIX1K=8 must not change the 256 radix");
+
+#if defined(_WIN32)
+  _putenv_s("AEVUM_RADIX1K", "4");
+#else
+  setenv("AEVUM_RADIX1K", "4", 1);
+#endif
+  FFTShape radix1kForced4{FFT3161, 1024, 2, 1024};
+  if (radix1kForced4.nW() != 4 || radix1kForced4.nH() != 4)
+    throw std::runtime_error("AEVUM_RADIX1K=4 did not retain radix4");
+
+#if defined(_WIN32)
+  _putenv_s("AEVUM_RADIX1K", "");
+#else
+  unsetenv("AEVUM_RADIX1K");
+#endif
   FFTConfig plan("pfa9:4:512:9:512:202");
   if (plan.shape.fft_type != FFT323161 || plan.pfa_radix != 9 ||
       plan.shape.width != 512 || plan.shape.middle != 9 ||
