@@ -102,7 +102,6 @@ private:
 
   u32 hN, nW, nH;
   bool useLongCarry;
-  bool pfa_resident_enabled{false};  // opt-in PFA9 type-4 resident-word hot chain
   u32 wantROE{};
 
   Profile profile{};
@@ -131,7 +130,6 @@ private:
   Kernel ktailMulLow;
   Kernel kfftMidOut;
   Kernel kfftW;
-  Kernel kfftWResident;
 
   /* Kernels for NTT_GF31 */
   Kernel kfftMidInGF31;
@@ -142,7 +140,6 @@ private:
   Kernel ktailMulLowGF31;
   Kernel kfftMidOutGF31;
   Kernel kfftWGF31;
-  Kernel kfftWGF31Resident;
 
   /* Kernels for NTT_GF61 */
   Kernel kfftMidInGF61;
@@ -176,7 +173,6 @@ private:
   Kernel kfftMidOutGF61WriteScalarApple;
 #endif
   Kernel kfftWGF61;
-  Kernel kfftWGF61Resident;
 #if defined(__APPLE__)
   Kernel kfftWGF61LoadScalarApple;
   Kernel kfftWGF61WidthRadixApple;
@@ -200,8 +196,7 @@ private:
 
   /* Kernels dealing with the FP data and product of NTT primes */
   Kernel kfftP;
-  Kernel kfftPCarryB;  // legacy PFA9 carryB + fftP bridge
-  Kernel kfftPResident; // PFA9 type-4 direct resident Word2 input
+  Kernel kfftPCarryB;  // PFA9 carryB + fftP bridge for retained LEAD_WIDTH
 #if defined(__APPLE__)
   Kernel kfftMidInGF61LoadScalarApple;
   Kernel kfftMidInGF61Mul2FactorScalarApple;
@@ -268,8 +263,6 @@ private:
 #endif
   Kernel kCarryA;
   Kernel kCarryAROE;
-  Kernel kCarryAResident;
-  Kernel kCarryAResidentROE;
   Kernel kCarryM;
   Kernel kCarryMROE;
   Kernel kCarryLL;
@@ -280,7 +273,6 @@ private:
   Kernel kCarryFusedLL;
 
   Kernel carryB;
-  Kernel kCarryBResident;
   Kernel transpIn, transpOut;
   Kernel readResidue;
   Kernel kernIsEqual;
@@ -347,7 +339,7 @@ private:
   TimeInfo* timeBufVect;
   ZAvg zAvg;
 
-  enum BOTTOM_HALF_KERNELS {KMIDIN, KFFTHIN, KTAILSQUARE, KTAILMUL, KTAILMULLOW, KMIDOUT, KFFTW, KFFTW_RESIDENT};
+  enum BOTTOM_HALF_KERNELS {KMIDIN, KFFTHIN, KTAILSQUARE, KTAILMUL, KTAILMULLOW, KMIDOUT, KFFTW};
   vector<enum BOTTOM_HALF_KERNELS> recorded_kernels;
   vector<Buffer<double> *> recorded_kernel_args;
 
@@ -359,7 +351,6 @@ private:
   void fftP(Buffer<double>& out, Buffer<double>& in) { fftP(out, reinterpret_cast<Buffer<Word>&>(in)); }
   void fftP(Buffer<double>& out, Buffer<Word>& in);
   void fftPCarryB(Buffer<double>& out, Buffer<Word>& in);
-  void fftPResident(Buffer<double>& out, Buffer<Word>& in);
   void fftMidIn(Buffer<double>& buf);
   void fftMidOut(Buffer<double>& buf);
   void fftHin(Buffer<double>& out, Buffer<double>& in);
@@ -367,11 +358,8 @@ private:
   void tailMul(Buffer<double>& buf, Buffer<double>& in2);
   void tailMulLow(Buffer<double>& buf, Buffer<double>& in2);
   void fftW(Buffer<double>& out, Buffer<double>& in);
-  void fftWResident(Buffer<double>& out, Buffer<double>& in);
   void carryA(Buffer<double>& out, Buffer<double>& in) { carryA(reinterpret_cast<Buffer<Word>&>(out), in); }
   void carryA(Buffer<Word>& out, Buffer<double>& in);
-  void carryAResident(Buffer<Word>& out, Buffer<double>& in);
-  void carryBResident(Buffer<Word>& io);
   void carryM(Buffer<Word>& out, Buffer<double>& in);
   void carryLL(Buffer<Word>& out, Buffer<double>& in);
   void carryFused(Buffer<double>& buf);

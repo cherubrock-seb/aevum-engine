@@ -610,8 +610,24 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
     return fft;
   }
 
-  // The standard GPUOwl tune file contains FP64 shapes, including non-power-of-two
-  // middle dimensions.  Aevum is NTT-only, so select directly from FFT3161 shapes.
+  // No explicit FFT spec: first reuse compatible Aevum tuning data.
+  // TuneEntry::readTuneFile rejects historical single-digit GPUOwl/PRPLL FP64
+  // records, accepts explicit Type1 records, and safely normalizes modern
+  // unprefixed three-digit WMH NTT records (for example 512:8:512:202).
+  // Entries are sorted by measured cost; the first safe entry is therefore
+  // the fastest measured compatible plan.
+  for (const TuneEntry& tuned : TuneEntry::readTuneFile(args)) {
+    if (tuned.fft.shape.fft_type != FFT3161) continue;
+    const double bits_per_word = E / double(tuned.fft.size());
+    if (bits_per_word < tuned.fft.minBpw()) continue;
+    if (tuned.fft.maxExp() * args.fftOverdrive >= E) {
+      log("Aevum tuned FFT: %s for exponent %" PRIu64 "\n",
+          tuned.fft.spec().c_str(), E);
+      return tuned.fft;
+    }
+  }
+
+  // No usable tuned entry: select directly from the built-in FFT3161 shapes.
   for (const FFTShape& shape : FFTShape::allShapes()) {
     if (shape.fft_type != FFT3161) continue;
     for (u32 v : {101, 202}) {
