@@ -465,6 +465,7 @@ public:
 
   void regSync();
   void regProfileReport(bool emit);
+  double regPrpRoe(bool begin);
   bool regSupportsLeadCache() const;
   bool regSupportsFusedLL() const;
   bool regSupportsPreparedMulLead() const;

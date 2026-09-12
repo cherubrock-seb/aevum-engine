@@ -1,5 +1,6 @@
 #include "TuneEntry.h"
 #include "Args.h"
+#include "PrpUseTune.h"
 #include "CycleFile.h"
 #include "common.h"
 
@@ -8,6 +9,7 @@
 #include <cctype>
 #include <cinttypes>
 #include <string>
+#include <sstream>
 
 // v100.10 tune-format compatibility.
 //
@@ -180,7 +182,15 @@ vector<TuneEntry> TuneEntry::readTuneFile(const Args& args) {
 
       prevCost = cost;
       prevMaxExp = maxExp;
-      results.push_back({cost, fft});
+      std::vector<KeyVal> use;
+      std::istringstream fields(line); std::string ignored_cost, ignored_spec, option;
+      fields >> ignored_cost >> ignored_spec >> option;
+      if (option == "-use") {
+        std::string profile; std::getline(fields, profile);
+        if (auto comment=profile.find('#'); comment!=std::string::npos) profile.resize(comment);
+        use = aevum_prp_use::parse(profile);
+      }
+      results.push_back({cost, fft, use});
       if (normalized_unprefixed) ++normalizedCount;
     } catch (...) {
       ++incompatibleCount;
@@ -218,7 +228,8 @@ void TuneEntry::writeTuneFile(const vector<TuneEntry>& results) {
     assert(r.cost >= prevCost && maxExp > prevMaxExp);
     prevCost = r.cost;
     prevMaxExp = maxExp;
-    tune->printf("%6.1f %14s # %" PRIu64 "\n",
-                 r.cost, r.fft.spec().c_str(), maxExp);
+    const std::string use = r.use.empty() ? "" : " -use " + aevum_prp_use::normalize(r.use);
+    tune->printf("%6.1f %14s%s # %" PRIu64 "\n",
+                 r.cost, r.fft.spec().c_str(), use.c_str(), maxExp);
   }
 }
