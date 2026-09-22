@@ -12,7 +12,7 @@ on:
     branches:
       - 'cherub-preflight/aevum-release-pipeline-v1'
     tags:
- - 'v0.*'
+      - 'v0.*'
 
 permissions:
   contents: read
@@ -334,7 +334,7 @@ jobs:
 
   release:
     name: Publish standalone Aevum release
- if: startsWith(github.ref, 'refs/tags/v0.')
+    if: startsWith(github.ref, 'refs/tags/v0.')
     needs:
       - linux
       - windows
@@ -379,7 +379,7 @@ jobs:
             echo "- Aevum source tree SHA: \`${SOURCE_TREE}\`"
             echo "- Workflow run: \`${GITHUB_RUN_ID}\`"
             echo "- Architectures: Linux x86_64, Windows x86_64, macOS x86_64 and arm64"
- echo "- Repository topology: standalone aevum-engine repository."
+            echo "- Repository topology: standalone aevum-engine repository."
             echo "- Tagged Aevum change: ${CHANGE}"
             echo
             echo "Correctness gates include the Aevum host tests and standalone engine API loader test on every release platform."
