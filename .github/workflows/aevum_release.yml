@@ -12,7 +12,7 @@ on:
     branches:
       - 'cherub-preflight/aevum-release-pipeline-v1'
     tags:
-      - 'v0.**'
+ - 'v0.*'
 
 permissions:
   contents: read
@@ -334,7 +334,7 @@ jobs:
 
   release:
     name: Publish standalone Aevum release
-    if: startsWith(github.ref, 'refs/tags/v0.*')
+ if: startsWith(github.ref, 'refs/tags/v0.')
     needs:
       - linux
       - windows
