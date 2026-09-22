@@ -106,12 +106,76 @@ double positiveEnvDouble(const char* name, double fallback, double lo, double hi
   return std::max(lo, std::min(hi, v));
 }
 
-bool usableTuneEntry(const Args& args, uint32_t exponent) {
+bool pm1Factor3Workload(aevum_autotune::Workload workload) {
+  return workload == aevum_autotune::Workload::Pm1 ||
+         workload == aevum_autotune::Workload::Pm1Lowmem ||
+         workload == aevum_autotune::Workload::Pm1Ultralowmem;
+}
+
+// square_mul(x,3) needs more dynamic range than a pure square.
+// A plan admissible for exponent E is not necessarily admissible for
+// x <- 3*x^2.  Account explicitly for log2(3) extra bits/word.
+bool smallFactorCapacitySafe(const Args& args,
+                             uint32_t exponent,
+                             const FFTConfig& fft,
+                             uint32_t factor) {
+  if (factor <= 1u) return true;
+  const double bpw = double(exponent) / double(fft.size());
+  const double required_bpw = bpw + std::log2(double(factor));
+  const double allowed_bpw = double(fft.maxBpw()) * args.fftOverdrive;
+  return required_bpw <= allowed_bpw;
+}
+
+bool factor3CapacitySafe(const Args& args,
+                         uint32_t exponent,
+                         const FFTConfig& fft) {
+  return smallFactorCapacitySafe(args, exponent, fft, 3u);
+}
+
+FFTConfig promoteToFactor3SafePlan(const Args& args,
+                                   uint32_t exponent,
+                                   FFTConfig fft) {
+  for (unsigned attempt = 0; attempt < 8; ++attempt) {
+    if (factor3CapacitySafe(args, exponent, fft)) return fft;
+
+    // Convert the factor-3 headroom into an equivalent exponent requirement.
+    const uint64_t effective_exponent =
+        static_cast<uint64_t>(std::ceil(
+            double(exponent) +
+            std::log2(3.0) * double(fft.size())));
+
+    FFTConfig next = FFTConfig::bestFit(args, effective_exponent, "");
+
+    if (next.size() <= fft.size()) {
+      // Defensive escape from a selector boundary that does not advance.
+      next = FFTConfig::bestFit(
+          args,
+          effective_exponent + static_cast<uint64_t>(fft.size()),
+          "");
+    }
+
+    if (next.size() <= fft.size())
+      throw std::runtime_error(
+          "Aevum cannot find a factor-3-safe P-1 FFT plan");
+
+    fft = next;
+  }
+
+  throw std::runtime_error(
+      "Aevum factor-3 P-1 FFT promotion did not converge");
+}
+
+bool usableTuneEntry(const Args& args,
+                     uint32_t exponent,
+                     aevum_autotune::Workload workload) {
   for (const TuneEntry& tuned : TuneEntry::readTuneFile(args)) {
     if (tuned.fft.shape.fft_type != FFT3161 || tuned.fft.isPfa()) continue;
     const double bpw = exponent / double(tuned.fft.size());
     if (bpw < tuned.fft.minBpw()) continue;
-    if (tuned.fft.maxExp() * args.fftOverdrive >= exponent) return true;
+    if (tuned.fft.maxExp() * args.fftOverdrive < exponent) continue;
+    if (pm1Factor3Workload(workload) &&
+        !factor3CapacitySafe(args, exponent, tuned.fft)) continue;
+    return true;
   }
   return false;
 }
@@ -141,6 +205,8 @@ std::vector<std::string> autotuneCandidates(const Args& args,
     if (candidates.size() >= cap || seen.count(spec)) return;
     const auto fft = admissiblePlan(args, exponent, spec);
     if (!fft) return;
+    if (pm1Factor3Workload(workload) &&
+        !factor3CapacitySafe(args, exponent, *fft)) return;
     const std::string normalized = fft->spec();
     if (seen.insert(normalized).second) candidates.push_back(normalized);
   };
@@ -745,6 +811,7 @@ public:
     if (tune_dir && *tune_dir) args_.masterDir = std::filesystem::absolute(tune_dir);
     args_.setDefaults();
     args_.profile = std::getenv("AEVUM_PROFILE_KERNELS") && std::strcmp(std::getenv("AEVUM_PROFILE_KERNELS"), "1") == 0;
+    timing_enabled_ = envExactly("AEVUM_TIMING_DECOMP", "1");
 
     // Device-scoped tuning must use the actual OpenCL device selected by -d.
     cl_device_id selected_device = getDevice(device);
@@ -817,13 +884,37 @@ public:
     if (multi_q_default) args_.flags["MULTI_Q"] = "1";
 
     const bool manual_plan_env = aevum_autotune::hasManualPlanOverrideEnvironment();
-    const bool compatible_tune_entry = spec.empty() && usableTuneEntry(args_, exponent_);
+    const bool compatible_tune_entry =
+        spec.empty() && usableTuneEntry(args_, exponent_, workload_);
     const bool workload_tunable = workload_ != aevum_autotune::Workload::Pm1Ultralowmem;
     const bool autotune_eligible = autotune_mode != aevum_autotune::Mode::Off &&
         !explicit_fft_spec && !gb202_profile && !manual_plan_env &&
         !compatible_tune_entry && workload_tunable;
 
     FFTConfig native_fft = FFTConfig::bestFit(args_, exponent_, spec);
+
+    if (!explicit_fft_spec &&
+        !manual_plan_env &&
+        !gb202_profile &&
+        pm1Factor3Workload(workload_) &&
+        !factor3CapacitySafe(args_, exponent_, native_fft)) {
+      const std::string unsafe_spec = native_fft.spec();
+      const double unsafe_bpw =
+          double(exponent_) / double(native_fft.size());
+
+      native_fft =
+          promoteToFactor3SafePlan(args_, exponent_, native_fft);
+
+      if (verbose) {
+        log("Aevum P-1 factor-3 capacity guard: "
+            "%s rejected at %.2f bpw; promoted to %s "
+            "(+log2(3) arithmetic headroom).\n",
+            unsafe_spec.c_str(),
+            unsafe_bpw,
+            native_fft.spec().c_str());
+      }
+    }
+
     std::string selected_spec = native_fft.spec();
 
     if (autotune_eligible) {
@@ -843,7 +934,9 @@ public:
         cached_record = aevum_autotune::load(autotune_cache_path, autotune_key);
         if (cached_record) {
           const auto cached_fft = admissiblePlan(args_, exponent_, cached_record->plan);
-          if (cached_fft) {
+          if (cached_fft &&
+              (!pm1Factor3Workload(workload_) ||
+               factor3CapacitySafe(args_, exponent_, *cached_fft))) {
             selected_spec = cached_fft->spec();
             autotune_plan_speedup = cached_record->plan_speedup;
             autotune_impl_speedup = cached_record->implementation_speedup;
@@ -934,6 +1027,14 @@ public:
     }
 
     FFTConfig fft = admissiblePlan(args_, exponent_, selected_spec).value_or(native_fft);
+
+    // Runtime backstop for every square/multiply followed by a small integer
+    // factor. Automatic P-1 and Gaussian modes select a safe plan ahead of
+    // time; explicit/manual unsafe plans fail loudly instead of returning
+    // a silently corrupted residue.
+    small_factor_headroom_bits_ =
+        double(fft.maxBpw()) * args_.fftOverdrive -
+        double(exponent_) / double(fft.size());
 
     if (verbose) {
       const bool uses_1k = fft.shape.width == 1024 || fft.shape.height == 1024;
@@ -1182,7 +1283,22 @@ public:
 
   void sync() {
     flush_pending_square();
+    if (!timing_enabled_) {
+      gpu_->regSync();
+      return;
+    }
+    const auto t0 = std::chrono::steady_clock::now();
     gpu_->regSync();
+    timing_.queue_sync_ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - t0).count());
+    ++timing_.queue_sync_calls;
+  }
+
+  void timing_reset() { timing_ = {}; }
+
+  void timing_get(aevum_engine_timing_stats* stats) const {
+    if (!stats) throw std::runtime_error("null Aevum timing output");
+    *stats = timing_;
   }
 
   void profile_report(bool emit) {
@@ -1211,7 +1327,13 @@ public:
     check_reg(src);
     flush_pending_square();
     if (!words || count != word_count_) throw std::runtime_error("invalid Aevum output word buffer");
+    const auto t0 = timing_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     Words v = gpu_->regRead(reg(src));
+    if (timing_enabled_) {
+      timing_.readback_ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now() - t0).count());
+      ++timing_.readback_calls;
+    }
     if (v.empty()) v.assign(word_count_, 0);
     if (v.size() != word_count_) throw std::runtime_error("unexpected Aevum residue size");
     std::copy(v.begin(), v.end(), words);
@@ -1223,7 +1345,15 @@ public:
     flush_pending_square();
     if (dst != src) {
       invalidate_if(dst);
-      gpu_->regCopy(reg(dst), reg(src));
+      if (!timing_enabled_) {
+        gpu_->regCopy(reg(dst), reg(src));
+      } else {
+        const auto t0 = std::chrono::steady_clock::now();
+        gpu_->regCopy(reg(dst), reg(src));
+        timing_.copy_ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - t0).count());
+        ++timing_.copy_calls;
+      }
     }
   }
 
@@ -1243,6 +1373,7 @@ public:
   void square_mul(size_t index, uint32_t factor) {
     check_reg(index);
     if (factor == 0) throw std::runtime_error("Aevum square factor must be positive");
+    if (timing_enabled_) ++timing_.square_calls;
 
     // Keep one logical arithmetic operation pending.  The next compatible
     // operation executes the previous one with leadOut=WIDTH, so the hot
@@ -1350,7 +1481,13 @@ public:
     check_reg(lhs);
     check_reg(rhs);
     flush_pending_square();
-    return gpu_->regEqual(reg(lhs), reg(rhs));
+    if (!timing_enabled_) return gpu_->regEqual(reg(lhs), reg(rhs));
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool result = gpu_->regEqual(reg(lhs), reg(rhs));
+    timing_.equal_ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - t0).count());
+    ++timing_.equal_calls;
+    return result;
   }
 
   void debug_square_trace(size_t src, uint64_t* trace, size_t trace_count) {
@@ -1395,7 +1532,17 @@ private:
     gpu_->regMulPreparedStep(reg(index), prepared_buffers_[prepared_slot], lead_in, lead_out);
   }
 
-  void flush_pending_square() { execute_pending(false); }
+  void flush_pending_square() {
+    if (!timing_enabled_ || pending_kind_ == PendingKind::None) {
+      execute_pending(false);
+      return;
+    }
+    const auto t0 = std::chrono::steady_clock::now();
+    execute_pending(false);
+    timing_.pending_flush_ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - t0).count());
+    ++timing_.pending_flush_calls;
+  }
 
   size_t find_prepared(size_t index, bool touch) {
     for (size_t i = 0; i < prepared_slots_.size(); ++i) {
@@ -1428,6 +1575,17 @@ private:
 
   void multiply_small(size_t index, uint32_t factor) {
     if (factor == 1) return;
+
+    const double required_bits = std::log2(double(factor));
+    if (required_bits > small_factor_headroom_bits_ + 1.0e-9) {
+      throw std::runtime_error(
+          "Aevum small-factor capacity exceeded: factor=" +
+          std::to_string(factor) +
+          " requires +" + std::to_string(required_bits) +
+          " bits of FFT headroom, available=" +
+          std::to_string(small_factor_headroom_bits_));
+    }
+
     if (small_factor_scratch_.empty()) throw std::runtime_error("Aevum small-factor scratch is unavailable");
 
     gpu_->regCopy(small_factor_scratch_[0], reg(index));
@@ -1485,6 +1643,9 @@ private:
   size_t pending_reg_ = no_prepared;
   size_t pending_prepared_slot_ = no_prepared;
   bool pending_lead_width_ = false;
+  double small_factor_headroom_bits_ = 0.0;
+  bool timing_enabled_ = false;
+  aevum_engine_timing_stats timing_{};
 };
 
 template <class F>
@@ -1578,6 +1739,10 @@ size_t aevum_engine_word_count(aevum_engine_handle handle) {
 }
 
 int aevum_engine_sync(aevum_engine_handle handle) { return invoke([&] { runtime(handle).sync(); }); }
+int aevum_engine_timing_reset(aevum_engine_handle handle) { return invoke([&] { runtime(handle).timing_reset(); }); }
+int aevum_engine_timing_get(aevum_engine_handle handle, aevum_engine_timing_stats* stats) {
+  return invoke([&] { runtime(handle).timing_get(stats); });
+}
 int aevum_engine_set_u32(aevum_engine_handle handle, size_t dst, uint32_t value) { return invoke([&] { runtime(handle).set_u32(dst, value); }); }
 int aevum_engine_set_words(aevum_engine_handle handle, size_t dst, const uint32_t* words, size_t count) { return invoke([&] { runtime(handle).set_words(dst, words, count); }); }
 int aevum_engine_get_words(aevum_engine_handle handle, size_t src, uint32_t* words, size_t count) { return invoke([&] { runtime(handle).get_words(src, words, count); }); }
