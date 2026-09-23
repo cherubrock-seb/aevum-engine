@@ -52,9 +52,6 @@ endif
 COMMON_FLAGS = -Wall $(CUDAFLAGS) -std=c++20 $(DARWIN_MIN_FLAGS)
 ifneq ($(HOST_OS),Darwin)
  COMMON_FLAGS += -static-libstdc++ -static-libgcc
- ifeq ($(findstring MINGW,$(HOST_OS)),MINGW)
-  COMMON_FLAGS += -static
- endif
 endif
 # -fext-numeric-literals
 
