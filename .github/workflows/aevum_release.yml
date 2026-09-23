@@ -275,31 +275,31 @@ jobs:
           set -euo pipefail
           cd "$AEVUM_DIR" && python3 tests/native_tune_compat_source_test.py
 
-      - name: Host test binary: GF arithmetic
+      - name: "Host test binary: GF arithmetic"
         shell: msys2 {0}
         run: |
           set -euo pipefail
           cd "$AEVUM_DIR" && build-tests/aevum-host-gf-test
 
-      - name: Host test binary: compact state
+      - name: "Host test binary: compact state"
         shell: msys2 {0}
         run: |
           set -euo pipefail
           cd "$AEVUM_DIR" && build-tests/aevum-state-compact-test
 
-      - name: Host test binary: OpenCL standard
+      - name: "Host test binary: OpenCL standard"
         shell: msys2 {0}
         run: |
           set -euo pipefail
           cd "$AEVUM_DIR" && build-tests/aevum-opencl-standard-test
 
-      - name: Host test binary: type4 PFA9 plan
+      - name: "Host test binary: type4 PFA9 plan"
         shell: msys2 {0}
         run: |
           set -euo pipefail
           cd "$AEVUM_DIR" && build-tests/aevum-type4-pfa9-plan-test
 
-      - name: Host test binary: runtime autotune cache
+      - name: "Host test binary: runtime autotune cache"
         shell: msys2 {0}
         run: |
           set -euo pipefail
