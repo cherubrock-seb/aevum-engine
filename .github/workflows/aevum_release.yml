@@ -88,18 +88,18 @@ jobs:
           ref: ${{ inputs.source_ref || github.ref }}
           fetch-depth: 0
 
-      - name: Set up MSYS2 MINGW64 for standalone Aevum
+      - name: Set up MSYS2 UCRT64 for standalone Aevum
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: true
           install: >-
             make
             diffutils
             python
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-opencl-headers
-            mingw-w64-x86_64-opencl-icd
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-opencl-headers
+            mingw-w64-ucrt-x86_64-opencl-icd
 
       - name: Build and run type4 PFA9 host test
         shell: msys2 {0}
