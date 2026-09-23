@@ -101,74 +101,14 @@ jobs:
             mingw-w64-x86_64-opencl-headers
             mingw-w64-x86_64-opencl-icd
 
-      - name: Build proven type4 objects
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          mkdir -p "$AEVUM_DIR/build-tests/type4-obj"
-          cd "$AEVUM_DIR"
-          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c tests/type4_pfa9_plan_test.cpp -o build-tests/type4-obj/test.o
-          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/PrpUseTune.cpp -o build-tests/type4-obj/PrpUseTune.o
-          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/RuntimeAutotune.cpp -o build-tests/type4-obj/RuntimeAutotune.o
-          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/FFTConfig.cpp -o build-tests/type4-obj/FFTConfig.o
-          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c tests/type4_args_splituses_stub.cpp -o build-tests/type4-obj/Args.o
-          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/TuneEntry.cpp -o build-tests/type4-obj/TuneEntry.o
-
-      - name: Build type4 object - common
-        continue-on-error: true
+      - name: Build and run type4 PFA9 host test
         shell: msys2 {0}
         run: |
           set -euo pipefail
           cd "$AEVUM_DIR"
-          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/common.cpp -o build-tests/type4-obj/common.o
-
-      - name: Build type4 object - fs
-        continue-on-error: true
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          cd "$AEVUM_DIR"
-          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/fs.cpp -o build-tests/type4-obj/fs.o
-
-      - name: Build type4 object - File
-        continue-on-error: true
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          cd "$AEVUM_DIR"
-          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/File.cpp -o build-tests/type4-obj/File.o
-          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/CycleFile.cpp -o build-tests/type4-obj/CycleFile.o
-
-      - name: Build type4 object - timeutil
-        continue-on-error: true
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          cd "$AEVUM_DIR"
-          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/timeutil.cpp -o build-tests/type4-obj/timeutil.o
-
-      - name: Verify remaining type4 objects compiled
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          cd "$AEVUM_DIR"
-          missing=0
-          for obj in common fs File timeutil; do
-            if test -s "build-tests/type4-obj/${obj}.o"; then
-              echo "OBJECT_OK=${obj}"
-            else
-              echo "OBJECT_MISSING=${obj}"
-              missing=1
-            fi
-          done
-          test "$missing" -eq 0
-
-      - name: Link type4 PFA9 plan binary
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          cd "$AEVUM_DIR"
-          g++ build-tests/type4-obj/test.o build-tests/type4-obj/PrpUseTune.o build-tests/type4-obj/RuntimeAutotune.o build-tests/type4-obj/FFTConfig.o build-tests/type4-obj/Args.o build-tests/type4-obj/TuneEntry.o build-tests/type4-obj/common.o build-tests/type4-obj/fs.o build-tests/type4-obj/File.o build-tests/type4-obj/CycleFile.o build-tests/type4-obj/timeutil.o -o build-tests/aevum-type4-pfa9-plan-test
+          mkdir -p build-tests
+          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc tests/type4_pfa9_plan_test.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp tests/type4_args_splituses_stub.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/CycleFile.cpp src/timeutil.cpp -o build-tests/aevum-type4-pfa9-plan-test
+          build-tests/aevum-type4-pfa9-plan-test
 
       - name: Build host test binary - monolithic source
         shell: msys2 {0}
