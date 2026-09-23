@@ -137,7 +137,7 @@ jobs:
           set -euo pipefail
           cd "$AEVUM_DIR"
           g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/File.cpp -o build-tests/type4-obj/File.o
- g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/CycleFile.cpp -o build-tests/type4-obj/CycleFile.o
+          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/CycleFile.cpp -o build-tests/type4-obj/CycleFile.o
 
       - name: Build type4 object - timeutil
         continue-on-error: true
