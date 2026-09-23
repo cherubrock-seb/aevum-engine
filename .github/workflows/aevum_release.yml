@@ -511,57 +511,6 @@ jobs:
             dist/Aevum-*.zip.sha256
           if-no-files-found: error
 
-  windows_dll_probe:
-    name: Windows DLL build probe
-    runs-on: windows-latest
-    steps:
-      - name: Checkout exact source
-        uses: actions/checkout@v4
-      - name: Set up MSYS2 UCRT64
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          install: >-
-            make
-            diffutils
-            python
-            mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-opencl-headers
-            mingw-w64-ucrt-x86_64-opencl-icd
-      - name: Probe engine DLL build
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          make clean
-          make engine-lib -j"$(nproc)" CXX=g++ DL_LIBS= ENGINE_LINK_FLAGS="-shared -static-libstdc++ -static-libgcc"
-          test -s build-engine/libaevum_engine.so
-
-  windows_cli_probe:
-    name: Windows CLI build probe
-    runs-on: windows-latest
-    steps:
-      - name: Checkout exact source
-        uses: actions/checkout@v4
-      - name: Set up MSYS2 UCRT64
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          install: >-
-            make
-            diffutils
-            python
-            mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-opencl-headers
-            mingw-w64-ucrt-x86_64-opencl-icd
-      - name: Probe CLI build
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          make -j"$(nproc)"
-          build-release/aevum.exe -h
-
   macos:
     name: macOS ${{ matrix.arch }}
     strategy:
