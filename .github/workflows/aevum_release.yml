@@ -338,7 +338,7 @@ jobs:
           set -euo pipefail
           cd "$AEVUM_DIR" && build-tests/aevum-runtime-autotune-cache-test
 
-      - name: Build and test standalone Aevum DLL and CLI
+      - name: Build standalone Aevum DLL
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -347,6 +347,10 @@ jobs:
             CXX=g++ \
             DL_LIBS= \
             ENGINE_LINK_FLAGS="-shared -static-libstdc++ -static-libgcc"
+      - name: Test standalone Aevum DLL exports
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
           DLL="$AEVUM_DIR/build-engine/aevum_engine.dll"
           cp "$AEVUM_DIR/build-engine/libaevum_engine.so" "$DLL"
           test -s "$DLL"
@@ -458,6 +462,10 @@ jobs:
           fi
 
           echo "Aevum DLL export table validation passed."
+      - name: Build and test standalone Aevum CLI
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
           make -C "$AEVUM_DIR" -j"$(nproc)"
           "$AEVUM_DIR/build-release/aevum.exe" -h
 
