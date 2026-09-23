@@ -126,6 +126,7 @@ jobs:
           make -C "$AEVUM_DIR" build-tests/aevum-opencl-standard-test
 
       - name: Build type4 object - test
+        continue-on-error: true
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -134,6 +135,7 @@ jobs:
           g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c tests/type4_pfa9_plan_test.cpp -o build-tests/type4-obj/test.o
 
       - name: Build type4 object - PrpUseTune
+        continue-on-error: true
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -142,6 +144,7 @@ jobs:
           g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/PrpUseTune.cpp -o build-tests/type4-obj/PrpUseTune.o
 
       - name: Build type4 object - RuntimeAutotune
+        continue-on-error: true
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -150,6 +153,7 @@ jobs:
           g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/RuntimeAutotune.cpp -o build-tests/type4-obj/RuntimeAutotune.o
 
       - name: Build type4 object - FFTConfig
+        continue-on-error: true
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -158,6 +162,7 @@ jobs:
           g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/FFTConfig.cpp -o build-tests/type4-obj/FFTConfig.o
 
       - name: Build type4 object - Args
+        continue-on-error: true
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -166,6 +171,7 @@ jobs:
           g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/Args.cpp -o build-tests/type4-obj/Args.o
 
       - name: Build type4 object - TuneEntry
+        continue-on-error: true
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -174,6 +180,7 @@ jobs:
           g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/TuneEntry.cpp -o build-tests/type4-obj/TuneEntry.o
 
       - name: Build type4 object - common
+        continue-on-error: true
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -182,6 +189,7 @@ jobs:
           g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/common.cpp -o build-tests/type4-obj/common.o
 
       - name: Build type4 object - fs
+        continue-on-error: true
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -190,6 +198,7 @@ jobs:
           g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/fs.cpp -o build-tests/type4-obj/fs.o
 
       - name: Build type4 object - File
+        continue-on-error: true
         shell: msys2 {0}
         run: |
           set -euo pipefail
@@ -198,12 +207,29 @@ jobs:
           g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/File.cpp -o build-tests/type4-obj/File.o
 
       - name: Build type4 object - timeutil
+        continue-on-error: true
         shell: msys2 {0}
         run: |
           set -euo pipefail
           mkdir -p "$AEVUM_DIR/build-tests/type4-obj"
           cd "$AEVUM_DIR"
           g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/timeutil.cpp -o build-tests/type4-obj/timeutil.o
+
+      - name: Verify all type4 objects compiled
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR"
+          missing=0
+          for obj in test PrpUseTune RuntimeAutotune FFTConfig Args TuneEntry common fs File timeutil; do
+            if test -s "build-tests/type4-obj/${obj}.o"; then
+              echo "OBJECT_OK=${obj}"
+            else
+              echo "OBJECT_MISSING=${obj}"
+              missing=1
+            fi
+          done
+          test "$missing" -eq 0
 
       - name: Link type4 PFA9 plan binary
         shell: msys2 {0}
