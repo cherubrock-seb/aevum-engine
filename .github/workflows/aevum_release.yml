@@ -491,7 +491,7 @@ jobs:
           Copy-Item "$env:AEVUM_DIR/MODIFICATIONS.md" "$stage/"
           Copy-Item "$env:AEVUM_DIR/tune.txt" "$stage/"
           $sourceSha = (git rev-parse HEAD).Trim()
- $sourceTree = (git rev-parse 'HEAD^{tree}').Trim()
+          $sourceTree = (git rev-parse 'HEAD^{tree}').Trim()
           @(
             "repository=$env:GITHUB_REPOSITORY"
             "source_sha=$sourceSha"
