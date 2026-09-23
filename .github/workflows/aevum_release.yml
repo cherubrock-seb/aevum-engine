@@ -101,11 +101,16 @@ jobs:
             mingw-w64-ucrt-x86_64-opencl-headers
             mingw-w64-ucrt-x86_64-opencl-icd
 
-      - name: Build and test standalone Aevum
+      - name: Run standalone Aevum host tests
         shell: msys2 {0}
         run: |
           set -euo pipefail
           make -C "$AEVUM_DIR" test-host
+
+      - name: Build and test standalone Aevum DLL and CLI
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
           make -C "$AEVUM_DIR" clean
           make -C "$AEVUM_DIR" engine-lib -j"$(nproc)" \
             CXX=g++ \
