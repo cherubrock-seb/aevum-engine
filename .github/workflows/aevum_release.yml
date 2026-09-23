@@ -101,30 +101,6 @@ jobs:
             mingw-w64-x86_64-opencl-headers
             mingw-w64-x86_64-opencl-icd
 
-      - name: Build host test binary - monolithic source
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          make -C "$AEVUM_DIR" build-tests/aevum-opencl-monolithic-source-test
-
-      - name: Build host test binary - GF arithmetic
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          make -C "$AEVUM_DIR" build-tests/aevum-host-gf-test
-
-      - name: Build host test binary - compact state
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          make -C "$AEVUM_DIR" build-tests/aevum-state-compact-test
-
-      - name: Build host test binary - OpenCL standard
-        shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          make -C "$AEVUM_DIR" build-tests/aevum-opencl-standard-test
-
       - name: Build type4 object - test
         continue-on-error: true
         shell: msys2 {0}
@@ -237,6 +213,30 @@ jobs:
           set -euo pipefail
           cd "$AEVUM_DIR"
           g++ build-tests/type4-obj/test.o build-tests/type4-obj/PrpUseTune.o build-tests/type4-obj/RuntimeAutotune.o build-tests/type4-obj/FFTConfig.o build-tests/type4-obj/Args.o build-tests/type4-obj/TuneEntry.o build-tests/type4-obj/common.o build-tests/type4-obj/fs.o build-tests/type4-obj/File.o build-tests/type4-obj/timeutil.o -Wl,--gc-sections -o build-tests/aevum-type4-pfa9-plan-test
+
+      - name: Build host test binary - monolithic source
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-opencl-monolithic-source-test
+
+      - name: Build host test binary - GF arithmetic
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-host-gf-test
+
+      - name: Build host test binary - compact state
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-state-compact-test
+
+      - name: Build host test binary - OpenCL standard
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-opencl-standard-test
 
       - name: Build host test binary - runtime autotune cache
         shell: msys2 {0}
