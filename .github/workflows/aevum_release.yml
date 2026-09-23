@@ -101,11 +101,41 @@ jobs:
             mingw-w64-x86_64-opencl-headers
             mingw-w64-x86_64-opencl-icd
 
-      - name: Build standalone Aevum host-test prerequisites
+      - name: Build host test binary - monolithic source
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          make -C "$AEVUM_DIR" build-tests/aevum-opencl-monolithic-source-test build-tests/aevum-host-gf-test build-tests/aevum-state-compact-test build-tests/aevum-opencl-standard-test build-tests/aevum-type4-pfa9-plan-test build-tests/aevum-runtime-autotune-cache-test
+          make -C "$AEVUM_DIR" build-tests/aevum-opencl-monolithic-source-test
+
+      - name: Build host test binary - GF arithmetic
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-host-gf-test
+
+      - name: Build host test binary - compact state
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-state-compact-test
+
+      - name: Build host test binary - OpenCL standard
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-opencl-standard-test
+
+      - name: Build host test binary - type4 PFA9 plan
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-type4-pfa9-plan-test
+
+      - name: Build host test binary - runtime autotune cache
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          make -C "$AEVUM_DIR" build-tests/aevum-runtime-autotune-cache-test
 
       - name: "Host test: monolithic source"
         shell: msys2 {0}
