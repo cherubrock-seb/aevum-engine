@@ -125,11 +125,92 @@ jobs:
           set -euo pipefail
           make -C "$AEVUM_DIR" build-tests/aevum-opencl-standard-test
 
-      - name: Build host test binary - type4 PFA9 plan
+      - name: Build type4 object - test
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          make -C "$AEVUM_DIR" build-tests/aevum-type4-pfa9-plan-test
+          mkdir -p "$AEVUM_DIR/build-tests/type4-obj"
+          cd "$AEVUM_DIR"
+          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c tests/type4_pfa9_plan_test.cpp -o build-tests/type4-obj/test.o
+
+      - name: Build type4 object - PrpUseTune
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p "$AEVUM_DIR/build-tests/type4-obj"
+          cd "$AEVUM_DIR"
+          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/PrpUseTune.cpp -o build-tests/type4-obj/PrpUseTune.o
+
+      - name: Build type4 object - RuntimeAutotune
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p "$AEVUM_DIR/build-tests/type4-obj"
+          cd "$AEVUM_DIR"
+          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/RuntimeAutotune.cpp -o build-tests/type4-obj/RuntimeAutotune.o
+
+      - name: Build type4 object - FFTConfig
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p "$AEVUM_DIR/build-tests/type4-obj"
+          cd "$AEVUM_DIR"
+          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/FFTConfig.cpp -o build-tests/type4-obj/FFTConfig.o
+
+      - name: Build type4 object - Args
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p "$AEVUM_DIR/build-tests/type4-obj"
+          cd "$AEVUM_DIR"
+          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/Args.cpp -o build-tests/type4-obj/Args.o
+
+      - name: Build type4 object - TuneEntry
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p "$AEVUM_DIR/build-tests/type4-obj"
+          cd "$AEVUM_DIR"
+          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/TuneEntry.cpp -o build-tests/type4-obj/TuneEntry.o
+
+      - name: Build type4 object - common
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p "$AEVUM_DIR/build-tests/type4-obj"
+          cd "$AEVUM_DIR"
+          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/common.cpp -o build-tests/type4-obj/common.o
+
+      - name: Build type4 object - fs
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p "$AEVUM_DIR/build-tests/type4-obj"
+          cd "$AEVUM_DIR"
+          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/fs.cpp -o build-tests/type4-obj/fs.o
+
+      - name: Build type4 object - File
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p "$AEVUM_DIR/build-tests/type4-obj"
+          cd "$AEVUM_DIR"
+          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/File.cpp -o build-tests/type4-obj/File.o
+
+      - name: Build type4 object - timeutil
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p "$AEVUM_DIR/build-tests/type4-obj"
+          cd "$AEVUM_DIR"
+          g++ -O2 -std=c++20 -Wall -Wextra -ffunction-sections -fdata-sections -Isrc -c src/timeutil.cpp -o build-tests/type4-obj/timeutil.o
+
+      - name: Link type4 PFA9 plan binary
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd "$AEVUM_DIR"
+          g++ build-tests/type4-obj/test.o build-tests/type4-obj/PrpUseTune.o build-tests/type4-obj/RuntimeAutotune.o build-tests/type4-obj/FFTConfig.o build-tests/type4-obj/Args.o build-tests/type4-obj/TuneEntry.o build-tests/type4-obj/common.o build-tests/type4-obj/fs.o build-tests/type4-obj/File.o build-tests/type4-obj/timeutil.o -Wl,--gc-sections -o build-tests/aevum-type4-pfa9-plan-test
 
       - name: Build host test binary - runtime autotune cache
         shell: msys2 {0}
