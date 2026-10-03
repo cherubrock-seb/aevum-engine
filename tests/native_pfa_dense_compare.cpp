@@ -1,18 +1,19 @@
-// FFT323161 (type-4) PFA9 GPU differential test with dense random residues.
+// Native Good-Thomas PFA GPU differential test with dense random residues.
 //
-// The three-plane FP32+GF31+GF61 Good-Thomas plan (pfa9full:4:...) is compared
-// word-for-word against an exact FFT3161 plan on dense, seeded random
-// residues: several squarings, a generic multiply and a prepared multiply.
-// Dense input is essential: with tiny values (an earlier version squared 3
-// twice) the FP32 plane never influences the CRT and any defect in it goes
-// unnoticed.  The default exponent puts the candidate above the exact FFT3161
-// limit (42.4 bits/word), so the FP32 plane really participates.
+// A pfa3:1 / pfa9:1 plan is compared word-for-word against a power-of-two
+// FFT3161 plan on dense, seeded random residues: several squarings, a generic
+// multiply (tailMul) and a prepared multiply (tailMulLow).
 //
-// usage: type4-pfa9-engine-compare libaevum_engine.so device [exponent]
-//                                  [iterations] [candidate] [reference]
+// Dense input is essential.  The former PFA check squared set_u32(3), whose
+// transform spectrum is constant; an omitted twiddle that both the forward and
+// the inverse transform skip is invisible on such input, while every word of
+// a dense residue comes out wrong.
+//
+// usage: native-pfa-dense-compare libaevum_engine.so device exponent
+//                                 reference_spec candidate_spec [iterations] [seed]
 #include <dlfcn.h>
-#include <cstdint>
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -71,6 +72,7 @@ struct Run {
   std::string resolved;
   size_t transform{};
   std::vector<std::vector<uint32_t>> outputs;
+  std::vector<std::string> labels;
 };
 
 static uint64_t hash_words(const std::vector<uint32_t>& words) {
@@ -92,16 +94,18 @@ static Run execute(Api& api, uint32_t exponent, uint32_t device,
   char resolved[256]{};
   require(api, api.resolve(exponent, spec, resolved, sizeof(resolved)), "resolve");
   Handle h = api.create(exponent, 2, device, 1, spec, ".");
-  if (!h) throw std::runtime_error(api.last_error() ? api.last_error() : "create failed");
+  if (!h) throw std::runtime_error(std::string("create ") + spec + ": " +
+                                   (api.last_error() ? api.last_error() : "failed"));
 
   Run result;
   result.resolved = resolved;
   result.transform = api.transform_size(h);
   const size_t count = api.word_count(h);
-  auto capture = [&](size_t reg) {
+  auto capture = [&](size_t reg, const std::string& label) {
     std::vector<uint32_t> words(count);
     require(api, api.get_words(h, reg, words.data(), words.size()), "get_words");
     result.outputs.push_back(std::move(words));
+    result.labels.push_back(label);
   };
 
   // The same seed produces the same residues for both plans.
@@ -110,25 +114,33 @@ static Run execute(Api& api, uint32_t exponent, uint32_t device,
   require(api, api.set_words(h, 0, x.data(), x.size()), "set dense square input");
   for (unsigned i = 0; i < iterations; ++i) {
     require(api, api.square_mul(h, 0, (i & 1u) ? 3u : 1u), "square_mul");
-    capture(0);
+    capture(0, "square " + std::to_string(i + 1));
   }
 
   // Generic multiply by a dense operand (tailMul).
   std::vector<uint32_t> y = dense_words(rng, exponent, count);
   require(api, api.set_words(h, 1, y.data(), y.size()), "set dense mul source");
   require(api, api.mul(h, 0, 1, 1), "mul");
-  capture(0);
+  capture(0, "generic mul");
 
   // Prepared multiply by another dense operand (tailMulLow).
   std::vector<uint32_t> z = dense_words(rng, exponent, count);
   require(api, api.set_words(h, 1, z.data(), z.size()), "set dense prepared source");
   require(api, api.prepare(h, 1, 1), "prepare");
   require(api, api.mul(h, 0, 1, 3), "mul prepared");
-  capture(0);
+  capture(0, "prepared mul");
 
   // One more squaring after the multiplies.
-  require(api, api.square_mul(h, 0, 1), "square_mul after mul");
-  capture(0);
+  require(api, api.square_mul(h, 0, 1), "square_mul final");
+  capture(0, "final square");
+
+  // Consecutive squarings without an intervening read: the engine keeps one
+  // operation pending and executes it with a retained width transform, so a
+  // PFA plan with a lead cache runs fftW + carryA + fftPCarryB (lazy carryB
+  // inside the Good-Thomas gather) instead of the canonical carry sequence.
+  for (unsigned i = 0; i < 4; ++i)
+    require(api, api.square_mul(h, 0, 1), "square_mul chain");
+  capture(0, "square chain x4");
 
   api.destroy(h);
   return result;
@@ -136,47 +148,35 @@ static Run execute(Api& api, uint32_t exponent, uint32_t device,
 
 int main(int argc, char** argv) {
   try {
-    if (argc < 3) {
+    if (argc < 6) {
       std::cerr << "usage: " << argv[0]
-                << " libaevum_engine.so device [exponent] [iterations] [candidate] [reference]\n";
+                << " libaevum_engine.so device exponent reference_spec candidate_spec"
+                   " [iterations] [seed]\n";
       return 2;
     }
     Api api(argv[1]);
     const uint32_t device = static_cast<uint32_t>(std::stoul(argv[2]));
-    // 42.4 bits/word for the 4.5M-word PFA9 shape: above the exact FFT3161
-    // limit, so a pfa9:4 request keeps all three planes.
-    const uint32_t exponent = argc > 3 ? static_cast<uint32_t>(std::stoul(argv[3])) : 200000033u;
-    const unsigned iterations = argc > 4 ? static_cast<unsigned>(std::stoul(argv[4])) : 4u;
-    const char* candidate = argc > 5 ? argv[5] : "pfa9full:4:512:9:512:202";
-    const char* reference = argc > 6 ? argv[6] : "1:512:16:512:202";
-    const unsigned seed = 20261002u;
+    const uint32_t exponent = static_cast<uint32_t>(std::stoul(argv[3]));
+    const char* reference = argv[4];
+    const char* candidate = argv[5];
+    const unsigned iterations = argc > 6 ? static_cast<unsigned>(std::stoul(argv[6])) : 3u;
+    const unsigned seed = argc > 7 ? static_cast<unsigned>(std::stoul(argv[7])) : 20261002u;
 
     Run left = execute(api, exponent, device, reference, iterations, seed);
     Run right = execute(api, exponent, device, candidate, iterations, seed);
 
-    // The candidate must really have run the three-plane transform: an elided
-    // pfa9:4 request resolves to the GF-only FFT3161 spelling instead.
-    if (right.resolved.rfind("pfa9:4:", 0) != 0) {
-      std::cerr << "ERROR: candidate " << candidate << " resolved to " << right.resolved
-                << ", expected the FFT323161 pfa9:4 plan\n";
-      return 1;
-    }
-
     if (left.outputs.size() != right.outputs.size())
       throw std::runtime_error("output-count mismatch");
 
-    static const char* const labels[] = {"generic mul", "prepared mul", "final square"};
     for (size_t output = 0; output < left.outputs.size(); ++output) {
-      const std::string label = output < iterations
-                                    ? "square " + std::to_string(output + 1)
-                                    : labels[output - iterations];
       if (left.outputs[output] != right.outputs[output]) {
         size_t word = 0, differing = 0;
         while (word < left.outputs[output].size() &&
                left.outputs[output][word] == right.outputs[output][word]) ++word;
         for (size_t i = 0; i < left.outputs[output].size(); ++i)
           differing += left.outputs[output][i] != right.outputs[output][i];
-        std::cerr << "MISMATCH output=" << output << " (" << label << ") first_word=" << word
+        std::cerr << "MISMATCH output=" << output << " (" << left.labels[output] << ")"
+                  << " first_word=" << word
                   << " differing_words=" << differing << "/" << left.outputs[output].size()
                   << " reference_hash=0x" << std::hex << hash_words(left.outputs[output])
                   << " candidate_hash=0x" << hash_words(right.outputs[output]) << std::dec << "\n";
@@ -188,14 +188,14 @@ int main(int argc, char** argv) {
                     << (i == word ? "  <-- first" : "") << "\n";
         return 1;
       }
-      std::cout << "exact output " << output << " (" << label << ") OK hash=0x" << std::hex
-                << hash_words(left.outputs[output]) << std::dec << "\n";
+      std::cout << "exact output " << output << " (" << left.labels[output] << ") OK hash=0x"
+                << std::hex << hash_words(left.outputs[output]) << std::dec << "\n";
     }
 
     std::cout << "reference=" << left.resolved << " size=" << left.transform << "\n";
     std::cout << "candidate=" << right.resolved << " size=" << right.transform
               << " bits/word=" << double(exponent) / double(right.transform) << "\n";
-    std::cout << "FFT323161 PFA9 DENSE DIFFERENTIAL TEST PASSED\n";
+    std::cout << "NATIVE AEVUM PFA DENSE DIFFERENTIAL TEST PASSED\n";
     return 0;
   } catch (const std::exception& e) {
     std::cerr << "ERROR: " << e.what() << "\n";
