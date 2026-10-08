@@ -440,3 +440,14 @@ test-gf61-limb32-cmul: $(GF61_LIMB32_CMUL_TEST)
 $(GF61_LIMB32_CMUL_TEST): tests/gf61_limb32_cmul_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gf61_limb32_cmul_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+
+# Strict integer parsing for -use values (cherubrock-seb/PrMers#130)
+STRICT_INT_TEST := build-tests/aevum-strict-int-test
+.PHONY: test-strict-int
+test-host: test-strict-int
+test-strict-int: $(STRICT_INT_TEST)
+	$(STRICT_INT_TEST)
+
+$(STRICT_INT_TEST): tests/strict_int_test.cpp src/StrictInt.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/strict_int_test.cpp -o $@
