@@ -93,6 +93,29 @@ static int runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::stri
   int err = 0;
   cl_kernel k = clCreateKernel(prog.get(), "tshufl", &err);
   CHECK1(err);
+
+  size_t kernelMaxWg = 0;
+  cl_ulong kernelLocal = 0;
+  cl_ulong deviceLocal = 0;
+  CHECK1(clGetKernelWorkGroupInfo(k, dev, CL_KERNEL_WORK_GROUP_SIZE,
+                                  sizeof kernelMaxWg, &kernelMaxWg, nullptr));
+  CHECK1(clGetKernelWorkGroupInfo(k, dev, CL_KERNEL_LOCAL_MEM_SIZE,
+                                  sizeof kernelLocal, &kernelLocal, nullptr));
+  CHECK1(clGetDeviceInfo(dev, CL_DEVICE_LOCAL_MEM_SIZE,
+                         sizeof deviceLocal, &deviceLocal, nullptr));
+
+  if (WG > kernelMaxWg) {
+    char buf[256];
+    std::snprintf(buf, sizeof buf,
+                  "kernel WG limit: requested=%u kernel_max=%zu kernel_local=%llu device_local=%llu",
+                  WG, kernelMaxWg,
+                  (unsigned long long) kernelLocal,
+                  (unsigned long long) deviceLocal);
+    detail = buf;
+    clReleaseKernel(k);
+    return 2;
+  }
+
   const size_t N = c.width;
   const size_t esz = (c.type == FP64 || c.type == GF61) ? 16 : 8;
   cl_mem bin = clCreateBuffer(ctx, CL_MEM_READ_WRITE, N * esz, nullptr, &err);
@@ -143,7 +166,17 @@ static int runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::stri
     CHECK1(clSetKernelArg(k, 2, sizeof bbad, &bbad));
     CHECK1(clSetKernelArg(k, 3, sizeof mode, &mode));
     size_t wg = WG;
-    CHECK1(clEnqueueNDRangeKernel(q, k, 1, nullptr, &wg, &wg, 0, nullptr, nullptr));
+    const int launchErr = clEnqueueNDRangeKernel(q, k, 1, nullptr, &wg, &wg, 0, nullptr, nullptr);
+    if (launchErr != CL_SUCCESS) {
+      char buf[320];
+      std::snprintf(buf, sizeof buf,
+                    "launch error=%d requested=%u kernel_max=%zu kernel_local=%llu device_local=%llu mode=%u",
+                    launchErr, WG, kernelMaxWg,
+                    (unsigned long long) kernelLocal,
+                    (unsigned long long) deviceLocal, mode);
+      detail = buf;
+      return 2;
+    }
     CHECK1(clEnqueueReadBuffer(q, bout, 1, 0, N * esz, out.data(), 0, nullptr, nullptr));
     int bad = 0;
     CHECK1(clEnqueueReadBuffer(q, bbad, 1, 0, 4, &bad, 0, nullptr, nullptr));
