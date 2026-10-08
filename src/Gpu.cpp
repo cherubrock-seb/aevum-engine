@@ -372,6 +372,13 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
       log("Warning: unrecognized -use key '%s'\n", k.c_str());
     }
 
+    // The TAIL_TRIGS* values select both a kernel variant and the layout of the trig table built on the host
+    // (TrigBufCache), so only the supported values may reach either.  Settings of unused number types are ignored.
+    if ((k == "TAIL_TRIGS" && fft.FFT_FP64) || (k == "TAIL_TRIGS32" && fft.FFT_FP32) ||
+        (k == "TAIL_TRIGS31" && fft.NTT_GF31) || (k == "TAIL_TRIGS61" && fft.NTT_GF61)) {
+      parseTailTrigs(k, v);
+    }
+
     // Some -use options are needed in both OpenCL code and C++ initialization code
     if (k == "TAIL_KERNELS") {
       if (atoi(v.c_str()) == 0) tail_single_wide = 1, tail_single_kernel = 1;
