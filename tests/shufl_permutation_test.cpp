@@ -94,23 +94,12 @@ static int runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::stri
   cl_kernel k = clCreateKernel(prog.get(), "tshufl", &err);
   CHECK1(err);
 
-  size_t kernelMaxWg = 0;
-  cl_ulong kernelLocal = 0;
-  cl_ulong deviceLocal = 0;
-  CHECK1(clGetKernelWorkGroupInfo(k, dev, CL_KERNEL_WORK_GROUP_SIZE,
-                                  sizeof kernelMaxWg, &kernelMaxWg, nullptr));
-  CHECK1(clGetKernelWorkGroupInfo(k, dev, CL_KERNEL_LOCAL_MEM_SIZE,
-                                  sizeof kernelLocal, &kernelLocal, nullptr));
-  CHECK1(clGetDeviceInfo(dev, CL_DEVICE_LOCAL_MEM_SIZE,
-                         sizeof deviceLocal, &deviceLocal, nullptr));
-
+  const size_t kernelMaxWg = static_cast<size_t>(getWorkGroupSize(k, dev, "tshufl"));
   if (WG > kernelMaxWg) {
-    char buf[256];
+    char buf[192];
     std::snprintf(buf, sizeof buf,
-                  "kernel WG limit: requested=%u kernel_max=%zu kernel_local=%llu device_local=%llu",
-                  WG, kernelMaxWg,
-                  (unsigned long long) kernelLocal,
-                  (unsigned long long) deviceLocal);
+                  "kernel WG limit: requested=%u kernel_max=%zu",
+                  WG, kernelMaxWg);
     detail = buf;
     clReleaseKernel(k);
     return 2;
@@ -170,10 +159,8 @@ static int runCase(cl_device_id dev, cl_context ctx, cl_queue q, const std::stri
     if (launchErr != CL_SUCCESS) {
       char buf[320];
       std::snprintf(buf, sizeof buf,
-                    "launch error=%d requested=%u kernel_max=%zu kernel_local=%llu device_local=%llu mode=%u",
-                    launchErr, WG, kernelMaxWg,
-                    (unsigned long long) kernelLocal,
-                    (unsigned long long) deviceLocal, mode);
+                    "launch error=%d requested=%u kernel_max=%zu mode=%u",
+                    launchErr, WG, kernelMaxWg, mode);
       detail = buf;
       return 2;
     }
