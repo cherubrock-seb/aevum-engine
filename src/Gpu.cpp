@@ -312,11 +312,17 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.try_emplace("TAIL_TRIGS61", "0");
   }
 
+  // NVIDIA 1K radix-4 has G_W=256. An implicit WMUL=2 would therefore
+  // request a 512-thread carryFused work-group. Supply the validated safe
+  // fallback only when no explicit/tuned WMUL already exists.
+  if (isNvidiaGpu(id) && fft.shape.width == 1024 && fft.shape.nW() == 4)
+    config.try_emplace("WMUL", "1");
+
   // Default value for -use options that must also be parsed in C++ code
-  tail_single_wide = 0, tail_single_kernel = 1;         // Default tailSquare is double-wide in one kernel
-  in_place = 0;                                         // Default is not in-place
-  wmul = 2;                                             // Default is carryFused processes two lines at a time
-  pad_size = isAmdGpu(id) ? 256 : 0;                    // Default is 256 bytes for AMD, 0 for others
+  tail_single_wide = 0, tail_single_kernel = 1;
+  in_place = 0;
+  wmul = 2;
+  pad_size = isAmdGpu(id) ? 256 : 0;
 
   // Validate -use options
   for (const auto& [k, v] : config) {
