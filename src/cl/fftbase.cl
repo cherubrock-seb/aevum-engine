@@ -572,6 +572,32 @@ T OVERLOAD shufl_fft2_read(local T *lds, u32 index, u32 delta, bool upper) {
   return upper ? addq(a, b) : subq(a, b);
 }
 
+// Consume one independent pair before forming the next pair's intermediates.
+void OVERLOAD shufl_fft2_entry16_read(local T2 *lds, T2 *u,
+                                     u32 row, u32 stride, u32 delta, bool upper) {
+#pragma unroll
+  for (u32 i = 0; i < 4; ++i) {
+    T2 a = shufl_fft2_read(lds, row + i * stride, delta, upper);
+    T2 b = shufl_fft2_read(lds, row + (i + 4) * stride, delta, upper);
+    fft8_16_entry_pair(&a, &b, i, upper);
+    u[i] = a;
+    u[i + 4] = b;
+  }
+}
+
+// Real components have been read; every imaginary input is already in LDS.
+void OVERLOAD shufl_fft2_entry16_read(local T *lds, T2 *u,
+                                     u32 row, u32 stride, u32 delta, bool upper) {
+#pragma unroll
+  for (u32 i = 0; i < 4; ++i) {
+    T2 a = U2(u[i].x, shufl_fft2_read(lds, row + i * stride, delta, upper));
+    T2 b = U2(u[i + 4].x, shufl_fft2_read(lds, row + (i + 4) * stride, delta, upper));
+    fft8_16_entry_pair(&a, &b, i, upper);
+    u[i] = a;
+    u[i + 4] = b;
+  }
+}
+
 void OVERLOAD shufl_and_fft2_impl(local T2 *lds2, T2 *u,
                                   u32 f, u32 numWG, u32 lowMe, const bool entry16) {
   assert(RADIX == 8);
@@ -590,13 +616,7 @@ void OVERLOAD shufl_and_fft2_impl(local T2 *lds2, T2 *u,
 
   bar(WG);
   if (entry16) {
-    for (u32 i = 0; i < 4; ++i) {
-      T2 a = shufl_fft2_read(lds, i * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
-      T2 b = shufl_fft2_read(lds, (i + 4) * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
-      fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
-      u[i] = a;
-      u[i + 4] = b;
-    }
+    shufl_fft2_entry16_read(lds, u, lowMe % (WG / 2), WG / 2, 4 * WG, lowMe < WG / 2);
   } else {
     for (u32 i = 0; i < RADIX; ++i) {
       T2 a = lds[i*(WG/2) + lowMe%(WG/2)];
@@ -627,13 +647,7 @@ void OVERLOAD shufl_and_fft2_impl(local T2 *lds2, T2 *u,
 
   bar(WG);
   if (entry16) {
-    for (u32 i = 0; i < 4; ++i) {
-      T2 a = U2(u[i].x, shufl_fft2_read(lds, i * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2));
-      T2 b = U2(u[i + 4].x, shufl_fft2_read(lds, (i + 4) * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2));
-      fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
-      u[i] = a;
-      u[i + 4] = b;
-    }
+    shufl_fft2_entry16_read(lds, u, lowMe % (WG / 2), WG / 2, 4 * WG, lowMe < WG / 2);
   } else {
     for (u32 i=0; i<RADIX; ++i) {
       T a=lds[i*(WG/2)+lowMe%(WG/2)];
@@ -670,6 +684,19 @@ F2 OVERLOAD shufl_fft2_read(local F2 *lds, u32 index, u32 delta, bool upper) {
   return upper ? addq(a, b) : subq(a, b);
 }
 
+// Consume one independent pair before forming the next pair's intermediates.
+void OVERLOAD shufl_fft2_entry16_read(local F2 *lds, F2 *u,
+                                     u32 row, u32 stride, u32 delta, bool upper) {
+#pragma unroll
+  for (u32 i = 0; i < 4; ++i) {
+    F2 a = shufl_fft2_read(lds, row + i * stride, delta, upper);
+    F2 b = shufl_fft2_read(lds, row + (i + 4) * stride, delta, upper);
+    fft8_16_entry_pair(&a, &b, i, upper);
+    u[i] = a;
+    u[i + 4] = b;
+  }
+}
+
 void OVERLOAD shufl_and_fft2_impl(local F2 *lds2, F2 *u,
                                   u32 f, u32 numWG, u32 lowMe, const bool entry16) {
   assert(RADIX == 8);
@@ -688,13 +715,7 @@ void OVERLOAD shufl_and_fft2_impl(local F2 *lds2, F2 *u,
 
   bar(WG);
   if (entry16) {
-    for (u32 i = 0; i < 4; ++i) {
-      F2 a = shufl_fft2_read(lds, i * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
-      F2 b = shufl_fft2_read(lds, (i + 4) * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
-      fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
-      u[i] = a;
-      u[i + 4] = b;
-    }
+    shufl_fft2_entry16_read(lds, u, lowMe % (WG / 2), WG / 2, 4 * WG, lowMe < WG / 2);
   } else {
     for (u32 i=0; i<RADIX; ++i) {
       F2 a=lds[i*(WG/2)+lowMe%(WG/2)];
@@ -731,6 +752,19 @@ GF31 OVERLOAD shufl_fft2_read(local GF31 *lds, u32 index, u32 delta, bool upper)
   return upper ? addq(a, b) : subq(a, b);
 }
 
+// Consume one independent pair before forming the next pair's intermediates.
+void OVERLOAD shufl_fft2_entry16_read(local GF31 *lds, GF31 *u,
+                                     u32 row, u32 stride, u32 delta, bool upper) {
+#pragma unroll
+  for (u32 i = 0; i < 4; ++i) {
+    GF31 a = shufl_fft2_read(lds, row + i * stride, delta, upper);
+    GF31 b = shufl_fft2_read(lds, row + (i + 4) * stride, delta, upper);
+    fft8_16_entry_pair(&a, &b, i, upper);
+    u[i] = a;
+    u[i + 4] = b;
+  }
+}
+
 void OVERLOAD shufl_and_fft2_impl(local GF31 *lds2, GF31 *u,
                                   u32 f, u32 numWG, u32 lowMe, const bool entry16) {
   assert(RADIX == 8);
@@ -756,13 +790,7 @@ void OVERLOAD shufl_and_fft2_impl(local GF31 *lds2, GF31 *u,
 
     if (entry16) {
       const u32 row = ((lowMe / 8) & 7) * (WG + 8) + (lowMe & 7);
-      for (u32 i = 0; i < 4; ++i) {
-        GF31 a = shufl_fft2_read(lds, row + i * 8, 64, lowMe < WG / 2);
-        GF31 b = shufl_fft2_read(lds, row + (i + 4) * 8, 64, lowMe < WG / 2);
-        fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
-        u[i] = a;
-        u[i + 4] = b;
-      }
+      shufl_fft2_entry16_read(lds, u, row, 8, 64, lowMe < WG / 2);
     } else {
       for (u32 i = 0; i < RADIX; ++i) {
         GF31 a =
@@ -793,13 +821,7 @@ void OVERLOAD shufl_and_fft2_impl(local GF31 *lds2, GF31 *u,
 
   bar(WG);
   if (entry16) {
-    for (u32 i = 0; i < 4; ++i) {
-      GF31 a = shufl_fft2_read(lds, i * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
-      GF31 b = shufl_fft2_read(lds, (i + 4) * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
-      fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
-      u[i] = a;
-      u[i + 4] = b;
-    }
+    shufl_fft2_entry16_read(lds, u, lowMe % (WG / 2), WG / 2, 4 * WG, lowMe < WG / 2);
   } else {
     for (u32 i=0; i<RADIX; ++i) {
       GF31 a=lds[i*(WG/2)+lowMe%(WG/2)];
@@ -841,6 +863,32 @@ Z61 OVERLOAD shufl_fft2_read(local Z61 *lds, u32 index, u32 delta, bool upper) {
   return upper ? addq(a, b) : subq(a, b);
 }
 
+// Consume one independent pair before forming the next pair's intermediates.
+void OVERLOAD shufl_fft2_entry16_read(local GF61 *lds, GF61 *u,
+                                     u32 row, u32 stride, u32 delta, bool upper) {
+#pragma unroll
+  for (u32 i = 0; i < 4; ++i) {
+    GF61 a = shufl_fft2_read(lds, row + i * stride, delta, upper);
+    GF61 b = shufl_fft2_read(lds, row + (i + 4) * stride, delta, upper);
+    fft8_16_entry_pair(&a, &b, i, upper);
+    u[i] = a;
+    u[i + 4] = b;
+  }
+}
+
+// Real components have been read; every imaginary input is already in LDS.
+void OVERLOAD shufl_fft2_entry16_read(local Z61 *lds, GF61 *u,
+                                     u32 row, u32 stride, u32 delta, bool upper) {
+#pragma unroll
+  for (u32 i = 0; i < 4; ++i) {
+    GF61 a = U2(u[i].x, shufl_fft2_read(lds, row + i * stride, delta, upper));
+    GF61 b = U2(u[i + 4].x, shufl_fft2_read(lds, row + (i + 4) * stride, delta, upper));
+    fft8_16_entry_pair(&a, &b, i, upper);
+    u[i] = a;
+    u[i + 4] = b;
+  }
+}
+
 void OVERLOAD shufl_and_fft2_impl(local GF61 *lds2, GF61 *u,
                                   u32 f, u32 numWG, u32 lowMe, const bool entry16) {
   assert(RADIX == 8);
@@ -859,13 +907,7 @@ void OVERLOAD shufl_and_fft2_impl(local GF61 *lds2, GF61 *u,
 
   bar(WG);
   if (entry16) {
-    for (u32 i = 0; i < 4; ++i) {
-      GF61 a = shufl_fft2_read(lds, i * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
-      GF61 b = shufl_fft2_read(lds, (i + 4) * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
-      fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
-      u[i] = a;
-      u[i + 4] = b;
-    }
+    shufl_fft2_entry16_read(lds, u, lowMe % (WG / 2), WG / 2, 4 * WG, lowMe < WG / 2);
   } else {
     for (u32 i=0; i<RADIX; ++i) {
       GF61 a=lds[i*(WG/2)+lowMe%(WG/2)];
@@ -917,13 +959,7 @@ void OVERLOAD shufl_and_fft2_impl(local GF61 *lds2, GF61 *u,
     if (entry16) {
       // At WG=128 the original padded read index reduces to row + i*8.
       const u32 row = ((lowMe / 8) & 7) * (WG + 8) + (lowMe & 7);
-      for (u32 i = 0; i < 4; ++i) {
-        GF61 a = U2(u[i].x, shufl_fft2_read(lds, row + i * 8, 64, lowMe < WG / 2));
-        GF61 b = U2(u[i + 4].x, shufl_fft2_read(lds, row + (i + 4) * 8, 64, lowMe < WG / 2));
-        fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
-        u[i] = a;
-        u[i + 4] = b;
-      }
+      shufl_fft2_entry16_read(lds, u, row, 8, 64, lowMe < WG / 2);
     } else {
       for (u32 i = 0; i < RADIX; ++i) {
         Z61 a =
@@ -965,13 +1001,7 @@ void OVERLOAD shufl_and_fft2_impl(local GF61 *lds2, GF61 *u,
 
   bar(WG);
   if (entry16) {
-    for (u32 i = 0; i < 4; ++i) {
-      GF61 a = U2(u[i].x, shufl_fft2_read(lds, i * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2));
-      GF61 b = U2(u[i + 4].x, shufl_fft2_read(lds, (i + 4) * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2));
-      fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
-      u[i] = a;
-      u[i + 4] = b;
-    }
+    shufl_fft2_entry16_read(lds, u, lowMe % (WG / 2), WG / 2, 4 * WG, lowMe < WG / 2);
   } else {
     for (u32 i=0; i<RADIX; ++i) {
       Z61 a=lds[i*(WG/2)+lowMe%(WG/2)];
