@@ -563,8 +563,17 @@ void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
 
 #if FFT_FP64 && WG == 128 && RADIX == 8
 
-void OVERLOAD shufl_and_fft2(local T2 *lds2, T2 *u,
-                             u32 f, u32 numWG, u32 lowMe) {
+T2 OVERLOAD shufl_fft2_read(local T2 *lds, u32 index, u32 delta, bool upper) {
+  T2 a = lds[index], b = lds[index + delta];
+  return upper ? addq(a, b) : subq(a, b);
+}
+T OVERLOAD shufl_fft2_read(local T *lds, u32 index, u32 delta, bool upper) {
+  T a = lds[index], b = lds[index + delta];
+  return upper ? addq(a, b) : subq(a, b);
+}
+
+void OVERLOAD shufl_and_fft2_impl(local T2 *lds2, T2 *u,
+                                  u32 f, u32 numWG, u32 lowMe, const bool entry16) {
   assert(RADIX == 8);
   assert(f == 8);
 
@@ -580,10 +589,20 @@ void OVERLOAD shufl_and_fft2(local T2 *lds2, T2 *u,
     lds[i*f + (lowMe & ~mask)*RADIX + (lowMe & mask)] = u[i];
 
   bar(WG);
-  for (u32 i = 0; i < RADIX; ++i) {
-    T2 a = lds[i*(WG/2) + lowMe%(WG/2)];
-    T2 b = lds[4*WG + i*(WG/2) + lowMe%(WG/2)];
-    u[i] = lowMe < WG/2 ? a+b : a-b;
+  if (entry16) {
+    for (u32 i = 0; i < 4; ++i) {
+      T2 a = shufl_fft2_read(lds, i * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
+      T2 b = shufl_fft2_read(lds, (i + 4) * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
+      fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
+      u[i] = a;
+      u[i + 4] = b;
+    }
+  } else {
+    for (u32 i = 0; i < RADIX; ++i) {
+      T2 a = lds[i*(WG/2) + lowMe%(WG/2)];
+      T2 b = lds[4*WG + i*(WG/2) + lowMe%(WG/2)];
+      u[i] = lowMe < WG/2 ? a+b : a-b;
+    }
   }
 
 #elif SHUFL_BYTES == 8
@@ -607,13 +626,37 @@ void OVERLOAD shufl_and_fft2(local T2 *lds2, T2 *u,
     lds[i*f+(lowMe&~mask)*RADIX+(lowMe&mask)] = u[i].y;
 
   bar(WG);
-  for (u32 i=0; i<RADIX; ++i) {
-    T a=lds[i*(WG/2)+lowMe%(WG/2)];
-    T b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
-    u[i].y = lowMe < WG/2 ? a+b : a-b;
+  if (entry16) {
+    for (u32 i = 0; i < 4; ++i) {
+      T2 a = U2(u[i].x, shufl_fft2_read(lds, i * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2));
+      T2 b = U2(u[i + 4].x, shufl_fft2_read(lds, (i + 4) * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2));
+      fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
+      u[i] = a;
+      u[i + 4] = b;
+    }
+  } else {
+    for (u32 i=0; i<RADIX; ++i) {
+      T a=lds[i*(WG/2)+lowMe%(WG/2)];
+      T b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
+      u[i].y = lowMe < WG/2 ? a+b : a-b;
+    }
   }
 #else
 #error Unsupported FP64 SHUFL_BYTES
+#endif
+}
+
+void OVERLOAD shufl_and_fft2(local T2 *lds, T2 *u, u32 f, u32 numWG, u32 lowMe) {
+  shufl_and_fft2_impl(lds, u, f, numWG, lowMe, false);
+}
+
+void OVERLOAD shufl_and_fft16(local T2 *lds, T2 *u, u32 numWG, u32 lowMe) {
+#if AEVUM_DIRECTIONAL_FUSION
+  shufl_and_fft2_impl(lds, u, 8, numWG, lowMe, true);
+  if (lowMe < WG / 2) { fft8_16a_skip1(u); } else { fft8_16b_skip1(u); }
+#else
+  shufl_and_fft2(lds, u, 8, numWG, lowMe);
+  if (lowMe < WG / 2) { fft8_16a(u); } else { fft8_16b(u); }
 #endif
 }
 
@@ -622,8 +665,13 @@ void OVERLOAD shufl_and_fft2(local T2 *lds2, T2 *u,
 
 #if FFT_FP32 && WG == 128 && RADIX == 8
 
-void OVERLOAD shufl_and_fft2(local F2 *lds2, F2 *u,
-                             u32 f, u32 numWG, u32 lowMe) {
+F2 OVERLOAD shufl_fft2_read(local F2 *lds, u32 index, u32 delta, bool upper) {
+  F2 a = lds[index], b = lds[index + delta];
+  return upper ? addq(a, b) : subq(a, b);
+}
+
+void OVERLOAD shufl_and_fft2_impl(local F2 *lds2, F2 *u,
+                                  u32 f, u32 numWG, u32 lowMe, const bool entry16) {
   assert(RADIX == 8);
   assert(f == 8);
 
@@ -639,13 +687,37 @@ void OVERLOAD shufl_and_fft2(local F2 *lds2, F2 *u,
     lds[i*f+(lowMe&~mask)*RADIX+(lowMe&mask)] = u[i];
 
   bar(WG);
-  for (u32 i=0; i<RADIX; ++i) {
-    F2 a=lds[i*(WG/2)+lowMe%(WG/2)];
-    F2 b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
-    u[i] = lowMe < WG/2 ? a+b : a-b;
+  if (entry16) {
+    for (u32 i = 0; i < 4; ++i) {
+      F2 a = shufl_fft2_read(lds, i * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
+      F2 b = shufl_fft2_read(lds, (i + 4) * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
+      fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
+      u[i] = a;
+      u[i + 4] = b;
+    }
+  } else {
+    for (u32 i=0; i<RADIX; ++i) {
+      F2 a=lds[i*(WG/2)+lowMe%(WG/2)];
+      F2 b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
+      u[i] = lowMe < WG/2 ? a+b : a-b;
+    }
   }
 #else
 #error Unsupported FP32 SHUFL_BYTES
+#endif
+}
+
+void OVERLOAD shufl_and_fft2(local F2 *lds, F2 *u, u32 f, u32 numWG, u32 lowMe) {
+  shufl_and_fft2_impl(lds, u, f, numWG, lowMe, false);
+}
+
+void OVERLOAD shufl_and_fft16(local F2 *lds, F2 *u, u32 numWG, u32 lowMe) {
+#if AEVUM_DIRECTIONAL_FUSION
+  shufl_and_fft2_impl(lds, u, 8, numWG, lowMe, true);
+  if (lowMe < WG / 2) { fft8_16a_skip1(u); } else { fft8_16b_skip1(u); }
+#else
+  shufl_and_fft2(lds, u, 8, numWG, lowMe);
+  if (lowMe < WG / 2) { fft8_16a(u); } else { fft8_16b(u); }
 #endif
 }
 
@@ -654,8 +726,13 @@ void OVERLOAD shufl_and_fft2(local F2 *lds2, F2 *u,
 
 #if NTT_GF31 && WG == 128 && RADIX == 8
 
-void OVERLOAD shufl_and_fft2(local GF31 *lds2, GF31 *u,
-                             u32 f, u32 numWG, u32 lowMe) {
+GF31 OVERLOAD shufl_fft2_read(local GF31 *lds, u32 index, u32 delta, bool upper) {
+  GF31 a = lds[index], b = lds[index + delta];
+  return upper ? addq(a, b) : subq(a, b);
+}
+
+void OVERLOAD shufl_and_fft2_impl(local GF31 *lds2, GF31 *u,
+                                  u32 f, u32 numWG, u32 lowMe, const bool entry16) {
   assert(RADIX == 8);
   assert(f == 8);
 
@@ -677,22 +754,33 @@ void OVERLOAD shufl_and_fft2(local GF31 *lds2, GF31 *u,
 
     bar(WG);
 
-    for (u32 i = 0; i < RADIX; ++i) {
-      GF31 a =
-        lds[(i / 2) * (WG / 64) * 8
-          + (((i & 1) * (WG / 2)) / 64) * 8
-          + ((lowMe % (WG / 2)) / 64) * 8
-          + ((lowMe / 8) & 7) * (WG + 8)
-          + (lowMe & 7)];
+    if (entry16) {
+      const u32 row = ((lowMe / 8) & 7) * (WG + 8) + (lowMe & 7);
+      for (u32 i = 0; i < 4; ++i) {
+        GF31 a = shufl_fft2_read(lds, row + i * 8, 64, lowMe < WG / 2);
+        GF31 b = shufl_fft2_read(lds, row + (i + 4) * 8, 64, lowMe < WG / 2);
+        fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
+        u[i] = a;
+        u[i + 4] = b;
+      }
+    } else {
+      for (u32 i = 0; i < RADIX; ++i) {
+        GF31 a =
+          lds[(i / 2) * (WG / 64) * 8
+            + (((i & 1) * (WG / 2)) / 64) * 8
+            + ((lowMe % (WG / 2)) / 64) * 8
+            + ((lowMe / 8) & 7) * (WG + 8)
+            + (lowMe & 7)];
 
-      GF31 b =
-        lds[(i / 2 + 4) * (WG / 64) * 8
-          + (((i & 1) * (WG / 2)) / 64) * 8
-          + ((lowMe % (WG / 2)) / 64) * 8
-          + ((lowMe / 8) & 7) * (WG + 8)
-          + (lowMe & 7)];
+        GF31 b =
+          lds[(i / 2 + 4) * (WG / 64) * 8
+            + (((i & 1) * (WG / 2)) / 64) * 8
+            + ((lowMe % (WG / 2)) / 64) * 8
+            + ((lowMe / 8) & 7) * (WG + 8)
+            + (lowMe & 7)];
 
-      u[i] = lowMe < WG / 2 ? addq(a, b) : subq(a, b);
+        u[i] = lowMe < WG / 2 ? addq(a, b) : subq(a, b);
+      }
     }
 
     return;
@@ -704,13 +792,37 @@ void OVERLOAD shufl_and_fft2(local GF31 *lds2, GF31 *u,
     lds[i*f+(lowMe&~mask)*RADIX+(lowMe&mask)] = u[i];
 
   bar(WG);
-  for (u32 i=0; i<RADIX; ++i) {
-    GF31 a=lds[i*(WG/2)+lowMe%(WG/2)];
-    GF31 b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
-    u[i] = lowMe < WG/2 ? addq(a,b) : subq(a,b);
+  if (entry16) {
+    for (u32 i = 0; i < 4; ++i) {
+      GF31 a = shufl_fft2_read(lds, i * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
+      GF31 b = shufl_fft2_read(lds, (i + 4) * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
+      fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
+      u[i] = a;
+      u[i + 4] = b;
+    }
+  } else {
+    for (u32 i=0; i<RADIX; ++i) {
+      GF31 a=lds[i*(WG/2)+lowMe%(WG/2)];
+      GF31 b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
+      u[i] = lowMe < WG/2 ? addq(a,b) : subq(a,b);
+    }
   }
 #else
 #error Unsupported GF31 SHUFL_BYTES
+#endif
+}
+
+void OVERLOAD shufl_and_fft2(local GF31 *lds, GF31 *u, u32 f, u32 numWG, u32 lowMe) {
+  shufl_and_fft2_impl(lds, u, f, numWG, lowMe, false);
+}
+
+void OVERLOAD shufl_and_fft16(local GF31 *lds, GF31 *u, u32 numWG, u32 lowMe) {
+#if AEVUM_DIRECTIONAL_FUSION
+  shufl_and_fft2_impl(lds, u, 8, numWG, lowMe, true);
+  if (lowMe < WG / 2) { fft8_16a_skip1(u); } else { fft8_16b_skip1(u); }
+#else
+  shufl_and_fft2(lds, u, 8, numWG, lowMe);
+  if (lowMe < WG / 2) { fft8_16a(u); } else { fft8_16b(u); }
 #endif
 }
 
@@ -1450,9 +1562,7 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
   fft8(u);
   w = bcast(w, 8);
   chainMul(u, w);
-  shufl_and_fft2(lds, u, 8, numWG, lowMe);
-
-  if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
+  shufl_and_fft16(lds, u, numWG, lowMe);
 
 #else
 
@@ -1701,9 +1811,7 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
 
   fft8(u);
   tabMul(trig, u, 8, lowMe);
-  shufl_and_fft2(lds, u, 8, numWG, lowMe);
-
-  if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
+  shufl_and_fft16(lds, u, numWG, lowMe);
 
 #else
 
@@ -2297,9 +2405,7 @@ void OVERLOAD fft_common(local F2 *lds, F2 *u, TrigFP32 trig, u32 numWG, u32 low
 
   fft8(u);
   tabMul(trig, u, 8, lowMe);
-  shufl_and_fft2(lds, u, 8, numWG, lowMe);
-
-  if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
+  shufl_and_fft16(lds, u, numWG, lowMe);
 
 #else
 
@@ -2513,9 +2619,7 @@ void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32
 
   fft8(u);
   tabMul(trig, u, 8, lowMe);
-  shufl_and_fft2(lds, u, 8, numWG, lowMe);
-
-  if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
+  shufl_and_fft16(lds, u, numWG, lowMe);
 
 #else
 

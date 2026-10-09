@@ -16,13 +16,17 @@ void OVERLOAD fft4CoreSpecial(T2 *u) {
   X2_apply_delay(u[2], u[3]);
 }
 
+void OVERLOAD fft8Core_finish(T2 *u) {
+  fft4Core(u);
+  fft4CoreSpecial(u + 4);
+}
+
 void OVERLOAD fft8Core(T2 *u) {
   X2(u[0], u[4]);
   X2(u[1], u[5]);   u[5] = mul_t8_delayed(u[5]);
   X2_mul_t4(u[2], u[6]);                                        // X2(u[2], u[6]);   u[6] = mul_t4(u[6]);
   X2(u[3], u[7]);   u[7] = mul_3t8_delayed(u[7]);
-  fft4Core(u);
-  fft4CoreSpecial(u + 4);
+  fft8Core_finish(u);
 }
 
 // 4 MUL + 52 ADD
@@ -39,8 +43,7 @@ void OVERLOAD fft8Core_skip1(T2 *u) {
   u[5] = mul_t8_delayed(u[5]);
   u[6] = mul_t4(u[6]);
   u[7] = mul_3t8_delayed(u[7]);                                 // Must match fft8Core: this fft4CoreSpecial does not absorb the factor of i
-  fft4Core(u);
-  fft4CoreSpecial(u + 4);
+  fft8Core_finish(u);
 }
 
 void OVERLOAD fft8_skip1(T2 *u) {
@@ -69,11 +72,7 @@ void OVERLOAD fft4CoreSpecial(F2 *u) {
   X2_apply_delay(u[2], u[3]);
 }
 
-void OVERLOAD fft8Core(F2 *u) {
-  X2(u[0], u[4]);
-  X2(u[1], u[5]);   u[5] = mul_t8_delayed(u[5]);
-  X2_mul_t4(u[2], u[6]);                                        // X2(u[2], u[6]);   u[6] = mul_t4(u[6]);
-  X2(u[3], u[7]);   u[7] = mul_3t8_delayed(u[7]);
+void OVERLOAD fft8Core_finish(F2 *u) {
   // Keep the radix-8 type-4 plan self-contained.  Some OpenCL front-ends
   // lose the overload imported from fft4.cl specifically with variant 202.
   X2(u[0], u[2]);
@@ -81,6 +80,14 @@ void OVERLOAD fft8Core(F2 *u) {
   X2(u[0], u[1]);
   X2(u[2], u[3]);
   fft4CoreSpecial(u + 4);
+}
+
+void OVERLOAD fft8Core(F2 *u) {
+  X2(u[0], u[4]);
+  X2(u[1], u[5]);   u[5] = mul_t8_delayed(u[5]);
+  X2_mul_t4(u[2], u[6]);                                        // X2(u[2], u[6]);   u[6] = mul_t4(u[6]);
+  X2(u[3], u[7]);   u[7] = mul_3t8_delayed(u[7]);
+  fft8Core_finish(u);
 }
 
 // 4 MUL + 52 ADD
@@ -100,11 +107,7 @@ void OVERLOAD fft8(F2 *u) {
 
 #if NTT_GF31
 
-void OVERLOAD fft8Core(GF31 *u) {
-  X2(u[0], u[4]);
-  X2_mul_t8(u[1], u[5]);
-  X2_mul_t4(u[2], u[6]);
-  X2_mul_3t8(u[3], u[7]);
+void OVERLOAD fft8Core_finish(GF31 *u) {
   // Inline the exact GF31 fft4Core body twice.  This is algebraically
   // identical and avoids an OpenCL overload-visibility failure in the
   // power-of-two type-4 variant-202 compilation unit.
@@ -116,6 +119,14 @@ void OVERLOAD fft8Core(GF31 *u) {
   X2_mul_t4(u[5], u[7]);
   X2(u[4], u[5]);
   X2(u[6], u[7]);
+}
+
+void OVERLOAD fft8Core(GF31 *u) {
+  X2(u[0], u[4]);
+  X2_mul_t8(u[1], u[5]);
+  X2_mul_t4(u[2], u[6]);
+  X2_mul_3t8(u[3], u[7]);
+  fft8Core_finish(u);
 }
 
 // 4 MUL + 52 ADD
@@ -189,19 +200,34 @@ void OVERLOAD fft8(GF61 *u) {
 
 // Perform the last three levels of a radix-16 butterfly.  The initial radix-2 has already been performed and shufl'ed.
 // This is used by SIZE=1K, RADIX=8 fft.  There are two versions, one for the first eight radix-16 values and one for the second eight radix-16 values.
+void OVERLOAD fft8_16_entry_pair(T2 *a, T2 *b, u32 i, bool upper) {
+  if (!upper) {
+    X2t4(*a, *b);
+  } else if (i == 2) {
+    X2_mul_t4(*a, *b);
+  } else {
+    X2(*a, *b);
+    if (i == 1) { *b = mul_t8_delayed(*b); }
+    if (i == 3) { *b = mul_3t8_delayed(*b); }
+  }
+}
+
+// The entry pairs include all first-layer rotations (including delayed factors).
+void OVERLOAD fft8_16a_skip1(T2 *u) {
+  fft8Core_finish(u);
+  SWAP(u[1], u[4]);
+  SWAP(u[3], u[6]);
+}
+
 void OVERLOAD fft8_16a(T2 *u) {
   fft8(u);
 }
-void OVERLOAD fft8_16b(T2 *u) {
+// Caller has already applied X2t4 to the four (i,i+4) pairs.
+void OVERLOAD fft8_16b_skip1(T2 *u) {
   const double C1 = 0.92387953251128674, // cos(tau/16)
                S1 = 0.38268343236508978, // sin(tau/16)
                S1_over_C1 = 0.4142135623730950488017,
                C1_over_S1 = 2.4142135623730950488017;
-
-  X2t4(u[0], u[4]);
-  X2t4(u[1], u[5]);
-  X2t4(u[2], u[6]);
-  X2t4(u[3], u[7]);
 
   u[1] = partial_cmul(u[1], S1_over_C1);  // delays a mul by C1
   u[2] = mul_t8_delayed(u[2]);            // delays a mul by M_SQRT1_2
@@ -221,6 +247,15 @@ void OVERLOAD fft8_16b(T2 *u) {
 
   SWAP(u[1], u[4]);
   SWAP(u[3], u[6]);
+}
+
+void OVERLOAD fft8_16b(T2 *u) {
+  X2t4(u[0], u[4]);
+  X2t4(u[1], u[5]);
+  X2t4(u[2], u[6]);
+  X2t4(u[3], u[7]);
+
+  fft8_16b_skip1(u);
 }
 
 #endif
@@ -229,19 +264,34 @@ void OVERLOAD fft8_16b(T2 *u) {
 
 // Perform the last three levels of a radix-16 butterfly.  The initial radix-2 has already been performed and shufl'ed.
 // This is used by SIZE=1K, RADIX=8 fft.  There are two versions, one for the first eight radix-16 values and one for the second eight radix-16 values.
+void OVERLOAD fft8_16_entry_pair(F2 *a, F2 *b, u32 i, bool upper) {
+  if (!upper) {
+    X2t4(*a, *b);
+  } else if (i == 2) {
+    X2_mul_t4(*a, *b);
+  } else {
+    X2(*a, *b);
+    if (i == 1) { *b = mul_t8_delayed(*b); }
+    if (i == 3) { *b = mul_3t8_delayed(*b); }
+  }
+}
+
+// The entry pairs include all first-layer rotations (including delayed factors).
+void OVERLOAD fft8_16a_skip1(F2 *u) {
+  fft8Core_finish(u);
+  SWAP(u[1], u[4]);
+  SWAP(u[3], u[6]);
+}
+
 void OVERLOAD fft8_16a(F2 *u) {
   fft8(u);
 }
-void OVERLOAD fft8_16b(F2 *u) {
+// Caller has already applied X2t4 to the four (i,i+4) pairs.
+void OVERLOAD fft8_16b_skip1(F2 *u) {
   const float C1 = 0.92387953251128674, // cos(tau/16)
               S1 = 0.38268343236508978, // sin(tau/16)
               S1_over_C1 = 0.4142135623730950488017,
               C1_over_S1 = 2.4142135623730950488017;
-
-  X2t4(u[0], u[4]);
-  X2t4(u[1], u[5]);
-  X2t4(u[2], u[6]);
-  X2t4(u[3], u[7]);
 
   u[1] = partial_cmul(u[1], S1_over_C1);  // delays a mul by C1
   u[2] = mul_t8_delayed(u[2]);            // delays a mul by M_SQRT1_2
@@ -263,25 +313,51 @@ void OVERLOAD fft8_16b(F2 *u) {
   SWAP(u[3], u[6]);
 }
 
+void OVERLOAD fft8_16b(F2 *u) {
+  X2t4(u[0], u[4]);
+  X2t4(u[1], u[5]);
+  X2t4(u[2], u[6]);
+  X2t4(u[3], u[7]);
+
+  fft8_16b_skip1(u);
+}
+
 #endif
 
 #if NTT_GF31
 
 // Perform the last three levels of a radix-16 butterfly.  The initial radix-2 has already been performed and shufl'ed.
 // This is used by SIZE=1K, RADIX=8 fft.  There are two versions, one for the first eight radix-16 values and one for the second eight radix-16 values.
+void OVERLOAD fft8_16_entry_pair(GF31 *a, GF31 *b, u32 i, bool upper) {
+  if (!upper) {
+    X2t4(*a, *b);
+  } else if (i == 1) {
+    X2_mul_t8(*a, *b);
+  } else if (i == 2) {
+    X2_mul_t4(*a, *b);
+  } else if (i == 3) {
+    X2_mul_3t8(*a, *b);
+  } else {
+    X2(*a, *b);
+  }
+}
+
+// The entry pairs include all first-layer rotations (including delayed factors).
+void OVERLOAD fft8_16a_skip1(GF31 *u) {
+  fft8Core_finish(u);
+  SWAP(u[1], u[4]);
+  SWAP(u[3], u[6]);
+}
+
 void OVERLOAD fft8_16a(GF31 *u) {
   fft8(u);
 }
-void OVERLOAD fft8_16b(GF31 *u) {
+// Caller has already applied X2t4 to the four (i,i+4) pairs.
+void OVERLOAD fft8_16b_skip1(GF31 *u) {
   const Z31 C1 = 1556715293;
   const Z31 S1 = 978592373;
   const Z31 negC1 = M31 - C1;
   const Z31 negS1 = M31 - S1;
-
-  X2t4(u[0], u[4]);
-  X2t4(u[1], u[5]);
-  X2t4(u[2], u[6]);
-  X2t4(u[3], u[7]);
 
   u[1] = cmul_const(u[1], U2(C1, S1));
   u[2] = mul_t8(u[2]);
@@ -301,6 +377,15 @@ void OVERLOAD fft8_16b(GF31 *u) {
 
   SWAP(u[1], u[4]);
   SWAP(u[3], u[6]);
+}
+
+void OVERLOAD fft8_16b(GF31 *u) {
+  X2t4(u[0], u[4]);
+  X2t4(u[1], u[5]);
+  X2t4(u[2], u[6]);
+  X2t4(u[3], u[7]);
+
+  fft8_16b_skip1(u);
 }
 
 #endif
