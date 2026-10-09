@@ -719,8 +719,18 @@ void OVERLOAD shufl_and_fft2(local GF31 *lds2, GF31 *u,
 
 #if NTT_GF61 && WG == 128 && RADIX == 8
 
-void OVERLOAD shufl_and_fft2(local GF61 *lds2, GF61 *u,
-                             u32 f, u32 numWG, u32 lowMe) {
+// Preserve the FFT2 operand order and quick range while consuming LDS pairs.
+GF61 OVERLOAD shufl_fft2_read(local GF61 *lds, u32 index, u32 delta, bool upper) {
+  GF61 a = lds[index], b = lds[index + delta];
+  return upper ? addq(a, b) : subq(a, b);
+}
+Z61 OVERLOAD shufl_fft2_read(local Z61 *lds, u32 index, u32 delta, bool upper) {
+  Z61 a = lds[index], b = lds[index + delta];
+  return upper ? addq(a, b) : subq(a, b);
+}
+
+void OVERLOAD shufl_and_fft2_impl(local GF61 *lds2, GF61 *u,
+                                  u32 f, u32 numWG, u32 lowMe, const bool entry16) {
   assert(RADIX == 8);
   assert(f == 8);
 
@@ -736,10 +746,20 @@ void OVERLOAD shufl_and_fft2(local GF61 *lds2, GF61 *u,
     lds[i*f+(lowMe&~mask)*RADIX+(lowMe&mask)] = u[i];
 
   bar(WG);
-  for (u32 i=0; i<RADIX; ++i) {
-    GF61 a=lds[i*(WG/2)+lowMe%(WG/2)];
-    GF61 b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
-    u[i] = lowMe < WG/2 ? addq(a,b) : subq(a,b);
+  if (entry16) {
+    for (u32 i = 0; i < 4; ++i) {
+      GF61 a = shufl_fft2_read(lds, i * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
+      GF61 b = shufl_fft2_read(lds, (i + 4) * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2);
+      fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
+      u[i] = a;
+      u[i + 4] = b;
+    }
+  } else {
+    for (u32 i=0; i<RADIX; ++i) {
+      GF61 a=lds[i*(WG/2)+lowMe%(WG/2)];
+      GF61 b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
+      u[i] = lowMe < WG/2 ? addq(a,b) : subq(a,b);
+    }
   }
 
 #elif SHUFL_BYTES == 8
@@ -782,22 +802,34 @@ void OVERLOAD shufl_and_fft2(local GF61 *lds2, GF61 *u,
 
     bar(WG);
 
-    for (u32 i = 0; i < RADIX; ++i) {
-      Z61 a =
-        lds[(i / 2) * (WG / 64) * 8
-          + (((i & 1) * (WG / 2)) / 64) * 8
-          + ((lowMe % (WG / 2)) / 64) * 8
-          + ((lowMe / 8) & 7) * (WG + 8)
-          + (lowMe & 7)];
+    if (entry16) {
+      // At WG=128 the original padded read index reduces to row + i*8.
+      const u32 row = ((lowMe / 8) & 7) * (WG + 8) + (lowMe & 7);
+      for (u32 i = 0; i < 4; ++i) {
+        GF61 a = U2(u[i].x, shufl_fft2_read(lds, row + i * 8, 64, lowMe < WG / 2));
+        GF61 b = U2(u[i + 4].x, shufl_fft2_read(lds, row + (i + 4) * 8, 64, lowMe < WG / 2));
+        fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
+        u[i] = a;
+        u[i + 4] = b;
+      }
+    } else {
+      for (u32 i = 0; i < RADIX; ++i) {
+        Z61 a =
+          lds[(i / 2) * (WG / 64) * 8
+            + (((i & 1) * (WG / 2)) / 64) * 8
+            + ((lowMe % (WG / 2)) / 64) * 8
+            + ((lowMe / 8) & 7) * (WG + 8)
+            + (lowMe & 7)];
 
-      Z61 b =
-        lds[(i / 2 + 4) * (WG / 64) * 8
-          + (((i & 1) * (WG / 2)) / 64) * 8
-          + ((lowMe % (WG / 2)) / 64) * 8
-          + ((lowMe / 8) & 7) * (WG + 8)
-          + (lowMe & 7)];
+        Z61 b =
+          lds[(i / 2 + 4) * (WG / 64) * 8
+            + (((i & 1) * (WG / 2)) / 64) * 8
+            + ((lowMe % (WG / 2)) / 64) * 8
+            + ((lowMe / 8) & 7) * (WG + 8)
+            + (lowMe & 7)];
 
-      u[i].y = lowMe < WG / 2 ? addq(a, b) : subq(a, b);
+        u[i].y = lowMe < WG / 2 ? addq(a, b) : subq(a, b);
+      }
     }
 
     return;
@@ -820,13 +852,37 @@ void OVERLOAD shufl_and_fft2(local GF61 *lds2, GF61 *u,
     lds[i*f+(lowMe&~mask)*RADIX+(lowMe&mask)] = u[i].y;
 
   bar(WG);
-  for (u32 i=0; i<RADIX; ++i) {
-    Z61 a=lds[i*(WG/2)+lowMe%(WG/2)];
-    Z61 b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
-    u[i].y = lowMe < WG/2 ? addq(a,b) : subq(a,b);
+  if (entry16) {
+    for (u32 i = 0; i < 4; ++i) {
+      GF61 a = U2(u[i].x, shufl_fft2_read(lds, i * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2));
+      GF61 b = U2(u[i + 4].x, shufl_fft2_read(lds, (i + 4) * (WG / 2) + lowMe % (WG / 2), 4 * WG, lowMe < WG / 2));
+      fft8_16_entry_pair(&a, &b, i, lowMe < WG / 2);
+      u[i] = a;
+      u[i + 4] = b;
+    }
+  } else {
+    for (u32 i=0; i<RADIX; ++i) {
+      Z61 a=lds[i*(WG/2)+lowMe%(WG/2)];
+      Z61 b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
+      u[i].y = lowMe < WG/2 ? addq(a,b) : subq(a,b);
+    }
   }
 #else
 #error Unsupported GF61 SHUFL_BYTES
+#endif
+}
+
+void OVERLOAD shufl_and_fft2(local GF61 *lds, GF61 *u, u32 f, u32 numWG, u32 lowMe) {
+  shufl_and_fft2_impl(lds, u, f, numWG, lowMe, false);
+}
+
+void OVERLOAD shufl_and_fft16(local GF61 *lds, GF61 *u, u32 numWG, u32 lowMe) {
+#if AEVUM_DIRECTIONAL_FUSION
+  shufl_and_fft2_impl(lds, u, 8, numWG, lowMe, true);
+  if (lowMe < WG / 2) { fft8_16a_skip1(u); } else { fft8_16b_skip1(u); }
+#else
+  shufl_and_fft2(lds, u, 8, numWG, lowMe);
+  if (lowMe < WG / 2) { fft8_16a(u); } else { fft8_16b(u); }
 #endif
 }
 
@@ -2673,9 +2729,7 @@ void OVERLOAD fft_common(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32
 
   fft8(u);
   tabMul(trig, u, 8, lowMe);
-  shufl_and_fft2(lds, u, 8, numWG, lowMe);
-
-  if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
+  shufl_and_fft16(lds, u, numWG, lowMe);
 
 #else
 

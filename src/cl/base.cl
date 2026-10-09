@@ -138,6 +138,14 @@ G_H        "group height" == SMALL_HEIGHT / NH
 #endif
 #endif
 
+// Experimental 1K/radix-8 LDS-read + radix-16 entry fusion. Opt in for hardware validation.
+#ifndef AEVUM_DIRECTIONAL_FUSION
+#define AEVUM_DIRECTIONAL_FUSION 0
+#endif
+#if AEVUM_DIRECTIONAL_FUSION != 0 && AEVUM_DIRECTIONAL_FUSION != 1
+#error AEVUM_DIRECTIONAL_FUSION must be 0 or 1
+#endif
+
 // Shufl width in bytes (can be 4, 8, or 16).  See fftbase.cl.  Allow different shufl widths for fft_width and fft_height.
 // Default is 8 bytes (one double).  Historically best for Radeon VII and TitanV.  This setting will affect how much LDS
 // memory is needed which in turn may affect occupancy and thus performance.
