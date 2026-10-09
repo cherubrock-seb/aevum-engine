@@ -24,6 +24,15 @@
 
 static const char* HARNESS = R"CL(
 #include "base.cl"
+
+// Apple Intel OpenCL 1.2 treats the untyped M_SQRT1_2 literal as ambiguous
+// between the FP32 and FP64 X2ad overloads.  The FP32 transform requires the
+// float constant; all other arithmetic types retain base.cl's definition.
+#if FFT_FP32
+#undef M_SQRT1_2
+#define M_SQRT1_2 0.70710678118654752440f
+#endif
+
 #include "fftwidth.cl"
 
 #if FFT_FP64
@@ -292,12 +301,12 @@ int main(int argc, char** argv) {
           ++total;
           if (r == RESOURCE_LIMITED) {
             ++resourceLimited;
+          } else if (r < 0) {
+            ++failed;
+            ++buildFailed;
           } else {
             ++executed;
-            if (r != 0) {
-              ++failed;
-              if (r < 0) ++buildFailed;
-            }
+            if (r != 0) ++failed;
           }
           if (r != 0 || verbose)
             std::printf("%s width %4u radix %u SHUFL_BYTES=%2u LDSPAD=%d LDSSWIZ=%d: %s\n", typeName[t], s.width, s.nw, bytes, m.pad, m.swiz, detail.c_str());
