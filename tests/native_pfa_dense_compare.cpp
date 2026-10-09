@@ -11,6 +11,9 @@
 //
 // usage: native-pfa-dense-compare libaevum_engine.so device exponent
 //                                 reference_spec candidate_spec [iterations] [seed]
+// Append --directional-fusion to compare the same explicit 1K/radix-8 plan
+// with AEVUM_DIRECTIONAL_FUSION=0 and =1, using the PRP workload's -use bridge.
+#include "../src/EngineApi.h"
 #include <dlfcn.h>
 #include <algorithm>
 #include <cstdint>
@@ -90,12 +93,25 @@ static std::vector<uint32_t> dense_words(std::mt19937& rng, uint32_t exponent, s
 }
 
 static Run execute(Api& api, uint32_t exponent, uint32_t device,
-                   const char* spec, unsigned iterations, unsigned seed) {
+                   const char* spec, unsigned iterations, unsigned seed, bool prp = false) {
   char resolved[256]{};
   require(api, api.resolve(exponent, spec, resolved, sizeof(resolved)), "resolve");
-  Handle h = api.create(exponent, 2, device, 1, spec, ".");
+  Handle h = prp
+      ? api.sym<decltype(&aevum_engine_create_ex)>("aevum_engine_create_ex")(
+          exponent, 2, device, 1, spec, ".", AEVUM_WORKLOAD_PRP)
+      : api.create(exponent, 2, device, 1, spec, ".");
   if (!h) throw std::runtime_error(std::string("create ") + spec + ": " +
                                    (api.last_error() ? api.last_error() : "failed"));
+  if (prp) {
+    // Use the actual context plan, not just the resolver's prediction.
+    require(api, api.sym<decltype(&aevum_engine_plan_spec)>("aevum_engine_plan_spec")(
+        h, resolved, sizeof(resolved)), "created plan");
+    if (std::string(resolved).find(":1K:") == std::string::npos &&
+        std::string(resolved).rfind("1K:", 0) != 0) {
+      api.destroy(h);
+      throw std::runtime_error("directional fusion requires a resolved 1K side");
+    }
+  }
 
   Run result;
   result.resolved = resolved;
@@ -151,7 +167,7 @@ int main(int argc, char** argv) {
     if (argc < 6) {
       std::cerr << "usage: " << argv[0]
                 << " libaevum_engine.so device exponent reference_spec candidate_spec"
-                   " [iterations] [seed]\n";
+                   " [iterations] [seed] [--directional-fusion]\n";
       return 2;
     }
     Api api(argv[1]);
@@ -162,8 +178,33 @@ int main(int argc, char** argv) {
     const unsigned iterations = argc > 6 ? static_cast<unsigned>(std::stoul(argv[6])) : 3u;
     const unsigned seed = argc > 7 ? static_cast<unsigned>(std::stoul(argv[7])) : 20261002u;
 
-    Run left = execute(api, exponent, device, reference, iterations, seed);
-    Run right = execute(api, exponent, device, candidate, iterations, seed);
+    const bool directional = argc == 9 && std::strcmp(argv[8], "--directional-fusion") == 0;
+    if (argc > 8 && !directional) throw std::runtime_error("unknown comparison option");
+    std::string uses;
+    if (directional) {
+#if defined(__APPLE__)
+      throw std::runtime_error("Apple staging forces radix-4; directional fusion is not exercised");
+#endif
+      const char* radix = std::getenv("AEVUM_RADIX1K");
+      if (!radix || std::strcmp(radix, "8") != 0)
+        throw std::runtime_error("--directional-fusion requires AEVUM_RADIX1K=8");
+      if (std::strcmp(reference, candidate) != 0 || std::string(reference).find("pfa") != std::string::npos)
+        throw std::runtime_error("--directional-fusion requires the same explicit non-PFA plan twice");
+      if (const char* value = std::getenv("AEVUM_PRP_USE")) uses = value;
+      if (uses.find("AEVUM_DIRECTIONAL_FUSION") != std::string::npos)
+        throw std::runtime_error("remove AEVUM_DIRECTIONAL_FUSION from AEVUM_PRP_USE; the comparison sets it");
+      if (!uses.empty()) uses += ',';
+    }
+    auto run = [&](const char* spec, const char* fusion) {
+      if (directional && setenv("AEVUM_PRP_USE", (uses + "AEVUM_DIRECTIONAL_FUSION=" + fusion).c_str(), 1) != 0)
+        throw std::runtime_error("cannot set directional fusion profile");
+      return execute(api, exponent, device, spec, iterations, seed, directional);
+    };
+    Run left = run(reference, "0");
+    Run right = run(candidate, "1");
+
+    if (directional && (left.resolved != right.resolved || left.transform != right.transform))
+      throw std::runtime_error("directional fusion changed the resolved plan");
 
     if (left.outputs.size() != right.outputs.size())
       throw std::runtime_error("output-count mismatch");
@@ -195,7 +236,8 @@ int main(int argc, char** argv) {
     std::cout << "reference=" << left.resolved << " size=" << left.transform << "\n";
     std::cout << "candidate=" << right.resolved << " size=" << right.transform
               << " bits/word=" << double(exponent) / double(right.transform) << "\n";
-    std::cout << "NATIVE AEVUM PFA DENSE DIFFERENTIAL TEST PASSED\n";
+    std::cout << (directional ? "DIRECTIONAL FUSION SAME-PLAN DENSE DIFFERENTIAL TEST PASSED\n"
+                             : "NATIVE AEVUM PFA DENSE DIFFERENTIAL TEST PASSED\n");
     return 0;
   } catch (const std::exception& e) {
     std::cerr << "ERROR: " << e.what() << "\n";
