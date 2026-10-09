@@ -323,13 +323,21 @@ void aevum_fft4Core16_GF61(GF61 *u) {
     u[i] = modM61q(u[i], 3);
 }
 
-void OVERLOAD fft8_16a(GF61 *u) {
-  // shufl_and_fft2 performed "quick" adds, u[0-7] are in range 0..2+
-  X2q(&u[0], &u[4]);               // X2(u[0], u[4]);  No reductions mod M61.  u[0,4] range is 0..4+, -2-..2+
-  X2q(&u[1], &u[5]);               // X2(u[1], u[5]);  Delay mul_t8 on u[5].   u[1,5] range is 0..4+, -2-..2+
-  X2q_mul_t4(&u[2], &u[6]);        // X2(u[2], u[6]);  u[6] = mul_t4(u[6]);    u[2,6] range is 0..4+, -2-..2+
-  X2q_mul_t4(&u[3], &u[7]);        // X2(u[3], u[7]);  u[7] = mul_t4(u[7]);    u[3,7] range is 0..4+, -2-..2+   Delay mul_t8 on u[7].
+// One (i,i+4) pair after the shuffled FFT2.  Keep quick representations:
+// upper: inputs 0..2+, outputs 0..4+ and -2-..2+;
+// lower: inputs -1-..1+, outputs -2-..2+.  Normalization stays in the tails.
+void OVERLOAD fft8_16_entry_pair(GF61 *a, GF61 *b, u32 i, bool upper) {
+  if (!upper) {
+    X2qt4(a, b);
+  } else if (i < 2) {
+    X2q(a, b);
+  } else {
+    X2q_mul_t4(a, b);
+  }
+}
 
+// Caller has consumed the first butterfly layer, including its quarter roots.
+void OVERLOAD fft8_16a_skip1(GF61 *u) {
   // Must normalize values.  The delayed mul_t8s can help with that (half of the complex number needs normalizing before mul_t8).
   for (u32 i = 0; i <= 3; ++i) u[i] = modM61q(u[i], 0);
   u[4] = modM61q(u[4], 3);
@@ -346,13 +354,18 @@ void OVERLOAD fft8_16a(GF61 *u) {
   SWAP(u[1], u[4]);
   SWAP(u[3], u[6]);
 }
-void OVERLOAD fft8_16b(GF61 *u) {
-  // shufl_and_fft2 performed "quick" subtracts, u[0-7] are in range -1-..1+
-  X2qt4(&u[0], &u[4]);            // -2..2+
-  X2qt4(&u[1], &u[5]);
-  X2qt4(&u[2], &u[6]);
-  X2qt4(&u[3], &u[7]);
 
+void OVERLOAD fft8_16a(GF61 *u) {
+  // shufl_and_fft2 performed "quick" adds, u[0-7] are in range 0..2+
+  X2q(&u[0], &u[4]);               // X2(u[0], u[4]);  No reductions mod M61.  u[0,4] range is 0..4+, -2-..2+
+  X2q(&u[1], &u[5]);               // X2(u[1], u[5]);  Delay mul_t8 on u[5].   u[1,5] range is 0..4+, -2-..2+
+  X2q_mul_t4(&u[2], &u[6]);        // X2(u[2], u[6]);  u[6] = mul_t4(u[6]);    u[2,6] range is 0..4+, -2-..2+
+  X2q_mul_t4(&u[3], &u[7]);        // X2(u[3], u[7]);  u[7] = mul_t4(u[7]);    u[3,7] range is 0..4+, -2-..2+   Delay mul_t8 on u[7].
+
+  fft8_16a_skip1(u);
+}
+// Caller has consumed the first butterfly layer, including its quarter roots.
+void OVERLOAD fft8_16b_skip1(GF61 *u) {
   // Must normalize values.  Some mul_t8s can help with that (only half of the complex number needs normalizing before mul_t8).
   u[0] = modM61q(u[0], 3);
   u[1] = modM61q(u[1], 3);
@@ -375,6 +388,16 @@ void OVERLOAD fft8_16b(GF61 *u) {
 
   SWAP(u[1], u[4]);
   SWAP(u[3], u[6]);
+}
+
+void OVERLOAD fft8_16b(GF61 *u) {
+  // shufl_and_fft2 performed "quick" subtracts, u[0-7] are in range -1-..1+
+  X2qt4(&u[0], &u[4]);            // -2..2+
+  X2qt4(&u[1], &u[5]);
+  X2qt4(&u[2], &u[6]);
+  X2qt4(&u[3], &u[7]);
+
+  fft8_16b_skip1(u);
 }
 
 #endif
