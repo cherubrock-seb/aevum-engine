@@ -39,6 +39,17 @@ void spin() {
 #define WMUL 2
 #endif
 
+#ifndef AEVUM_CARRY_STAGE31_V1
+#define AEVUM_CARRY_STAGE31_V1 0
+#endif
+// Trade a bounded, separate LDS plane for the GF31 values otherwise live
+// across the GF61 inverse FFT. The total declared LDS stays within 32 KiB.
+#define AEVUM_CARRY_STAGE31_ACTIVE \
+  (AEVUM_CARRY_STAGE31_V1 == 1 && FFT_TYPE == FFT3161 && !PFA_RADIX && \
+   !CUDA_BACKEND && __OPENCL_C_VERSION__ >= 200 && (AMDGPU || NVIDIAGPU) && \
+   (WIDTH == 512 || WIDTH == 1024) && (WMUL == 1 || WMUL == 2) && \
+   WMUL * (LDS_BYTES + WIDTH * 8) <= 32768)
+
 #if AMDGPU
 #define CarryShuttleAccess(me,i)        ((me) * NW + (i))                       // Generates denser global_load_dwordx4 instructions
 //#define CarryShuttleAccess(me,i)      ((me) * 4 + (i)%4 + (i)/4 * 4*G_W)      // Also generates global_load_dwordx4 instructions and unit stride when NW=8
@@ -1984,6 +1995,11 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShuttle, P(u32) ready, Trig smallTrig, P(uint) bufROE) {
   local GF61 lds61[WMUL * LDS_BYTES / sizeof(GF61)];
   local GF31 *lds31 = (local GF31 *) lds61;
+#if AEVUM_CARRY_STAGE31_ACTIVE
+  // Dedicated storage: never overlaps either FFT's LDS scratch. Volatile
+  // prevents forwarding these same-lane stores back into long-lived registers.
+  volatile local GF31 stage31[WIDTH * WMUL];
+#endif
 
   GF31 u31[NW];
   GF61 u61[NW];
@@ -2019,6 +2035,11 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   readCarryFusedLine(in31, u31, line, lowMe);
   fft_WIDTH1(lds31 + zerohack, u31, smallTrig31 + zerohack, WMUL, lowMe);
+#if AEVUM_CARRY_STAGE31_ACTIVE
+  for (u32 i = 0; i < NW; ++i) {
+    stage31[i * (G_W * WMUL) + me] = u31[i];
+  }
+#endif
 
   dependentLaunchWait();   // Previous kernel was fftMiddleOutGF61
 
@@ -2091,10 +2112,17 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Apply the inverse weights, optionally compute roundoff error, and convert to integer.  Also apply MUL3 here.
     // Then propagate carries through two words (the first carry does not have to be accurately calculated because it will
     // be accurately calculated by carryFinal later on).  The second carry must be accurate for output to the carry shuttle.
+#if AEVUM_CARRY_STAGE31_ACTIVE
+    wu[i] = weightAndCarryPairSloppy(SWAP_XY(stage31[i * (G_W * WMUL) + me]), SWAP_XY(u61[i]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
+                      // For an LL test, add -2 as the very initial "carry in"
+                      // We'd normally use logical &&, but the compiler whines with warning and bitwise fixes it
+                      LL != 0, (LL & (i == 0) & (line==0) & (me == 0)) ? -2 : 0, biglit0, biglit1, &carry[i], &roundMax, &carryMax);
+#else
     wu[i] = weightAndCarryPairSloppy(SWAP_XY(u31[i]), SWAP_XY(u61[i]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
                       // For an LL test, add -2 as the very initial "carry in"
                       // We'd normally use logical &&, but the compiler whines with warning and bitwise fixes it
                       LL != 0, (LL & (i == 0) & (line==0) & (me == 0)) ? -2 : 0, biglit0, biglit1, &carry[i], &roundMax, &carryMax);
+#endif
 
     // Generate weight shifts and frac_bits for next pair
     m31_combo_counter += m31_combo_bigstep;
