@@ -2113,7 +2113,9 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Then propagate carries through two words (the first carry does not have to be accurately calculated because it will
     // be accurately calculated by carryFinal later on).  The second carry must be accurate for output to the carry shuttle.
 #if AEVUM_CARRY_STAGE31_ACTIVE
-    wu[i] = weightAndCarryPairSloppy(SWAP_XY(stage31[i * (G_W * WMUL) + me]), SWAP_XY(u61[i]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
+    // SWAP_XY evaluates its argument twice; snapshot the volatile slot once.
+    GF31 pair31 = stage31[i * (G_W * WMUL) + me];
+    wu[i] = weightAndCarryPairSloppy(SWAP_XY(pair31), SWAP_XY(u61[i]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
                       // For an LL test, add -2 as the very initial "carry in"
                       // We'd normally use logical &&, but the compiler whines with warning and bitwise fixes it
                       LL != 0, (LL & (i == 0) & (line==0) & (me == 0)) ? -2 : 0, biglit0, biglit1, &carry[i], &roundMax, &carryMax);
