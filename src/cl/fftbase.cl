@@ -47,7 +47,7 @@ u32 aevumDirectionalOwner(u32 p) {
 // This transports bits; it is not a local-memory fence.
 u32 aevumDirectionalPeer32(u32 value) {
   u32 peer;
-  __asm("shfl.sync.bfly.b32 %0, %1, 16, 31, 0xffffffff;"
+  __asm volatile("shfl.sync.bfly.b32 %0, %1, 16, 31, 0xffffffff;"
         : "=r"(peer) : "r"(value));
   return peer;
 }
@@ -133,10 +133,15 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
     // Read from LDS in the desired output order.  In the example:  output[0..63] = 0, 64, ... 448, 1, 65...   output[64..127] = +8
     // Pad 1 value every row to eliminate bank conflicts.
     if (!force_default && f == 1 && RADIX == 8) {
+#if AEVUM_DIRECTIONAL_V2_ACTIVE
+      const u32 readMe = aevumDirectionalOwner(lowMe);
+#else
+      const u32 readMe = lowMe;
+#endif
       bar(WG);
       for (u32 i = 0; i < RADIX; ++i) { lds[(lowMe & 7) * (WG + 1) + (lowMe / 8) * 8 + i] = u[i]; }
       bar(WG);
-      for (u32 i = 0; i < RADIX; ++i) { u[i] = lds[i * (WG / 8) + (lowMe / 64) * 8 + ((lowMe / 8) & 7) * (WG + 1) + (lowMe & 7)]; }
+      for (u32 i = 0; i < RADIX; ++i) { u[i] = lds[i * (WG / 8) + (readMe / 64) * 8 + ((readMe / 8) & 7) * (WG + 1) + (readMe & 7)]; }
       return;
     }
 
@@ -256,6 +261,11 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
     // AEVUM_GWOLT_1K_FIRST_SHUFL_LDSPAD
     // gpuowl 6cf0dc first radix-8 padded shuffle.
     if (!force_default && f == 1 && RADIX == 8) {
+#if AEVUM_DIRECTIONAL_V2_ACTIVE
+      const u32 readMe = aevumDirectionalOwner(lowMe);
+#else
+      const u32 readMe = lowMe;
+#endif
       bar(WG);
       for (u32 i = 0; i < RADIX; ++i)
         lds[i * (WG + 2) + lowMe] = u[i].x;
@@ -263,8 +273,8 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
       bar(WG);
       for (u32 i = 0; i < RADIX; ++i)
         u[i].x = lds[i * WG / 8
-                   + (lowMe / 8)
-                   + (lowMe & 7) * (WG + 2)];
+                   + (readMe / 8)
+                   + (readMe & 7) * (WG + 2)];
 
       bar(WG);
       for (u32 i = 0; i < RADIX; ++i)
@@ -273,8 +283,8 @@ void OVERLOAD shufl64(local T2 *lds2, T2 *u, u32 f, u32 numWG, u32 lowMe) {
       bar(WG);
       for (u32 i = 0; i < RADIX; ++i)
         u[i].y = lds[i * WG / 8
-                   + (lowMe / 8)
-                   + (lowMe & 7) * (WG + 2)];
+                   + (readMe / 8)
+                   + (readMe & 7) * (WG + 2)];
 
       return;
     }
@@ -489,6 +499,11 @@ void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
     // Pad one value after every row to eliminate bank conflicts.
     // gpuowl 6cf0dc first radix-8 padded shuffle.
     if (!force_default && f == 1 && RADIX == 8) {
+#if AEVUM_DIRECTIONAL_V2_ACTIVE
+      const u32 readMe = aevumDirectionalOwner(lowMe);
+#else
+      const u32 readMe = lowMe;
+#endif
       bar(WG);
 
       for (u32 i = 0; i < RADIX; ++i)
@@ -498,8 +513,8 @@ void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
 
       for (u32 i = 0; i < RADIX; ++i)
         u[i] = lds[i * WG / 8
-                 + (lowMe / 8)
-                 + (lowMe & 7) * (WG + 2)];
+                 + (readMe / 8)
+                 + (readMe & 7) * (WG + 2)];
 
       return;
     }
@@ -635,6 +650,123 @@ void OVERLOAD shufl32(local F2 *lds2, F2 *u, u32 f, u32 numWG, u32 lowMe) {
 
 
 
+#if AEVUM_DIRECTIONAL_V2_ACTIVE
+// Move the first radix-16 +/- from the LDS consumer to the register producer.
+// Only one peer component is needed at a time; no second private u[8] array.
+// Keep every LDS-reuse and producer/consumer barrier from the production path.
+
+#if FFT_FP64
+void OVERLOAD aevumDirectionalShuffle2(local T2 *lds2, T2 *u, u32 numWG, u32 lowMe) {
+  const u32 owner = aevumDirectionalOwner(lowMe);
+#if SHUFL_BYTES == 16
+  local T2 *lds = lds2;
+  if (numWG > 1) { lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(T2); }
+
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) {
+    T x = aevumDirectionalPair(u[i].x, owner);
+    T y = aevumDirectionalPair(u[i].y, owner);
+    lds[i * 8 + (owner & ~7u) * RADIX + (owner & 7u)] = U2(x, y);
+  }
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) {
+    u[i] = lds[(lowMe / 64) * (4 * WG) + i * (WG / 2) + lowMe % (WG / 2)];
+  }
+#else
+  local T *lds = (local T *)lds2;
+  if (numWG > 1) { lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(T); }
+
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) {
+    lds[i * (WG + 8) + owner] = aevumDirectionalPair(u[i].x, owner);
+  }
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) { u[i].x = lds[aevumDirectionalRead8(i, lowMe)]; }
+
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) {
+    lds[i * (WG + 8) + owner] = aevumDirectionalPair(u[i].y, owner);
+  }
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) { u[i].y = lds[aevumDirectionalRead8(i, lowMe)]; }
+#endif
+}
+#endif
+
+#if NTT_GF61
+void OVERLOAD aevumDirectionalShuffle2(local GF61 *lds2, GF61 *u, u32 numWG, u32 lowMe) {
+  const u32 owner = aevumDirectionalOwner(lowMe);
+#if SHUFL_BYTES == 16
+  local GF61 *lds = lds2;
+  if (numWG > 1) { lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(GF61); }
+
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) {
+    Z61 x = aevumDirectionalPair(u[i].x, owner);
+    Z61 y = aevumDirectionalPair(u[i].y, owner);
+    lds[i * 8 + (owner & ~7u) * RADIX + (owner & 7u)] = U2(x, y);
+  }
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) {
+    u[i] = lds[(lowMe / 64) * (4 * WG) + i * (WG / 2) + lowMe % (WG / 2)];
+  }
+#else
+  local Z61 *lds = (local Z61 *)lds2;
+  if (numWG > 1) { lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(Z61); }
+
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) {
+    lds[i * (WG + 8) + owner] = aevumDirectionalPair(u[i].x, owner);
+  }
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) { u[i].x = lds[aevumDirectionalRead8(i, lowMe)]; }
+
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) {
+    lds[i * (WG + 8) + owner] = aevumDirectionalPair(u[i].y, owner);
+  }
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) { u[i].y = lds[aevumDirectionalRead8(i, lowMe)]; }
+#endif
+}
+#endif
+
+#if FFT_FP32
+void OVERLOAD aevumDirectionalShuffle2(local F2 *lds2, F2 *u, u32 numWG, u32 lowMe) {
+  const u32 owner = aevumDirectionalOwner(lowMe);
+  local F2 *lds = lds2;
+  if (numWG > 1) { lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(F2); }
+
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) {
+    F x = aevumDirectionalPair(u[i].x, owner);
+    F y = aevumDirectionalPair(u[i].y, owner);
+    lds[i * (WG + 8) + owner] = U2(x, y);
+  }
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) { u[i] = lds[aevumDirectionalRead8(i, lowMe)]; }
+}
+#endif
+
+#if NTT_GF31
+void OVERLOAD aevumDirectionalShuffle2(local GF31 *lds2, GF31 *u, u32 numWG, u32 lowMe) {
+  const u32 owner = aevumDirectionalOwner(lowMe);
+  local GF31 *lds = lds2;
+  if (numWG > 1) { lds += ((u32)get_local_id(0) / WG) * LDS_BYTES / sizeof(GF31); }
+
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) {
+    Z31 x = aevumDirectionalPair(u[i].x, owner);
+    Z31 y = aevumDirectionalPair(u[i].y, owner);
+    lds[i * (WG + 8) + owner] = U2(x, y);
+  }
+  bar(WG);
+  for (u32 i = 0; i < RADIX; ++i) { u[i] = lds[aevumDirectionalRead8(i, lowMe)]; }
+}
+#endif
+
+#endif
+
 // AEVUM_GWOLT_SHUFL_FFT2_TYPED
 // Typed Aevum backport of gpuowl 6cf0dc fused shuffle + fft2.
 // Used only by SIZE=1K / RADIX=8 / f=8, so it is only defined there: its SHUFL_BYTES checks must not reject other shapes.
@@ -645,6 +777,10 @@ void OVERLOAD shufl_and_fft2(local T2 *lds2, T2 *u,
                              u32 f, u32 numWG, u32 lowMe) {
   assert(RADIX == 8);
   assert(f == 8);
+
+#if AEVUM_DIRECTIONAL_V2_ACTIVE
+  aevumDirectionalShuffle2(lds2, u, numWG, lowMe);
+#else
 
   const u32 mask = f - 1;
 
@@ -693,6 +829,7 @@ void OVERLOAD shufl_and_fft2(local T2 *lds2, T2 *u,
 #else
 #error Unsupported FP64 SHUFL_BYTES
 #endif
+#endif
 }
 
 #endif
@@ -704,6 +841,10 @@ void OVERLOAD shufl_and_fft2(local F2 *lds2, F2 *u,
                              u32 f, u32 numWG, u32 lowMe) {
   assert(RADIX == 8);
   assert(f == 8);
+
+#if AEVUM_DIRECTIONAL_V2_ACTIVE
+  aevumDirectionalShuffle2(lds2, u, numWG, lowMe);
+#else
 
   const u32 mask = f - 1;
 
@@ -725,6 +866,7 @@ void OVERLOAD shufl_and_fft2(local F2 *lds2, F2 *u,
 #else
 #error Unsupported FP32 SHUFL_BYTES
 #endif
+#endif
 }
 
 #endif
@@ -736,6 +878,10 @@ void OVERLOAD shufl_and_fft2(local GF31 *lds2, GF31 *u,
                              u32 f, u32 numWG, u32 lowMe) {
   assert(RADIX == 8);
   assert(f == 8);
+
+#if AEVUM_DIRECTIONAL_V2_ACTIVE
+  aevumDirectionalShuffle2(lds2, u, numWG, lowMe);
+#else
 
   const u32 mask = f - 1;
 
@@ -790,6 +936,7 @@ void OVERLOAD shufl_and_fft2(local GF31 *lds2, GF31 *u,
 #else
 #error Unsupported GF31 SHUFL_BYTES
 #endif
+#endif
 }
 
 #endif
@@ -801,6 +948,10 @@ void OVERLOAD shufl_and_fft2(local GF61 *lds2, GF61 *u,
                              u32 f, u32 numWG, u32 lowMe) {
   assert(RADIX == 8);
   assert(f == 8);
+
+#if AEVUM_DIRECTIONAL_V2_ACTIVE
+  aevumDirectionalShuffle2(lds2, u, numWG, lowMe);
+#else
 
   const u32 mask = f - 1;
 
@@ -905,6 +1056,7 @@ void OVERLOAD shufl_and_fft2(local GF61 *lds2, GF61 *u,
   }
 #else
 #error Unsupported GF61 SHUFL_BYTES
+#endif
 #endif
 }
 
@@ -1722,7 +1874,11 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
   shufl(lds, u, 1, numWG, lowMe);
 
   fft8(u);
+#if AEVUM_DIRECTIONAL_V2_ACTIVE
+  tabMul(trig, u, 8, aevumDirectionalOwner(lowMe));
+#else
   tabMul(trig, u, 8, lowMe);
+#endif
   shufl_and_fft2(lds, u, 8, numWG, lowMe);
 
   if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
@@ -2318,7 +2474,11 @@ void OVERLOAD fft_common(local F2 *lds, F2 *u, TrigFP32 trig, u32 numWG, u32 low
   shufl(lds, u, 1, numWG, lowMe);
 
   fft8(u);
+#if AEVUM_DIRECTIONAL_V2_ACTIVE
+  tabMul(trig, u, 8, aevumDirectionalOwner(lowMe));
+#else
   tabMul(trig, u, 8, lowMe);
+#endif
   shufl_and_fft2(lds, u, 8, numWG, lowMe);
 
   if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
@@ -2534,7 +2694,11 @@ void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32
   shufl(lds, u, 1, numWG, lowMe);
 
   fft8(u);
+#if AEVUM_DIRECTIONAL_V2_ACTIVE
+  tabMul(trig, u, 8, aevumDirectionalOwner(lowMe));
+#else
   tabMul(trig, u, 8, lowMe);
+#endif
   shufl_and_fft2(lds, u, 8, numWG, lowMe);
 
   if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
@@ -2750,7 +2914,11 @@ void OVERLOAD fft_common(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32
   shufl(lds, u, 1, numWG, lowMe);
 
   fft8(u);
+#if AEVUM_DIRECTIONAL_V2_ACTIVE
+  tabMul(trig, u, 8, aevumDirectionalOwner(lowMe));
+#else
   tabMul(trig, u, 8, lowMe);
+#endif
   shufl_and_fft2(lds, u, 8, numWG, lowMe);
 
   if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
