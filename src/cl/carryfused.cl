@@ -39,6 +39,29 @@ void spin() {
 #define WMUL 2
 #endif
 
+#ifndef AEVUM_CARRY_FFT_RECOMPUTE_V1
+#define AEVUM_CARRY_FFT_RECOMPUTE_V1 0
+#endif
+// Replace the hidden-zero pointer perturbation only where it is actually zero,
+// including the duplicate final group. Keep other shapes/backends unchanged.
+#define AEVUM_CARRY_FFT_RECOMPUTE_ACTIVE \
+  (AEVUM_CARRY_FFT_RECOMPUTE_V1 == 1 && FFT_TYPE == FFT3161 && \
+   NVIDIAGPU && HAS_PTX >= 700 && WAVEFRONT == 32 && !CUDA_BACKEND && \
+   __OPENCL_C_VERSION__ >= 200 && !PFA_RADIX && \
+   (WIDTH == 512 || WIDTH == 1024) && (WMUL == 1 || WMUL == 2) && \
+   BIG_HEIGHT / WMUL < 131072 && (ZEROHACK_W == 0 || ZEROHACK_W == 1))
+
+#if AEVUM_CARRY_FFT_RECOMPUTE_ACTIVE
+// Runtime identity, opaque to the OpenCL optimizer. Separate inverse-FFT
+// lane expressions from the forward FFT so address/twiddle intermediates
+// need not be retained across carry propagation. This is not a memory fence.
+u32 aevumCarryFreshLane(u32 lane) {
+  u32 result;
+  __asm volatile("mov.b32 %0, %1;" : "=r"(result) : "r"(lane));
+  return result;
+}
+#endif
+
 #if AMDGPU
 #define CarryShuttleAccess(me,i)        ((me) * NW + (i))                       // Generates denser global_load_dwordx4 instructions
 //#define CarryShuttleAccess(me,i)      ((me) * 4 + (i)%4 + (i)/4 * 4*G_W)      // Also generates global_load_dwordx4 instructions and unit stride when NW=8
@@ -2015,15 +2038,25 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 // Try this weird FFT_width call that adds a "hidden zero" when unrolling.  This prevents the compiler from finding
 // common sub-expressions to re-use in the second fft_WIDTH call.  Re-using this data requires dozens of VGPRs
 // which causes a terrible reduction in occupancy.
+#if !AEVUM_CARRY_FFT_RECOMPUTE_ACTIVE
   u32 zerohack = ZEROHACK_W * (u32) get_group_id(0) / 131072;
+#endif
 
   readCarryFusedLine(in31, u31, line, lowMe);
+#if AEVUM_CARRY_FFT_RECOMPUTE_ACTIVE
+  fft_WIDTH1(lds31, u31, smallTrig31, WMUL, aevumCarryFreshLane(lowMe));
+#else
   fft_WIDTH1(lds31 + zerohack, u31, smallTrig31 + zerohack, WMUL, lowMe);
+#endif
 
   dependentLaunchWait();   // Previous kernel was fftMiddleOutGF61
 
   readCarryFusedLine(in61, u61, line, lowMe);
+#if AEVUM_CARRY_FFT_RECOMPUTE_ACTIVE
+  fft_WIDTH1(lds61, u61, smallTrig61, WMUL, aevumCarryFreshLane(lowMe));
+#else
   fft_WIDTH1(lds61 + zerohack, u61, smallTrig61 + zerohack, WMUL, lowMe);
+#endif
 
   Word2 wu[NW];
 
