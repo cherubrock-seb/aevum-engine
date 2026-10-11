@@ -11,6 +11,10 @@
 //
 // usage: native-pfa-dense-compare libaevum_engine.so device exponent
 //                                 reference_spec candidate_spec [iterations] [seed]
+//                                 [--directional-v2]
+// V2 mode: IMPLEMENTED — NOT COMPILED — NOT TESTED — NOT BENCHMARKED.
+// Compare the same explicit 1K-width plan with the PRP compile profile off/on.
+// A passing fallback device is not evidence that the NVIDIA warp path ran.
 #include <dlfcn.h>
 #include <algorithm>
 #include <cstdint>
@@ -18,6 +22,8 @@
 #include <cstring>
 #include <iostream>
 #include <random>
+#include <sstream>
+#include "../src/EngineApi.h"
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -29,6 +35,8 @@ struct Api {
   const char* (*last_error)(){};
   int (*resolve)(uint32_t, const char*, char*, size_t){};
   Handle (*create)(uint32_t, size_t, uint32_t, int, const char*, const char*){};
+  decltype(&aevum_engine_create_ex) create_ex{};
+  decltype(&aevum_engine_plan_spec) plan_spec{};
   void (*destroy)(Handle){};
   size_t (*transform_size)(Handle){};
   size_t (*word_count)(Handle){};
@@ -44,12 +52,16 @@ struct Api {
     return reinterpret_cast<T>(p);
   }
 
-  explicit Api(const char* path) {
+  explicit Api(const char* path, bool directional = false) {
     so = dlopen(path, RTLD_NOW | RTLD_LOCAL);
     if (!so) throw std::runtime_error(dlerror());
     last_error = sym<decltype(last_error)>("aevum_engine_last_error");
     resolve = sym<decltype(resolve)>("aevum_engine_resolve_fft");
     create = sym<decltype(create)>("aevum_engine_create");
+    if (directional) {
+      create_ex = sym<decltype(create_ex)>("aevum_engine_create_ex");
+      plan_spec = sym<decltype(plan_spec)>("aevum_engine_plan_spec");
+    }
     destroy = sym<decltype(destroy)>("aevum_engine_destroy");
     transform_size = sym<decltype(transform_size)>("aevum_engine_transform_size");
     word_count = sym<decltype(word_count)>("aevum_engine_word_count");
@@ -66,6 +78,37 @@ struct Api {
 static void require(Api& api, int rc, const char* what) {
   if (!rc) throw std::runtime_error(std::string(what) + ": " +
                                     (api.last_error() ? api.last_error() : "unknown"));
+}
+
+// Only this opt-in test mode changes the process environment; restore it on
+// success and on exceptions. The engine's generic create() ignores PRP_USE.
+struct ScopedEnvironment {
+  const char* key;
+  bool present;
+  std::string previous;
+
+  explicit ScopedEnvironment(const char* name) : key(name), present(std::getenv(name) != nullptr),
+      previous(present ? std::getenv(name) : "") {}
+
+  void set(const std::string& value) {
+    if (setenv(key, value.c_str(), 1) != 0) { throw std::runtime_error("setenv failed"); }
+  }
+
+  ~ScopedEnvironment() {
+    if (present) { setenv(key, previous.c_str(), 1); }
+    else { unsetenv(key); }
+  }
+};
+
+static void require_directional_plan(const std::string& spec) {
+  std::istringstream input(spec);
+  std::vector<std::string> parts;
+  std::string part;
+  while (std::getline(input, part, ':')) { parts.push_back(part); }
+  if (parts.size() != 5 || (parts[1] != "1K" && parts[1] != "1024") ||
+      parts[4].size() != 3 || parts[4][0] != '2') {
+    throw std::runtime_error("V2 comparison requires an explicit non-PFA 1K-width, width-variant-2 plan");
+  }
 }
 
 struct Run {
@@ -90,15 +133,33 @@ static std::vector<uint32_t> dense_words(std::mt19937& rng, uint32_t exponent, s
 }
 
 static Run execute(Api& api, uint32_t exponent, uint32_t device,
-                   const char* spec, unsigned iterations, unsigned seed) {
+                   const char* spec, unsigned iterations, unsigned seed, bool directional = false) {
   char resolved[256]{};
   require(api, api.resolve(exponent, spec, resolved, sizeof(resolved)), "resolve");
-  Handle h = api.create(exponent, 2, device, 1, spec, ".");
+  if (directional) { require_directional_plan(resolved); }
+  Handle h = directional
+    ? api.create_ex(exponent, 2, device, 1, spec, ".", AEVUM_WORKLOAD_PRP)
+    : api.create(exponent, 2, device, 1, spec, ".");
   if (!h) throw std::runtime_error(std::string("create ") + spec + ": " +
                                    (api.last_error() ? api.last_error() : "failed"));
 
+  struct Cleanup {
+    Api& api;
+    Handle handle;
+    ~Cleanup() { api.destroy(handle); }
+  } cleanup{api, h};
+
   Run result;
   result.resolved = resolved;
+  if (directional) {
+    char actual[256]{};
+    require(api, api.plan_spec(h, actual, sizeof(actual)), "actual plan");
+    require_directional_plan(actual);
+    if (result.resolved != actual) {
+      throw std::runtime_error("requested/resolved plan changed at creation");
+    }
+    result.resolved = actual;
+  }
   result.transform = api.transform_size(h);
   const size_t count = api.word_count(h);
   auto capture = [&](size_t reg, const std::string& label) {
@@ -142,7 +203,6 @@ static Run execute(Api& api, uint32_t exponent, uint32_t device,
     require(api, api.square_mul(h, 0, 1), "square_mul chain");
   capture(0, "square chain x4");
 
-  api.destroy(h);
   return result;
 }
 
@@ -151,10 +211,12 @@ int main(int argc, char** argv) {
     if (argc < 6) {
       std::cerr << "usage: " << argv[0]
                 << " libaevum_engine.so device exponent reference_spec candidate_spec"
-                   " [iterations] [seed]\n";
+                   " [iterations] [seed] [--directional-v2]\n";
       return 2;
     }
-    Api api(argv[1]);
+    const bool directional = argc == 9 && std::string(argv[8]) == "--directional-v2";
+    if (argc > 8 && !directional) { throw std::runtime_error("unknown extra argument"); }
+    Api api(argv[1], directional);
     const uint32_t device = static_cast<uint32_t>(std::stoul(argv[2]));
     const uint32_t exponent = static_cast<uint32_t>(std::stoul(argv[3]));
     const char* reference = argv[4];
@@ -162,8 +224,39 @@ int main(int argc, char** argv) {
     const unsigned iterations = argc > 6 ? static_cast<unsigned>(std::stoul(argv[6])) : 3u;
     const unsigned seed = argc > 7 ? static_cast<unsigned>(std::stoul(argv[7])) : 20261002u;
 
-    Run left = execute(api, exponent, device, reference, iterations, seed);
-    Run right = execute(api, exponent, device, candidate, iterations, seed);
+    Run left, right;
+    if (directional) {
+#if defined(__APPLE__)
+      throw std::runtime_error("V2 NVIDIA ownership path is not enabled on Apple");
+#endif
+      const char* radix = std::getenv("AEVUM_RADIX1K");
+      if (!radix || std::string(radix) != "8") {
+        throw std::runtime_error("V2 comparison requires explicit AEVUM_RADIX1K=8");
+      }
+      if (std::string(reference) != candidate || iterations == 0) {
+        throw std::runtime_error("V2 comparison requires identical plans and nonzero iterations");
+      }
+      ScopedEnvironment profile("AEVUM_PRP_USE");
+      ScopedEnvironment tuning("AEVUM_PRP_USE_TUNE");
+      // Preserve the owner's other flags identically in both profiles.
+      if (profile.previous.find("AEVUM_DIRECTIONAL_FUSION") != std::string::npos) {
+        throw std::runtime_error("remove directional flags from AEVUM_PRP_USE; the comparator sets them");
+      }
+      const std::string common = profile.previous.empty() ? "" : profile.previous + ",";
+      tuning.set("off");
+      profile.set(common + "AEVUM_DIRECTIONAL_FUSION_V2=0");
+      std::cout << "reference PRP profile: " << std::getenv("AEVUM_PRP_USE") << std::endl;
+      left = execute(api, exponent, device, reference, iterations, seed, true);
+      profile.set(common + "AEVUM_DIRECTIONAL_FUSION_V2=1");
+      std::cout << "candidate PRP profile: " << std::getenv("AEVUM_PRP_USE") << std::endl;
+      right = execute(api, exponent, device, candidate, iterations, seed, true);
+      if (left.resolved != right.resolved || left.transform != right.transform) {
+        throw std::runtime_error("V2 actual-plan or transform-size mismatch");
+      }
+    } else {
+      left = execute(api, exponent, device, reference, iterations, seed);
+      right = execute(api, exponent, device, candidate, iterations, seed);
+    }
 
     if (left.outputs.size() != right.outputs.size())
       throw std::runtime_error("output-count mismatch");
@@ -195,7 +288,12 @@ int main(int argc, char** argv) {
     std::cout << "reference=" << left.resolved << " size=" << left.transform << "\n";
     std::cout << "candidate=" << right.resolved << " size=" << right.transform
               << " bits/word=" << double(exponent) / double(right.transform) << "\n";
-    std::cout << "NATIVE AEVUM PFA DENSE DIFFERENTIAL TEST PASSED\n";
+    if (directional) {
+      std::cout << "DIRECTIONAL V2 PROFILE A/B RESIDUES MATCH\n"
+                   "Confirm the compiled activation gate; fallback is not enabled-path coverage.\n";
+    } else {
+      std::cout << "NATIVE AEVUM PFA DENSE DIFFERENTIAL TEST PASSED\n";
+    }
     return 0;
   } catch (const std::exception& e) {
     std::cerr << "ERROR: " << e.what() << "\n";
