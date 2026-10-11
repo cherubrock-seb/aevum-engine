@@ -16,6 +16,84 @@
 #define LDS_BYTES     (WG * RADIX * SHUFL_BYTES)
 #endif
 
+// Directional fusion V2: IMPLEMENTED — NOT COMPILED — NOT TESTED — NOT BENCHMARKED.
+// This experiment is confined to the tabulated 1K width transform. Unsupported
+// layouts/backends keep the production path, even when the option is requested.
+#ifndef AEVUM_DIRECTIONAL_FUSION_V2
+#define AEVUM_DIRECTIONAL_FUSION_V2 0
+#endif
+#if AEVUM_DIRECTIONAL_FUSION_V2 != 0 && AEVUM_DIRECTIONAL_FUSION_V2 != 1
+#error AEVUM_DIRECTIONAL_FUSION_V2 must be 0 or 1
+#endif
+#if AEVUM_DIRECTIONAL_FUSION_V2 && DOING_WIDTH && VARIANT == 2 && WG == 128 && RADIX == 8 && \
+    NVIDIAGPU && !AMDGPU && HAS_PTX >= 700 && WAVEFRONT == 32 && \
+    (SHUFL_BYTES == 8 || SHUFL_BYTES == 16) && LDSPAD && !LDSSWIZ && !NOWG2 && !NOLDS2 && !PFA_RADIX
+#define AEVUM_DIRECTIONAL_V2_ACTIVE 1
+#else
+#define AEVUM_DIRECTIONAL_V2_ACTIVE 0
+#endif
+
+#if AEVUM_DIRECTIONAL_V2_ACTIVE
+// Internal ownership only: physical lane bit 4 becomes logical thread bit 6.
+// P is an involution and P(p ^ 16) == P(p) ^ 64. The first transpose reads
+// owner P(p); the second transpose restores owner p before fft8_16a/b.
+// Do not apply this permutation to kernel/global/carry indices.
+u32 aevumDirectionalOwner(u32 p) {
+  return (p & ~80u) | ((p & 16u) << 2) | ((p & 64u) >> 2);
+}
+
+// Every physical warp executes every exchange, before any +/- selection.
+// No lane exits and the full mask never names another 128-thread LDS partition.
+// This transports bits; it is not a local-memory fence.
+u32 aevumDirectionalPeer32(u32 value) {
+  u32 peer;
+  __asm("shfl.sync.bfly.b32 %0, %1, 16, 31, 0xffffffff;"
+        : "=r"(peer) : "r"(value));
+  return peer;
+}
+
+#if FFT_FP64 || NTT_GF61
+u64 aevumDirectionalPeer64(u64 value) {
+  uint2 bits = as_uint2(value);
+  bits.x = aevumDirectionalPeer32(bits.x);
+  bits.y = aevumDirectionalPeer32(bits.y);
+  return as_ulong(bits);
+}
+#endif
+
+#if FFT_FP64
+T OVERLOAD aevumDirectionalPair(T value, u32 owner) {
+  T peer = as_double(aevumDirectionalPeer64(as_ulong(value)));
+  return owner < WG / 2 ? value + peer : peer - value;
+}
+#endif
+#if FFT_FP32
+F OVERLOAD aevumDirectionalPair(F value, u32 owner) {
+  F peer = as_float(aevumDirectionalPeer32(as_uint(value)));
+  return owner < WG / 2 ? value + peer : peer - value;
+}
+#endif
+#if NTT_GF31
+Z31 OVERLOAD aevumDirectionalPair(Z31 value, u32 owner) {
+  Z31 peer = aevumDirectionalPeer32(value);
+  return owner < WG / 2 ? addq(value, peer) : subq(peer, value);
+}
+#endif
+#if NTT_GF61
+Z61 OVERLOAD aevumDirectionalPair(Z61 value, u32 owner) {
+  Z61 peer = aevumDirectionalPeer64(value);
+  return owner < WG / 2 ? addq(value, peer) : subq(peer, value);
+}
+#endif
+
+// Eight-byte staging (GF31/FP32 pairs or GF61/FP64 scalar components).
+// Each row has 128 live elements and eight padding elements.
+u32 aevumDirectionalRead8(u32 i, u32 consumer) {
+  return ((consumer / 8) & 7u) * (WG + 8)
+       + (consumer & 7u) + i * 8 + (consumer / 64) * 64;
+}
+#endif
+
 #if FFT_FP64 | NTT_GF61
 
 // Shufl two or more fft_WIDTHs or FFT_HEIGHTs operating on 64-bit values using LDS_BYTES of LDS memory.

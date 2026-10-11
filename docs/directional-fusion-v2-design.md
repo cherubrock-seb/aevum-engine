@@ -32,9 +32,24 @@ Candidate directions, in priority order:
 4. Reject barrier removal unless every producer/consumer and LDS-reuse edge
    is accounted for. A barrier saving is not required if traffic falls.
 
-The exact candidate will be recorded with its implementation, including any
-rejected alternative. NVIDIA is the first experimental target; the existing
-AMD path and all defaults must remain intact.
+Selected candidate: change ownership only between the existing two transposes.
+The first transpose reads logical owner P(p), where P swaps bits 4 and 6 of
+the physical thread index. The second FFT8 and its twiddle use P(p).
+Physical lane xor 16 then supplies the operand owned by P(p) xor 64.
+Perform the +/- butterfly in registers **before** the second transpose stores.
+That transpose stores one result and reads one result per value, restoring
+the original physical/output owner p before fft8_16a/b.
+
+This removes the second LDS operand load without adding an LDS round trip.
+Global, carry, twiddle-table storage and external output layouts do not change.
+In particular, the final a/b branch stays warp-uniform. A whole-kernel
+permutation was rejected because it would complicate carry-ready flags and
+make that final branch divergent. A wholly warp-local FFT16 was rejected at
+this stage because restoring its output ownership would need more routing.
+
+The first source checkpoint adds guarded ownership/transport helpers only;
+the next source commit will wire them into both transposes atomically.
+NVIDIA is the first experimental target; AMD remains a compile-time fallback.
 
 ## Correctness and scope invariants
 
@@ -64,5 +79,9 @@ must not be presented as manually performed validation.
 ## Commit progress
 
 - Initial checkpoint: current production source read; dedicated branch created.
-- Implementation: pending. Cost table and precise owner commands follow with
-  the source stages. No correctness or performance success is claimed.
+- Source checkpoint 1: guarded owner permutation, bitwise NVIDIA peer transport,
+  directional pair operations and padded read mapping. Helpers are not wired
+  into the FFT yet.
+- Source status: IMPLEMENTED — NOT COMPILED — NOT TESTED — NOT BENCHMARKED.
+- Cost table and owner instructions follow with the integration checkpoint.
+  No correctness or performance success is claimed.
