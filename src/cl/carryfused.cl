@@ -1329,6 +1329,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   __asm("s_setprio 0");
 #endif
 
+#if !AEVUM_CARRY_LATE_FWEIGHTS_ACTIVE
   // Calculate inverse weights
   T base = optionalHalve(weights.y);
   for (u32 i = 0; i < NW; ++i) {
@@ -1336,6 +1337,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     T weight2 = optionalHalve(fancyMul(weight1, WEIGHT_STEP));
     u[i] = U2(weight1, weight2);
   }
+#endif
 
   // Shuffle carries up
   shufl_carries_up(lds, carry, me, lowMe);
@@ -1395,6 +1397,11 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     }
   }
 
+#if AEVUM_CARRY_LATE_FWEIGHTS_ACTIVE
+  // Materialize each pair only at its consumer, after incoming carries.
+  T base = optionalHalve(weights.y);
+#endif
+
   // Apply each 32 or 64 bit carry to the 2 words.  Apply weights.
   for (i32 i = 0; i < NW; ++i) {
     // Generate the second weight shift
@@ -1405,7 +1412,13 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Generate big-word/little-word flag, propagate final carry
     bool biglit0 = frac_bits <= FRAC_BPW_HI;
     wu[i] = carryFinal(wu[i], carry[i], biglit0);
+#if AEVUM_CARRY_LATE_FWEIGHTS_ACTIVE
+    T weight1 = i == 0 ? base : optionalHalve(fancyMul(base, fweightStep(i)));
+    T weight2 = optionalHalve(fancyMul(weight1, WEIGHT_STEP));
+    u[i] = U2(weight1 * wu[i].x, weight2 * wu[i].y);
+#else
     u[i] = U2(u[i].x * wu[i].x, u[i].y * wu[i].y);
+#endif
     u31[i] = U2(shl(make_Z31(wu[i].x), weight_shift0), shl(make_Z31(wu[i].y), weight_shift1));
 
     // Generate weight shifts and frac_bits for next pair
