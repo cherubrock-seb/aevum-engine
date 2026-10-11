@@ -778,10 +778,6 @@ void OVERLOAD shufl_and_fft2(local T2 *lds2, T2 *u,
   assert(RADIX == 8);
   assert(f == 8);
 
-#if AEVUM_DIRECTIONAL_V2_ACTIVE
-  aevumDirectionalShuffle2(lds2, u, numWG, lowMe);
-#else
-
   const u32 mask = f - 1;
 
 #if SHUFL_BYTES == 16
@@ -829,7 +825,6 @@ void OVERLOAD shufl_and_fft2(local T2 *lds2, T2 *u,
 #else
 #error Unsupported FP64 SHUFL_BYTES
 #endif
-#endif
 }
 
 #endif
@@ -841,10 +836,6 @@ void OVERLOAD shufl_and_fft2(local F2 *lds2, F2 *u,
                              u32 f, u32 numWG, u32 lowMe) {
   assert(RADIX == 8);
   assert(f == 8);
-
-#if AEVUM_DIRECTIONAL_V2_ACTIVE
-  aevumDirectionalShuffle2(lds2, u, numWG, lowMe);
-#else
 
   const u32 mask = f - 1;
 
@@ -866,7 +857,6 @@ void OVERLOAD shufl_and_fft2(local F2 *lds2, F2 *u,
 #else
 #error Unsupported FP32 SHUFL_BYTES
 #endif
-#endif
 }
 
 #endif
@@ -878,10 +868,6 @@ void OVERLOAD shufl_and_fft2(local GF31 *lds2, GF31 *u,
                              u32 f, u32 numWG, u32 lowMe) {
   assert(RADIX == 8);
   assert(f == 8);
-
-#if AEVUM_DIRECTIONAL_V2_ACTIVE
-  aevumDirectionalShuffle2(lds2, u, numWG, lowMe);
-#else
 
   const u32 mask = f - 1;
 
@@ -936,7 +922,6 @@ void OVERLOAD shufl_and_fft2(local GF31 *lds2, GF31 *u,
 #else
 #error Unsupported GF31 SHUFL_BYTES
 #endif
-#endif
 }
 
 #endif
@@ -948,10 +933,6 @@ void OVERLOAD shufl_and_fft2(local GF61 *lds2, GF61 *u,
                              u32 f, u32 numWG, u32 lowMe) {
   assert(RADIX == 8);
   assert(f == 8);
-
-#if AEVUM_DIRECTIONAL_V2_ACTIVE
-  aevumDirectionalShuffle2(lds2, u, numWG, lowMe);
-#else
 
   const u32 mask = f - 1;
 
@@ -1056,7 +1037,6 @@ void OVERLOAD shufl_and_fft2(local GF61 *lds2, GF61 *u,
   }
 #else
 #error Unsupported GF61 SHUFL_BYTES
-#endif
 #endif
 }
 
@@ -1875,11 +1855,13 @@ void OVERLOAD fft_common(local T2 *lds, T2 *u, Trig trig, T2 w, u32 numWG, u32 l
 
   fft8(u);
 #if AEVUM_DIRECTIONAL_V2_ACTIVE
+  // Pair with the remapped f=1 read above; restore physical ownership here.
   tabMul(trig, u, 8, aevumDirectionalOwner(lowMe));
+  aevumDirectionalShuffle2(lds, u, numWG, lowMe);
 #else
   tabMul(trig, u, 8, lowMe);
-#endif
   shufl_and_fft2(lds, u, 8, numWG, lowMe);
+#endif
 
   if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
 
@@ -2475,11 +2457,13 @@ void OVERLOAD fft_common(local F2 *lds, F2 *u, TrigFP32 trig, u32 numWG, u32 low
 
   fft8(u);
 #if AEVUM_DIRECTIONAL_V2_ACTIVE
+  // Pair with the remapped f=1 read above; restore physical ownership here.
   tabMul(trig, u, 8, aevumDirectionalOwner(lowMe));
+  aevumDirectionalShuffle2(lds, u, numWG, lowMe);
 #else
   tabMul(trig, u, 8, lowMe);
-#endif
   shufl_and_fft2(lds, u, 8, numWG, lowMe);
+#endif
 
   if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
 
@@ -2695,11 +2679,13 @@ void OVERLOAD fft_common(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32
 
   fft8(u);
 #if AEVUM_DIRECTIONAL_V2_ACTIVE
+  // Pair with the remapped f=1 read above; restore physical ownership here.
   tabMul(trig, u, 8, aevumDirectionalOwner(lowMe));
+  aevumDirectionalShuffle2(lds, u, numWG, lowMe);
 #else
   tabMul(trig, u, 8, lowMe);
-#endif
   shufl_and_fft2(lds, u, 8, numWG, lowMe);
+#endif
 
   if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
 
@@ -2915,11 +2901,13 @@ void OVERLOAD fft_common(local GF61 *lds, GF61 *u, TrigGF61 trig, u32 numWG, u32
 
   fft8(u);
 #if AEVUM_DIRECTIONAL_V2_ACTIVE
+  // Pair with the remapped f=1 read above; restore physical ownership here.
   tabMul(trig, u, 8, aevumDirectionalOwner(lowMe));
+  aevumDirectionalShuffle2(lds, u, numWG, lowMe);
 #else
   tabMul(trig, u, 8, lowMe);
-#endif
   shufl_and_fft2(lds, u, 8, numWG, lowMe);
+#endif
 
   if (lowMe < WG / 2) fft8_16a(u); else fft8_16b(u);
 
