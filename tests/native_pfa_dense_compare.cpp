@@ -100,7 +100,7 @@ struct ScopedEnvironment {
   }
 };
 
-static void require_directional_plan(const std::string& spec) {
+static std::vector<std::string> require_directional_plan(const std::string& spec) {
   std::istringstream input(spec);
   std::vector<std::string> parts;
   std::string part;
@@ -109,6 +109,8 @@ static void require_directional_plan(const std::string& spec) {
       parts[4].size() != 3 || parts[4][0] != '2') {
     throw std::runtime_error("V2 comparison requires an explicit non-PFA 1K-width, width-variant-2 plan");
   }
+  parts[1] = "1K";  // Accept the equivalent explicit width spelling 1024.
+  return parts;
 }
 
 struct Run {
@@ -136,7 +138,9 @@ static Run execute(Api& api, uint32_t exponent, uint32_t device,
                    const char* spec, unsigned iterations, unsigned seed, bool directional = false) {
   char resolved[256]{};
   require(api, api.resolve(exponent, spec, resolved, sizeof(resolved)), "resolve");
-  if (directional) { require_directional_plan(resolved); }
+  if (directional && require_directional_plan(spec) != require_directional_plan(resolved)) {
+    throw std::runtime_error("explicit requested plan changed during resolution");
+  }
   Handle h = directional
     ? api.create_ex(exponent, 2, device, 1, spec, ".", AEVUM_WORKLOAD_PRP)
     : api.create(exponent, 2, device, 1, spec, ".");

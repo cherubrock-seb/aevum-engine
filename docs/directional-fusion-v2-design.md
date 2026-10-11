@@ -192,7 +192,7 @@ for owner-run commands, the hardware matrix, acceptance criteria and known gaps.
 4. `4e79cf27a09e3249502513cac23344627199a695` — test(opencl): add same-plan directional v2 profile comparison.
 5. `7754286ef15c76881dc3e1c47741d0999f660e4b` — refactor(opencl): keep legacy shuffle entry points intact.
 
-The documentation completion commit follows this list; the PR head is the
+Subsequent documentation and review fixes are listed in the PR; its head is the
 authoritative final revision. All source stages have the status at the top.
 After reading the request, implementation used GitHub read/tree/commit/ref/PR
 operations only. No compiler, test, benchmark, SSH or Actions dispatch was run.
