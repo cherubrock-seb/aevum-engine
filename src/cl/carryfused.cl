@@ -39,6 +39,18 @@ void spin() {
 #define WMUL 2
 #endif
 
+#ifndef AEVUM_CARRY_LATE_FWEIGHTS_V1
+#define AEVUM_CARRY_LATE_FWEIGHTS_V1 0
+#endif
+// Keep only the common FP64 weight base live across carry forwarding.
+// The fused-weight butterfly needs the original high-half weight array.
+#define AEVUM_CARRY_LATE_FWEIGHTS_ACTIVE \
+  (AEVUM_CARRY_LATE_FWEIGHTS_V1 == 1 && \
+   (FFT_TYPE == FFT64 || FFT_TYPE == FFT6431) && !FUSE_WEIGHT_BUTTERFLY && \
+   !PFA_RADIX && !CUDA_BACKEND && __OPENCL_C_VERSION__ >= 200 && \
+   (AMDGPU || NVIDIAGPU) && (NW == 4 || NW == 8) && \
+   (WIDTH == 256 || WIDTH == 512 || WIDTH == 1024) && (WMUL == 1 || WMUL == 2))
+
 #if AMDGPU
 #define CarryShuttleAccess(me,i)        ((me) * NW + (i))                       // Generates denser global_load_dwordx4 instructions
 //#define CarryShuttleAccess(me,i)      ((me) * 4 + (i)%4 + (i)/4 * 4*G_W)      // Also generates global_load_dwordx4 instructions and unit stride when NW=8
@@ -298,6 +310,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   __asm("s_setprio 0");
 #endif
 
+#if !AEVUM_CARRY_LATE_FWEIGHTS_ACTIVE
   // Calculate inverse weights
   T base = optionalHalve(weights.y);
   for (u32 i = 0; i < NW; ++i) {
@@ -305,6 +318,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     T weight2 = optionalHalve(fancyMul(weight1, WEIGHT_STEP));
     u[i] = U2(weight1, weight2);
   }
+#endif
 
   // Shuffle carries up
   shufl_carries_up(lds, carry, me, lowMe);
@@ -364,11 +378,22 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     }
   }
 
+#if AEVUM_CARRY_LATE_FWEIGHTS_ACTIVE
+  // Materialize each pair only at its consumer, after incoming carries.
+  T base = optionalHalve(weights.y);
+#endif
+
   // Apply each 32 or 64 bit carry to the 2 words.  Then apply the weights -- or if FUSE_WEIGHT_BUTTERFLY apply weights only for the "low" i indices.
   for (i32 i = 0; i < NW; ++i) {
     bool biglit0 = frac_bits <= FRAC_BPW_HI;
     wu[i] = carryFinal(wu[i], carry[i], biglit0);
+#if AEVUM_CARRY_LATE_FWEIGHTS_ACTIVE
+    T weight1 = i == 0 ? base : optionalHalve(fancyMul(base, fweightStep(i)));
+    T weight2 = optionalHalve(fancyMul(weight1, WEIGHT_STEP));
+    u[i] = U2(weight1 * wu[i].x, weight2 * wu[i].y);
+#else
     if (!FUSE_WEIGHT_BUTTERFLY || i < NW/2) u[i] = U2(u[i].x * wu[i].x, u[i].y * wu[i].y);
+#endif
     // Generate frac_bits for next pair
     frac_bits += frac_bits_bigstep;
   }
