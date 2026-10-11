@@ -39,6 +39,16 @@ void spin() {
 #define WMUL 2
 #endif
 
+#ifndef AEVUM_CARRY_STREAM_V1
+#define AEVUM_CARRY_STREAM_V1 0
+#endif
+// With one line per workgroup, outgoing carries need no local forwarding.
+// Keep the existing ready protocol, but hold only one carry at a time.
+#define AEVUM_CARRY_STREAM_ACTIVE \
+  (AEVUM_CARRY_STREAM_V1 == 1 && FFT_TYPE == FFT3161 && WMUL == 1 && \
+   !PFA_RADIX && !CUDA_BACKEND && __OPENCL_C_VERSION__ >= 200 && \
+   (AMDGPU || NVIDIAGPU))
+
 #if AMDGPU
 #define CarryShuttleAccess(me,i)        ((me) * NW + (i))                       // Generates denser global_load_dwordx4 instructions
 //#define CarryShuttleAccess(me,i)      ((me) * 4 + (i)%4 + (i)/4 * 4*G_W)      // Also generates global_load_dwordx4 instructions and unit stride when NW=8
@@ -2028,7 +2038,9 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   Word2 wu[NW];
 
   P(i64) carryShuttlePtr = (P(i64)) carryShuttle;
+#if !AEVUM_CARRY_STREAM_ACTIVE
   i64 carry[NW+1];
+#endif
 
   u32 roundMax = 0;
   float carryMax = 0;
@@ -2091,10 +2103,21 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Apply the inverse weights, optionally compute roundoff error, and convert to integer.  Also apply MUL3 here.
     // Then propagate carries through two words (the first carry does not have to be accurately calculated because it will
     // be accurately calculated by carryFinal later on).  The second carry must be accurate for output to the carry shuttle.
+#if AEVUM_CARRY_STREAM_ACTIVE
+    i64 outgoing;
+    wu[i] = weightAndCarryPairSloppy(SWAP_XY(u31[i]), SWAP_XY(u61[i]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
+                      // For an LL test, add -2 as the very initial "carry in"
+                      // We'd normally use logical &&, but the compiler whines with warning and bitwise fixes it
+                      LL != 0, (LL & (i == 0) & (line==0) & (me == 0)) ? -2 : 0, biglit0, biglit1, &outgoing, &roundMax, &carryMax);
+    if (gr < H) {
+      CSSTORE(&carryShuttlePtr[gr * WIDTH + CarryShuttleAccess(lowMe, i)], outgoing);
+    }
+#else
     wu[i] = weightAndCarryPairSloppy(SWAP_XY(u31[i]), SWAP_XY(u61[i]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
                       // For an LL test, add -2 as the very initial "carry in"
                       // We'd normally use logical &&, but the compiler whines with warning and bitwise fixes it
                       LL != 0, (LL & (i == 0) & (line==0) & (me == 0)) ? -2 : 0, biglit0, biglit1, &carry[i], &roundMax, &carryMax);
+#endif
 
     // Generate weight shifts and frac_bits for next pair
     m31_combo_counter += m31_combo_bigstep;
@@ -2121,7 +2144,9 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #else
   if (gr < H / WMUL && me >= (WMUL-1) * G_W) {
 #endif
+#if !AEVUM_CARRY_STREAM_ACTIVE
     for (i32 i = 0; i < NW; ++i) { CSSTORE(&carryShuttlePtr[gr * WIDTH + CarryShuttleAccess(lowMe, i)], carry[i]); }
+#endif
 
     // Tell next group that its carries are ready
 #if OLD_FENCE
@@ -2165,7 +2190,9 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
 
   // Shuffle carries up
+#if !AEVUM_CARRY_STREAM_ACTIVE
   shufl_carries_up(lds61, carry, me, lowMe);
+#endif
 
   // Wait until our carries are ready.  The barrier below must be reached by every work-item of the
   // workgroup, so the spin-wait and the barrier sit outside the "me < G_W" guard.
@@ -2200,6 +2227,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   if (gr >= H / WMUL) { bar(); }
 #endif
 
+#if !AEVUM_CARRY_STREAM_ACTIVE
   if (me < G_W) {
 
     // Read from the carryShuttle carries produced by the previous WIDTH group.  Rotate carries from the last WIDTH line.
@@ -2221,6 +2249,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
       }
     }
   }
+#endif
 
   // Apply each 32 or 64 bit carry to the 2 words.  Apply weights.
   for (i32 i = 0; i < NW; ++i) {
@@ -2235,7 +2264,16 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     u32 m61_weight_shift1 = m61_weight_shift;
     // Generate big-word/little-word flag, propagate final carry
     bool biglit0 = frac_bits <= FRAC_BPW_HI;
+#if AEVUM_CARRY_STREAM_ACTIVE
+    // WMUL=1: every lane reads the previous group directly. At the cyclic
+    // seam, lane zero also wraps to the previous slot of the last lane.
+    u32 carryLane = gr == H ? (me + G_W - 1) % G_W : me;
+    u32 carrySlot = (gr == H && me == 0) ? (i + NW - 1) % NW : (u32) i;
+    i64 incoming = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess(carryLane, carrySlot)]);
+    wu[i] = carryFinal(wu[i], incoming, biglit0);
+#else
     wu[i] = carryFinal(wu[i], carry[i], biglit0);
+#endif
     u31[i] = U2(shl(make_Z31(wu[i].x), m31_weight_shift0), shl(make_Z31(wu[i].y), m31_weight_shift1));
     u61[i] = U2(shl(make_Z61(wu[i].x), m61_weight_shift0), shl(make_Z61(wu[i].y), m61_weight_shift1));
 
