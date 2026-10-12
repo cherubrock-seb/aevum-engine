@@ -1,6 +1,6 @@
 # FP32 + Gold64 implementation checkpoint
 
-- Last published SHA before this milestone: `c75013e2e89958250602525d4f351169333a019c`.
+- Last published implementation SHA before final source review: `670cd229f7b077b012848ac0fcf6bfc60e87953c`.
   The containing milestone SHA is `git log -1 --format=%H -- docs/fp32-gold64-implementation-status.md`
   (a commit cannot embed its own SHA); the PR description records the confirmed remote SHA.
 - A1 complete in source: canonical Gold64 arithmetic (host/OpenCL), packed
@@ -23,6 +23,8 @@
   factor 1/3, square-minus-two and an exact per-coefficient balanced carry split
   with signed-64 overflow detection. `Fp32Gold64Reconstruction.h` exposes only
   candidate coefficients: every status retains **UnprovenPrecision**.
+  Final source review adds buffer-alias rejection before any reconstruction
+  dispatch, including the differing 16-byte input / 8-byte carry output strides.
 - Next: `src/cl/fp32_gold64_reconstruct.cl::gold64_split_wide` and
   `Fp32Gold64Reconstruction.h`: implement complete inter-digit/cyclic long-carry
   propagation, then derive the FP32 quotient error bound and engine gate.

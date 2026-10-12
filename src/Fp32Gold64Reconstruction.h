@@ -3,6 +3,7 @@
 // may be made from a near-integer quotient or from this API completing.
 #pragma once
 #include "Fp32Gold64Gpu.h"
+#include <initializer_list>
 
 #ifndef CUDA_BACKEND
 namespace aevum_gold64 {
@@ -24,6 +25,12 @@ class ReconstructionExperiment {
 
   template<class T> static void requireSize(const Buffer<T>& x) {
     if (x.size != n) throw std::invalid_argument("Gold64 reconstruction buffer size mismatch");
+  }
+  static void requireDistinct(std::initializer_list<cl_mem> buffers) {
+    for (auto a = buffers.begin(); a != buffers.end(); ++a)
+      for (auto b = a + 1; b != buffers.end(); ++b)
+        if (*a == *b)
+          throw std::invalid_argument("Gold64 reconstruction buffers must not alias");
   }
   static void requireOperation(U32 factor, bool ll) {
     if ((factor != 1 && factor != 3) || (ll && factor != 1))
@@ -47,6 +54,7 @@ public:
                         Buffer<WideCoefficient>& candidates, Buffer<U32>& status,
                         U32 factor = 1, bool subtractTwo = false) {
     requireSize(input); requireSize(candidates); requireSize(status);
+    requireDistinct({input.get(), candidates.get(), status.get()});
     requireOperation(factor, subtractTwo);
     convolution.square(input, residues, estimates);
     emit(candidates, status, factor, subtractTwo);
@@ -55,6 +63,7 @@ public:
   void multiplyCandidates(const Buffer<std::int64_t>& lhs,
                           Buffer<WideCoefficient>& candidates, Buffer<U32>& status, U32 factor = 1) {
     requireSize(lhs); requireSize(candidates); requireSize(status);
+    requireDistinct({lhs.get(), candidates.get(), status.get()});
     requireOperation(factor, false);
     convolution.multiply(lhs, residues, estimates);
     emit(candidates, status, factor, false);
@@ -64,8 +73,7 @@ public:
                        Buffer<std::int64_t>& digits, Buffer<std::int64_t>& outgoing,
                        Buffer<U32>& status) {
     requireSize(candidates); requireSize(digits); requireSize(outgoing); requireSize(status);
-    if (digits.get() == outgoing.get())
-      throw std::invalid_argument("Gold64 digits and outgoing carries must not alias");
+    requireDistinct({candidates.get(), digits.get(), outgoing.get(), status.get()});
     split(candidates, digits, outgoing, status, cl_uint(exponent));
   }
 };
