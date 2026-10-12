@@ -1,6 +1,6 @@
 # FP32 + Gold64 implementation checkpoint
 
-- Last published SHA before this milestone: `79d43f151d90f19f337fe3d8fcb14fb14e59c4ad`.
+- Last published SHA before this milestone: `c75013e2e89958250602525d4f351169333a019c`.
   The containing milestone SHA is `git log -1 --format=%H -- docs/fp32-gold64-implementation-status.md`
   (a commit cannot embed its own SHA); the PR description records the confirmed remote SHA.
 - A1 complete in source: canonical Gold64 arithmetic (host/OpenCL), packed
@@ -19,12 +19,18 @@
   from the same signed input, exponent and prepared RHS. No CPU data roundtrip.
 - State: callable two-plane coefficient convolution (OpenCL only).
   Original oracle retained; production engine and AUTO unchanged.
-- Next: `src/cl/fp32_gold64_reconstruct.cl`: bounded signed lift and wide
-  carry primitives; preserve a hard block on PRP until the error bound exists.
+- C1 complete in source: actual plane outputs feed signed 128-bit lift,
+  factor 1/3, square-minus-two and an exact per-coefficient balanced carry split
+  with signed-64 overflow detection. `Fp32Gold64Reconstruction.h` exposes only
+  candidate coefficients: every status retains **UnprovenPrecision**.
+- Next: `src/cl/fp32_gold64_reconstruct.cl::gold64_split_wide` and
+  `Fp32Gold64Reconstruction.h`: implement complete inter-digit/cyclic long-carry
+  propagation, then derive the FP32 quotient error bound and engine gate.
 - Risks: arithmetic/codegen and root/weight agreement require validation;
   geometry legality is not a hybrid coefficient/carry capacity bound.
-- Missing: certified quotient bound,
-  wide carry, engine/type integration, all device validation.
+- Missing: certified quotient bound, inter-digit/cyclic long-carry propagation,
+  production carry integration, engine/type/CLI integration, all validation.
+  Milestones C (full carry), D and E are NOT complete. No explicit PRP plan exists.
 - Explicit end-to-end Aevum path: **no**. Ready for GPU PRP validation: **no**.
   Gold64 arithmetic/tables and two-plane square/multiply are ready for owner-led
   compilation and GPU differential validation, not yet validated themselves.
