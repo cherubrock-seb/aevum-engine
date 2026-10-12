@@ -7,8 +7,10 @@ autotune was executed. No KEEP decision or measured speedup.
 - Aevum main/base: 02bbffaee03480cf9d2cf2fe530c2a333c01930d.
 - Woltman gpuowl master: e44e0976584bc3d1dd9c155c86c4d7c1c814b05a.
 - PrMers main inspected: 0e788c3a1f47dfa64f2933ded59eb6d0bc8a3161.
-- Last confirmed remote implementation at checkpoint creation: the base above;
-  this first candidate is the source commit containing this checkpoint.
+- First remote source commit: 2c956221460db6357726e5400f672b56e7f25eda.
+  Follow-up source review moves the PFA11 compile guard after the FFT3161 macro
+  definition; the initial ordering would reject a valid Type1 compile.
+  The final candidate SHA is recorded in the Draft PR.
 - Dedicated branch: exp/pfa11-woltman-ntt. Independent of PR #23 and #22.
 - Previous PFA11 work was reported exact but slower and rejected. Recovered
   history mentions pfa11-r58/64/67/69/70/76/77/78/79/80 and disposable r56

@@ -213,15 +213,6 @@ G_H        "group height" == SMALL_HEIGHT / NH
 #define PFA_RADIX 0u
 #endif
 
-#if PFA_RADIX == 11
-#if FFT_TYPE != FFT3161 || MIDDLE != 11
-#error PFA11 requires FFT3161 and MIDDLE=11
-#endif
-#if !defined(AEVUM_PFA11_DOT128) || (AEVUM_PFA11_DOT128 != 0 && AEVUM_PFA11_DOT128 != 1)
-#error PFA11 requires an explicit DOT128 selection from the host
-#endif
-#endif
-
 #if PFA_RADIX
 #ifndef PFA_LOG2_ROOT_TWO31
 #error PFA_LOG2_ROOT_TWO31 must be supplied for mixed-radix transforms
@@ -263,6 +254,15 @@ typedef ulong2 GF61;        // A complex value using two Z61s.  For a GF(M61^2) 
 // Defines for the various supported FFTs/NTTs.  These match the enumeration in FFTConfig.h.  Sanity check for supported FFT/NTT.
 #define FFT64           0
 #define FFT3161         1
+#if PFA_RADIX == 11
+// FFT3161 must be defined before evaluating this preprocessor condition.
+#if FFT_TYPE != FFT3161 || MIDDLE != 11
+#error PFA11 requires FFT3161 and MIDDLE=11
+#endif
+#if !defined(AEVUM_PFA11_DOT128) || (AEVUM_PFA11_DOT128 != 0 && AEVUM_PFA11_DOT128 != 1)
+#error PFA11 requires an explicit DOT128 selection from the host
+#endif
+#endif
 #define FFT3261         2
 #define FFT61           3
 #define FFT323161       4
