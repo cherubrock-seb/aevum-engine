@@ -39,6 +39,18 @@ void spin() {
 #define WMUL 2
 #endif
 
+#ifndef AEVUM_CARRY_LDS_STREAM_V1
+#define AEVUM_CARRY_LDS_STREAM_V1 0
+#endif
+// WMUL=2 needs a cross-line handoff: stream into the existing second
+// line's LDS scratch instead of retaining a private carry array.
+#define AEVUM_CARRY_LDS_STREAM_ACTIVE \
+  (AEVUM_CARRY_LDS_STREAM_V1 == 1 && FFT_TYPE == FFT3161 && WMUL == 2 && \
+   !PFA_RADIX && !CUDA_BACKEND && __OPENCL_C_VERSION__ >= 200 && \
+   (AMDGPU || NVIDIAGPU) && (WIDTH == 512 || WIDTH == 1024) && \
+   (NW == 4 || NW == 8) && (SHUFL_BYTES_W == 8 || SHUFL_BYTES_W == 16) && \
+   LDS_BYTES >= WIDTH * 8)
+
 #if AMDGPU
 #define CarryShuttleAccess(me,i)        ((me) * NW + (i))                       // Generates denser global_load_dwordx4 instructions
 //#define CarryShuttleAccess(me,i)      ((me) * 4 + (i)%4 + (i)/4 * 4*G_W)      // Also generates global_load_dwordx4 instructions and unit stride when NW=8
@@ -2028,7 +2040,13 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   Word2 wu[NW];
 
   P(i64) carryShuttlePtr = (P(i64)) carryShuttle;
+#if AEVUM_CARRY_LDS_STREAM_ACTIVE
+  // Same slots as WMUL=2 shufl_carries_up: first line produces into
+  // the second line's scratch region; that line consumes its own slots.
+  local i64 *stagedCarry = (local i64 *) lds61 + LDS_BYTES / sizeof(i64);
+#else
   i64 carry[NW+1];
+#endif
 
   u32 roundMax = 0;
   float carryMax = 0;
@@ -2073,6 +2091,12 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   // Apply the inverse weights and carry propagate pairs to generate the output carries
 
+#if AEVUM_CARRY_LDS_STREAM_ACTIVE
+  // Protect the inverse FFT's final LDS reads before streaming stores.
+  // Group zero never consumes local carries and makes no staged stores.
+  if (gr != 0) { bar(); }
+#endif
+
   for (u32 i = 0; i < NW; ++i) {
     // Generate the second weight shifts
     u32 m31_weight_shift0 = m31_weight_shift;
@@ -2091,10 +2115,23 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Apply the inverse weights, optionally compute roundoff error, and convert to integer.  Also apply MUL3 here.
     // Then propagate carries through two words (the first carry does not have to be accurately calculated because it will
     // be accurately calculated by carryFinal later on).  The second carry must be accurate for output to the carry shuttle.
+#if AEVUM_CARRY_LDS_STREAM_ACTIVE
+    i64 outgoingCarry;
+    wu[i] = weightAndCarryPairSloppy(SWAP_XY(u31[i]), SWAP_XY(u61[i]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
+                      // For an LL test, add -2 as the very initial "carry in"
+                      // We'd normally use logical &&, but the compiler whines with warning and bitwise fixes it
+                      LL != 0, (LL & (i == 0) & (line==0) & (me == 0)) ? -2 : 0, biglit0, biglit1, &outgoingCarry, &roundMax, &carryMax);
+    if (me < G_W) {
+      if (gr != 0) { stagedCarry[i * G_W + lowMe] = outgoingCarry; }
+    } else if (gr < H / WMUL) {
+      CSSTORE(&carryShuttlePtr[gr * WIDTH + CarryShuttleAccess(lowMe, i)], outgoingCarry);
+    }
+#else
     wu[i] = weightAndCarryPairSloppy(SWAP_XY(u31[i]), SWAP_XY(u61[i]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
                       // For an LL test, add -2 as the very initial "carry in"
                       // We'd normally use logical &&, but the compiler whines with warning and bitwise fixes it
                       LL != 0, (LL & (i == 0) & (line==0) & (me == 0)) ? -2 : 0, biglit0, biglit1, &carry[i], &roundMax, &carryMax);
+#endif
 
     // Generate weight shifts and frac_bits for next pair
     m31_combo_counter += m31_combo_bigstep;
@@ -2121,7 +2158,9 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #else
   if (gr < H / WMUL && me >= (WMUL-1) * G_W) {
 #endif
+#if !AEVUM_CARRY_LDS_STREAM_ACTIVE
     for (i32 i = 0; i < NW; ++i) { CSSTORE(&carryShuttlePtr[gr * WIDTH + CarryShuttleAccess(lowMe, i)], carry[i]); }
+#endif
 
     // Tell next group that its carries are ready
 #if OLD_FENCE
@@ -2165,7 +2204,13 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #endif
 
   // Shuffle carries up
+#if AEVUM_CARRY_LDS_STREAM_ACTIVE
+  // Producers have filled the second line's slots. Preserve the full
+  // workgroup producer/consumer barrier before any staged carry load.
+  bar();
+#else
   shufl_carries_up(lds61, carry, me, lowMe);
+#endif
 
   // Wait until our carries are ready.  The barrier below must be reached by every work-item of the
   // workgroup, so the spin-wait and the barrier sit outside the "me < G_W" guard.
@@ -2200,6 +2245,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   if (gr >= H / WMUL) { bar(); }
 #endif
 
+#if !AEVUM_CARRY_LDS_STREAM_ACTIVE
   if (me < G_W) {
 
     // Read from the carryShuttle carries produced by the previous WIDTH group.  Rotate carries from the last WIDTH line.
@@ -2222,6 +2268,8 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     }
   }
 
+#endif
+
   // Apply each 32 or 64 bit carry to the 2 words.  Apply weights.
   for (i32 i = 0; i < NW; ++i) {
     // Generate the second weight shifts
@@ -2235,7 +2283,19 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     u32 m61_weight_shift1 = m61_weight_shift;
     // Generate big-word/little-word flag, propagate final carry
     bool biglit0 = frac_bits <= FRAC_BPW_HI;
+#if AEVUM_CARRY_LDS_STREAM_ACTIVE
+    i64 incomingCarry;
+    if (me < G_W) {
+      u32 sourceLane = gr < H / WMUL ? me : (me + G_W - 1) % G_W;
+      u32 sourceSlot = (gr < H / WMUL || me != 0) ? (u32) i : ((u32) i + NW - 1) % NW;
+      incomingCarry = CSLOAD(&carryShuttlePtr[(gr - 1) * WIDTH + CarryShuttleAccess(sourceLane, sourceSlot)]);
+    } else {
+      incomingCarry = stagedCarry[i * G_W + lowMe];
+    }
+    wu[i] = carryFinal(wu[i], incomingCarry, biglit0);
+#else
     wu[i] = carryFinal(wu[i], carry[i], biglit0);
+#endif
     u31[i] = U2(shl(make_Z31(wu[i].x), m31_weight_shift0), shl(make_Z31(wu[i].y), m31_weight_shift1));
     u61[i] = U2(shl(make_Z61(wu[i].x), m61_weight_shift0), shl(make_Z61(wu[i].y), m61_weight_shift1));
 
