@@ -492,7 +492,12 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
       for (const u32 bits : {31u, 61u}) {
         const u64 p = (u64(1) << bits) - 1;
         if ((p - 1) % 11) throw std::runtime_error("PFA11 requires an order-11 base-field root");
-        const u64 root = pfaPowMod(5, (p - 1) / 11, p);
+        u64 root = pfaPowMod(5, (p - 1) / 11, p);
+        // Unlike radices 3/7/9, PFA11 has no inherited root constant. Do not
+        // assume their generator gives order 11: find a nontrivial 11th root
+        // if necessary. Since 11 is prime, nontrivial implies exact order 11.
+        for (u64 generator = 2; root == 1 && generator < p; ++generator)
+          root = pfaPowMod(generator, (p - 1) / 11, p);
         if (root == 1 || pfaPowMod(root, 11, p) != 1)
           throw std::runtime_error("PFA11 root-order proof failed");
         const u64 inv2 = (p + 1) / 2;

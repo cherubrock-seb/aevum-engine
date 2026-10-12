@@ -8,11 +8,12 @@ autotune was executed. No KEEP decision or measured speedup.
 - Woltman gpuowl master: e44e0976584bc3d1dd9c155c86c4d7c1c814b05a.
 - PrMers main inspected: 0e788c3a1f47dfa64f2933ded59eb6d0bc8a3161.
 - Last confirmed remote implementation at this checkpoint:
-  e9b049c590a14fe1b4bec075a1a9f36be0e929fa.
+  642ba5ee8f0a22c7e31ab964c2c5d387d3941d2b (GF31 batching integrated).
   Initial source commit: 2c956221460db6357726e5400f672b56e7f25eda.
   Follow-up source review moved the PFA11 compile guard after the FFT3161 macro
   definition; the initial ordering would reject a valid Type1 compile.
-  This source milestone adds GF31 batching. Final SHA is recorded in the Draft
+  Final source review also makes root selection independent of the assumption
+  that generator 5 works for the new radix. Final SHA is recorded in the Draft
   PR, since a commit cannot embed its own SHA.
 - Draft PR: https://github.com/cherubrock-seb/aevum-engine/pull/24.
 - Dedicated branch: exp/pfa11-woltman-ntt. Independent of PR #23 and #22.
@@ -53,9 +54,10 @@ that layout and only supports the single odd middle, not composite middles.
   PFA11 rejects overcapacity even with -od/AEVUM_ALLOW_OVERCAPACITY_PLAN.
   AUTO enumeration and existing radices' limits/policies are unchanged.
 - src/Gpu.cpp: independently guard direct construction, generate order-11
-  roots and cosine/sine constants for both fields from generator 5; check
-  root order; inject constants and DOT128 mode into compiler configuration.
-- src/UseOptions.h: AEVUM_PFA11_DOT128 compiler option.
+  roots and cosine/sine constants for both fields, trying generator 5 and
+  deterministically finding a nontrivial root if needed; check exact root
+  order; inject constants and candidate modes into compiler configuration.
+- src/UseOptions.h: AEVUM_PFA11_DOT128 and AEVUM_PFA11_GF31_DOT64 options.
 - src/cl/base.cl: reject unsupported PFA11 type/middle/missing mode at compile.
 - src/cl/fft-middle.cl: pfaDft11 GF31 paired reference and GF61 DOT128/reference,
   actual forward/inverse dispatch, and normalized inverse row twiddle.
