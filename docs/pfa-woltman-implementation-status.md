@@ -8,9 +8,10 @@ No KEEP decision and no measured speedup.
 - Aevum main baseline: 02bbffaee03480cf9d2cf2fe530c2a333c01930d.
 - PrMers main reference: 0e788c3a1f47dfa64f2933ded59eb6d0bc8a3161 (no integration change needed).
 - Woltman gpuowl master reference: e44e0976584bc3d1dd9c155c86c4d7c1c814b05a.
-- Last confirmed remote implementation commit at checkpoint creation: baseline above.
-  The first candidate is the source commit containing this checkpoint; its remote
-  SHA will be recorded with the next implementation milestone and in the Draft PR.
+- Last confirmed remote implementation commit when writing this milestone:
+  c76b53ff529adbc5f524b9aaf9fe18a5dbcfe776 (PFA7 DOT128).
+  This source commit adds the PFA3 milestone; the Draft PR records its remote SHA.
+- Draft PR: https://github.com/cherubrock-seb/aevum-engine/pull/23.
 - Dedicated branch: exp/pfa-woltman-performance. PR #22 and its FP32/Gold64 branch
   are separate. No AUTO policy, capacity, overflow/carry guard or selector change.
 
@@ -27,14 +28,15 @@ No KEEP decision and no measured speedup.
    Keep the base-field roots, pair order, ordinary GF61 output range and inverse
    scale. Dependency: existing mul64/mad64/weakModM61/modM61q in math.cl.
    Principal risks: range assumptions and compiler unrolling/register spills.
-2. **Next: normalize the shared inverse row twiddle.**
+2. **Selected next: normalize the shared inverse row twiddle.**
    Upstream pfaMiddleOut(GF31*/GF61*) scales its row twiddle by 1/PFA.
    Aevum pfaInverseMiddle/pfaMiddleTwiddle still scale each GF31 output and
    each radix-3 GF61 output separately; NVIDIA GF61 radix 7/9 already fuse this.
    Remove repeated scalar normalization without changing the transform layout.
    Dependency: modify inverse butterfly and its following twiddle together.
    Principal risk: missing/double normalization or inadvertently scaling forward
-   transforms. Inspect actual upstream radix-3/radix-9 paths before extending.
+   transforms. Upstream pfaDftR's radix-3 and 3x3 radix-9 paths were inspected in
+   both GF31/GF61; normalization is outside those butterflies in pfaMiddleOut.
 
 The current PrMers docs/PRMERS_AUTO_VS_PRPLL.md comparison was read; its historical
 devices, commits, types and timings are not evidence for this candidate.
@@ -78,6 +80,28 @@ pc+qs <= 5*M61+epsilon and pc-qs+3*M61 is positive and < 8*M61.
 Output is reduced back to ordinary GF61 range. Root direction, odd-axis scale,
 Good-Thomas ordering and binary normalization are preserved.
 
+## Implemented milestone: PFA3 inverse twiddle normalization
+
+Selection: AEVUM_PFA_FUSED_INVERSE=1 with a legal explicit
+pfa3:1:<width>:3:<height>:<variant> plan. Set AEVUM_PFA7_DOT128=0 or unset it.
+The Gpu.cpp gate accepts only PFA3 GF31+GF61 at this milestone and rejects Apple.
+UseOptions.h also accepts the same name through -use. Off/unset is the baseline.
+
+src/cl/fftmiddleout.cl defines inverse-only scaling constants before including
+fft-middle.cl. pfaInverseMiddle returns the unscaled radix-3 outputs, and
+pfaMiddleTwiddle applies 1/3 once to the common row twiddle in each NTT plane.
+Thus three complex-by-scalar normalizations become one per plane. The general
+cmul used by WADD does not require a unit-circle twiddle. The base-field scalar
+commutes with SWAP_XY; binary carry normalization stays unchanged. Middle-in
+does not define these constants and keeps its forward transform unchanged.
+
+The existing square and prepared multiply schedules both invoke middle-out;
+no buffer, API, tail, root table or prepared-cache representation changes.
+KernelCompiler.cpp includes common definitions and kernel source in its cache
+hash. Remaining risks are missing/double scale across compile variants and
+backend code generation; only targeted source review was performed.
+
+
 ## Owner validation handoff (not executed)
 
 Baseline SHA is above; candidate SHA is the confirmed Draft PR head.
@@ -104,9 +128,11 @@ legal production plan. Instruction counts are not performance measurements.
 ## Remaining work / exact next step
 
 PFA7: compile and differential validation pending; GF31 and FP32 are unchanged.
-PFA3/PFA9: no new candidate yet. Their 3x3 decomposition and quick arithmetic
-must not be assumed faster from source alone.
-Next implementation: examine upstream inverse scale and radix-3/radix-9 call
-contracts, then connect an opt-in fused inverse twiddle to both affected stages
-if it preserves the existing layout and normalization. Commit separately.
+PFA3: inverse normalization candidate integrated; compilation/validation pending.
+PFA9: no new candidate yet. Its existing 3x3 decomposition is retained; wide
+PFA7 dots do not transfer to the different radix-3 identity. Quick arithmetic
+is not replayed as a new experiment.
+Next implementation: extend inverse-only normalization to GF31 PFA9 and to
+GF61 PFA9 where NVIDIA does not already fuse it. Preserve that existing NVIDIA
+path and commit the connected stages together.
 

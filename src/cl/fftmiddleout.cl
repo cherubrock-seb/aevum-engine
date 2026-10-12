@@ -1,6 +1,13 @@
 // Copyright (C) Mihai Preda and George Woltman
 
 #include "base.cl"
+// Inverse-only contract: omit per-output odd-axis normalization and apply it
+// once to the common binary row twiddle. Never define these in middle-in.
+// Adapted from Woltman pfaMiddleOut at e44e0976584bc3d1dd9c155c86c4d7c1c814b05a.
+#if AEVUM_PFA_FUSED_INVERSE && PFA_RADIX == 3
+#define AEVUM_PFA_MIDOUT_INV31 1431655765U
+#define AEVUM_PFA_MIDOUT_INV61 1537228672809129301UL
+#endif
 #if NVIDIAGPU && PFA_RADIX == 7 && NTT_GF61
 #define AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE 1
 #endif
@@ -650,3 +657,4 @@ KERNEL(256) fftMiddleOutGF61(P(T2) out, P(T2) in, Trig trig) {
 #endif
 
 #endif
+

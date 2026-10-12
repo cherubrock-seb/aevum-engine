@@ -290,23 +290,31 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
   // Explicit experimental arithmetic selection, shared by CLI and Engine API.
   // Resolve here (before compilation) so an incompatible plan cannot silently
   // ignore the environment request. The define is part of the compiler key.
-  if (const char* value = std::getenv("AEVUM_PFA7_DOT128")) {
-    const auto it = config.find("AEVUM_PFA7_DOT128");
-    if (it != config.end() && it->second != value)
-      throw std::runtime_error("conflicting AEVUM_PFA7_DOT128 selections");
-    config["AEVUM_PFA7_DOT128"] = value;
-  }
-  if (const auto it = config.find("AEVUM_PFA7_DOT128"); it != config.end()) {
-    if (it->second != "0" && it->second != "1")
-      throw std::runtime_error("AEVUM_PFA7_DOT128 must be 0 or 1");
-    if (it->second == "1") {
-      if (fft.pfa_radix != 7 || fft.shape.middle != 7 || !fft.NTT_GF61)
-        throw std::runtime_error("AEVUM_PFA7_DOT128 requires a PFA7 plan with a GF61 plane");
-#if defined(__APPLE__)
-      throw std::runtime_error("AEVUM_PFA7_DOT128 does not support the Apple staged pipeline");
-#endif
-      if (doLog) log("Experimental AEVUM_PFA7_DOT128=1: plan=%s GF61 middle-in/out; unvalidated.\n", fft.spec().c_str());
+  for (const char* key : {"AEVUM_PFA7_DOT128", "AEVUM_PFA_FUSED_INVERSE"}) {
+    if (const char* value = std::getenv(key)) {
+      const auto it = config.find(key);
+      if (it != config.end() && it->second != value)
+        throw std::runtime_error(string("conflicting selections for ") + key);
+      config[key] = value;
     }
+    if (const auto it = config.find(key); it != config.end() && it->second != "0" && it->second != "1")
+      throw std::runtime_error(string(key) + " must be 0 or 1");
+  }
+  if (config.count("AEVUM_PFA7_DOT128") && config.at("AEVUM_PFA7_DOT128") == "1") {
+    if (fft.pfa_radix != 7 || fft.shape.middle != 7 || !fft.NTT_GF61)
+      throw std::runtime_error("AEVUM_PFA7_DOT128 requires a PFA7 plan with a GF61 plane");
+#if defined(__APPLE__)
+    throw std::runtime_error("AEVUM_PFA7_DOT128 does not support the Apple staged pipeline");
+#endif
+    if (doLog) log("Experimental AEVUM_PFA7_DOT128=1: plan=%s GF61 middle-in/out; unvalidated.\n", fft.spec().c_str());
+  }
+  if (config.count("AEVUM_PFA_FUSED_INVERSE") && config.at("AEVUM_PFA_FUSED_INVERSE") == "1") {
+    if (fft.pfa_radix != 3 || fft.shape.middle != 3 || !fft.NTT_GF31 || !fft.NTT_GF61)
+      throw std::runtime_error("AEVUM_PFA_FUSED_INVERSE requires a PFA3 GF31+GF61 plan");
+#if defined(__APPLE__)
+    throw std::runtime_error("AEVUM_PFA_FUSED_INVERSE does not support the Apple staged pipeline");
+#endif
+    if (doLog) log("Experimental AEVUM_PFA_FUSED_INVERSE=1: plan=%s inverse NTT row twiddle; unvalidated.\n", fft.spec().c_str());
   }
 
 #if defined(__APPLE__)
