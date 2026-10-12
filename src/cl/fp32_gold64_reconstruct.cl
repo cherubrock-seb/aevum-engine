@@ -307,3 +307,24 @@ void gold64_status_finish(__global const uint4 * restrict partial,
   const uint4 report = gold64_report_reduce(data);
   if (!lane) summary[0] = report;
 }
+
+// Register import / exact linear operations reuse the same cyclic normalizer.
+// Inputs may coincide (read-only); neither may alias either output buffer.
+__kernel __attribute__((reqd_work_group_size(256,1,1)))
+void gold64_register_coefficients(__global const long * lhs,
+                                  __global const long * rhs,
+                                  __global ulong2 * restrict candidate,
+                                  __global uint * restrict status,
+                                  uint operation, uint value) {
+  const uint j = (uint)get_global_id(0);
+  ulong2 x = gold64_wide_signed(lhs[j]);
+  uint flags = G64_UNPROVEN_PRECISION;
+  if (operation == 1u) x = gold64_wide_add_checked(x, gold64_wide_signed(rhs[j]), &flags);
+  else if (operation == 2u) {
+    const ulong2 y = gold64_wide_signed(rhs[j]);
+    x = gold64_wide_add_checked(x, gold64_wide_add(~y, (ulong2)(1UL, 0UL)), &flags);
+  } else if (operation == 3u && !j) x = gold64_wide_add_checked(x, gold64_wide_signed(-(long)value), &flags);
+  else if (operation > 3u) flags |= G64_UNSUPPORTED_OPERATION;
+  candidate[j] = x;
+  status[j] = flags;
+}

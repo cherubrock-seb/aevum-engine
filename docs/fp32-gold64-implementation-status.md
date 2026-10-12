@@ -1,6 +1,6 @@
 # FP32 + Gold64 implementation checkpoint
 
-- Last confirmed remote implementation SHA before this milestone: `9234d42d5336203c5eae58aab34da633d42cdcea`.
+- Last confirmed remote implementation SHA before this milestone: `7bdd3cfcbd016c78e6638b9185f179e9031351f7`.
   The containing milestone SHA is `git log -1 --format=%H -- docs/fp32-gold64-implementation-status.md`
   (a commit cannot embed its own SHA); the PR description records the confirmed remote SHA.
 - A1 complete in source: canonical Gold64 arithmetic (host/OpenCL), packed
@@ -17,8 +17,8 @@
   swaps inverse components and restores natural digit order for both planes.
   A common HybridConvolution API computes modular and approximate coefficients
   from the same signed input, exponent and prepared RHS. No CPU data roundtrip.
-- State: callable two-plane coefficient convolution (OpenCL only).
-  Original oracle retained; production engine and AUTO unchanged.
+- State: explicit supervised-validation Engine API backend (OpenCL only).
+  Original oracle retained; production execution and AUTO unchanged.
 - C1 complete in source: actual plane outputs feed signed 128-bit lift,
   factor 1/3, square-minus-two and an exact per-coefficient balanced carry split
   with signed-64 overflow detection. `Fp32Gold64Reconstruction.h` exposes only
@@ -56,15 +56,37 @@
   Type2 limits are not reused. Factor 3 is applied exactly after the lift, so
   a wrong lift becomes a 3*p error, not a precision margin. Checked signed-wide
   carry handling does not validate the chosen multiple of the Gold64 prime.
-- Next: explicit experimental FFT configuration and supervised EngineApi
-  register execution; keep every production workload rejected for this type.
+- D complete in source: FFT32GOLD64=54, canonical explicit plan
+  `gold64-validation:512:8:512:202`, independent NTT_GOLD64 flag and zero
+  certified BPW/maxExp. Only format widths 1..33 are admitted; no AUTO/tune
+  enumeration or validated selector window changes. Stock Gpu rejects type 54.
+- E complete for supervised candidate execution: `Fp32Gold64Engine.h`
+  RegisterEngine owns its ordered queue, register/scratch buffers, both planes,
+  roots/weights, prepared RHS and complete carry pipeline. EngineApi Runtime
+  selects it only with `create_ex(..., AEVUM_WORKLOAD_GOLD64_VALIDATION)` and
+  an explicit Gold64 plan. Other workloads fail before device allocation.
+  Register set/get compact words, copy, prepare, square, factor 3, multiply,
+  add/subtract, equality and diagnostic square-minus-two are wired. One RHS
+  cache is invalidated on register mutation and rebuilt on demand. Result
+  registers swap only after global fatal-error rejection, preserving old data
+  on arithmetic failure. There is no GF61 fallback.
+- Diagnostics exported: `aevum_engine_gold64_diagnostics`, `_get_digits` and
+  `_square_minus_two`. Every candidate operation keeps UnprovenPrecision.
+  C API production entry points/ABI remain intact; no PrMers change required
+  to call create_ex from a supervised C API harness. Existing PrMers workload
+  values cannot enable this backend accidentally. CUDA rejects the new plan.
+- Next exact step: owner-led OpenCL compilation and differential validation
+  through create_ex at q=136279841, including upload/readback, hostile cyclic
+  carry, square/factor-3/minus-two, prepared RHS invalidation and exact residues.
+  Establish a combined FP32 error certificate before considering PRP/LL enablement.
 - Risks: arithmetic/codegen and root/weight agreement require validation;
   geometry legality is not a hybrid coefficient/carry capacity bound.
-- Missing: certified quotient bound, engine/type/CLI integration, all validation.
-  Full carry is implemented in source, not compiled or validated. No explicit
-  operational PRP plan exists; UnprovenPrecision remains unconditional.
-- Explicit end-to-end Aevum path: **no**. Ready for GPU PRP validation: **no**.
-  Gold64 arithmetic/tables, two-plane square/multiply and normalized candidate
-  APIs are ready for owner-led compilation and GPU differential validation,
-  not yet validated themselves.
+- Missing: certified quotient bound and all compilation/device validation.
+  Production PRP/LL, standalone CLI execution, CUDA, production timing counters
+  and performance tuning are intentionally unavailable for this experimental
+  type. Compact upload/readback/equality reuse Aevum's host bit packing; the
+  GPU arithmetic hot path never copies coefficients to the CPU.
+- Full cyclic carry in source: **yes**. Real Aevum Engine API path: **yes**,
+  explicit supervised validation only. Ready to BEGIN owner-led GPU compilation
+  and differential validation: **yes**. Ready for production PRP/LL: **no**.
 - This session: source review only; no builds, tests, benchmarks or CI polling.

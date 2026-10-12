@@ -34,7 +34,10 @@ enum aevum_engine_workload {
   AEVUM_WORKLOAD_PM1 = 3,
   AEVUM_WORKLOAD_PM1_LOWMEM = 4,
   AEVUM_WORKLOAD_PM1_ULTRALOWMEM = 5,
-  AEVUM_WORKLOAD_ECM = 6
+  AEVUM_WORKLOAD_ECM = 6,
+  // Explicit candidate arithmetic only. Never use for a production PRP/LL run.
+  // Requires fft_spec="gold64-validation:512:8:512:202" and OpenCL.
+  AEVUM_WORKLOAD_GOLD64_VALIDATION = 0x1000
 };
 
 AEVUM_ENGINE_API const char* aevum_engine_version(void);
@@ -110,6 +113,30 @@ AEVUM_ENGINE_API int aevum_engine_equal(aevum_engine_handle handle, size_t lhs, 
 AEVUM_ENGINE_API int aevum_engine_debug_square_trace(
     aevum_engine_handle handle, size_t src, uint64_t* trace, size_t trace_count);
 
+// Available only on the explicit Gold64 validation handle. Success of a
+// register operation means a candidate was produced, NOT mathematical proof.
+// Every report retains UNPROVEN_PRECISION. first_fatal_block is UINT32_MAX
+// when no fatal block exists; blocks contain 256 natural-order digits.
+enum aevum_gold64_status {
+  AEVUM_GOLD64_UNPROVEN_PRECISION = 1, AEVUM_GOLD64_NONFINITE = 2,
+  AEVUM_GOLD64_QUOTIENT_RANGE = 4, AEVUM_GOLD64_FRACTIONAL_HINT = 8,
+  AEVUM_GOLD64_INVALID_RESIDUE = 16, AEVUM_GOLD64_UNSUPPORTED_OPERATION = 32,
+  AEVUM_GOLD64_CARRY_OVERFLOW = 64, AEVUM_GOLD64_CARRY_NONCONVERGENCE = 128
+};
+typedef struct aevum_gold64_diagnostics {
+  uint32_t flags;
+  uint32_t first_fatal_block;
+  uint32_t fatal_blocks;
+  uint32_t unproven_blocks;
+} aevum_gold64_diagnostics;
+AEVUM_ENGINE_API int aevum_engine_gold64_diagnostics(
+    aevum_engine_handle handle, aevum_gold64_diagnostics* report);
+AEVUM_ENGINE_API int aevum_engine_gold64_get_digits(
+    aevum_engine_handle handle, size_t src, int64_t* digits, size_t count);
+AEVUM_ENGINE_API int aevum_engine_gold64_square_minus_two(
+    aevum_engine_handle handle, size_t reg);
+
 #ifdef __cplusplus
 }
 #endif
+

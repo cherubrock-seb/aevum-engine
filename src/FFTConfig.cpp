@@ -151,6 +151,10 @@ FFTShape::FFTShape(enum FFT_TYPES t, u32 w, u32 m, u32 h) :
   fft_type{t}, width{w}, middle{m}, height{h} {
   assert(w && m && h);
 
+  // This is an explicit validation format, with NO certified exponent limit.
+  // Never infer its capacity from another FFT type or a fallback BPW table.
+  if (t == FFT32GOLD64) { bpw.fill(0); return; }
+
   // Un-initialized shape, don't set BPW
   if (w == 1 && m == 1 && h == 1) { return; }
 
@@ -241,6 +245,8 @@ bool FFTShape::isFavoredShape() const {
 
 FFTConfig::FFTConfig(const string& input_spec) {
   string spec = input_spec;
+  const string gold64_prefix = "gold64-validation:";
+  if (startsWith(spec, gold64_prefix)) spec = "54:" + spec.substr(gold64_prefix.size());
   u32 requested_pfa = 0;
   bool adaptive_type4 = false;
   bool force_full_type4 = false;
@@ -341,10 +347,17 @@ FFTConfig::FFTConfig(FFTShape shape, u32 variant, enum CARRY_KIND carry) :
   else if (shape.fft_type == FFT6431)   FFT_FP64 = 1, FFT_FP32 = 0, NTT_GF31 = 1, NTT_GF61 = 0, WordSize = 8;
   else if (shape.fft_type == FFT31)     FFT_FP64 = 0, FFT_FP32 = 0, NTT_GF31 = 1, NTT_GF61 = 0, WordSize = 4;
   else if (shape.fft_type == FFT32)     FFT_FP64 = 0, FFT_FP32 = 1, NTT_GF31 = 0, NTT_GF61 = 0, WordSize = 4;
+  else if (shape.fft_type == FFT32GOLD64) {
+    if (shape.width != 512 || shape.middle != 8 || shape.height != 512 || variant != 202 || carry == CARRY_32)
+      throw std::runtime_error("Gold64 validation requires 512:8:512:202 with 64-bit digit storage");
+    FFT_FP64 = false; FFT_FP32 = true; NTT_GF31 = false; NTT_GF61 = false;
+    NTT_GOLD64 = true; WordSize = 8; this->carry = CARRY_64;
+  }
   else throw "FFT type";
 }
 
 string FFTConfig::spec() const {
+  if (isGold64()) return "gold64-validation:512:8:512:202";
   string s = shape.spec() + ":" + to_string(variant_W(variant)) + to_string(variant_M(variant)) + to_string(variant_H(variant));
   if (isPfa()) s = string("pfa") + to_string(pfa_radix) + ":" + s;
   return carry == CARRY_AUTO ? s : (s + (carry == CARRY_32 ? ":0" : ":1"));
@@ -428,6 +441,18 @@ FFTConfig FFTConfig::promoteKnownUnsafeOrdinaryPrp(
 }
 
 FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
+  if (isGold64Request(spec)) {
+#if defined(CUDA_BACKEND)
+    throw std::runtime_error("Gold64 validation is implemented only for OpenCL");
+#else
+    FFTConfig fft(spec);
+    // Format/geometry only. maxBpw/maxExp deliberately remain zero. The engine
+    // separately requires the supervised-validation workload before allocation.
+    if (E < fft.size() || E > 33u * fft.size())
+      throw std::runtime_error("Gold64 validation requires digit widths in [1,33]; this is not a capacity certificate");
+    return fft;
+#endif
+  }
 #if defined(__APPLE__)
   // Apple exposes OpenCL 1.2 through a legacy compiler.  The staged FFT3161
   // path is supported, while the monolithic Type-4 and native-PFA pipelines
@@ -850,3 +875,4 @@ string numberK(u64 n) {
     return to_string(n);
   }
 }
+

@@ -1,4 +1,4 @@
-# Experimental FP32 + Gold64 convolution
+# Experimental FP32 + Gold64 backend
 
 **Status: source implementation, incomplete PRP backend, unvalidated.**
 The current interruption checkpoint is
@@ -20,11 +20,11 @@ transform geometries representing the same IBDWT convolution:
 | Approximate plane | `Fp32Gold64Gpu.h`, `fp32_gold64_bridge.cl` | Existing Aevum FP32 kernels at 512:8:512/202, signed 64-bit input, tiled layout bridge |
 | Candidate lift/carry | `Fp32Gold64Reconstruction.h`, `fp32_gold64_reconstruct.cl` | Signed 128-bit coefficients, factor 1/3, square-minus-two, full cyclic normalization and global diagnostics |
 
-The headers expose source-level OpenCL experiments using Aevum's Queue,
-Buffer and KernelCompiler. No FFT type, CLI plan, Engine API operation or
-production AUTO policy exposes this as an operational hybrid PRP backend.
-The native CUDA backend is not wired. No existing transform/carry kernel was
-rewritten; the added helper in Gpu.cpp reuses its configuration/weight builders.
+The supervised Engine API owns the two-plane OpenCL dispatch, buffers and
+register lifecycle through `Fp32Gold64Engine.h`. Production workloads, the old
+create API, standalone stock Gpu execution and native CUDA reject the new type.
+AUTO and validated selectors are unchanged. The added helper in Gpu.cpp reuses
+the existing FP32 configuration/weight builders and optimized transform kernels.
 
 ## Common mathematical contract
 
@@ -55,8 +55,9 @@ exact integer operations on that candidate.
   M136279841 capacity. A rigorous FP32 reconstruction-error bound is missing.
 - Full cyclic carry is implemented in source, with explicit overflow and
   consistency flags. Its output remains a normalized reconstruction candidate.
-- Gerbicz/register operations, persistence and a dedicated engine/type path
-  remain unwired. Engine integration and all validation remain incomplete.
+- All compilation/device validation and a rigorous error certificate remain
+  missing. Production PRP/LL/Gerbicz acceptance, standalone execution and
+  production timing counters are disabled. No performance claim is made.
 
 ## Validation still required
 
@@ -80,7 +81,35 @@ Selected Gold64 arithmetic and packed transform functions derive from Marin
 4M dispatch sequence from `include/marin/engine_gpu.h`.
 The MIT notice is retained in `licenses/Marin-MIT.txt`. Existing Aevum FP32
 kernels and repository licensing are retained.
-# Cyclic carry and precision-policy continuation
+## Engine entry point
+
+The actual Engine API now supports the explicit plan
+`gold64-validation:512:8:512:202` (numeric FFT type 54). Its certified maxExp
+remains zero. Only the new supervised workload enables execution:
+
+```cpp
+aevum_engine_handle h = aevum_engine_create_ex(
+    136279841, 3, device_index, 1,
+    "gold64-validation:512:8:512:202", nullptr,
+    AEVUM_WORKLOAD_GOLD64_VALIDATION);
+// Check h and every API return; failures use aevum_engine_last_error().
+// Existing set/get_words, prepare, square_mul, mul, add/sub/copy/equal apply.
+// aevum_engine_gold64_diagnostics(h, &report) always reports unproven precision.
+// aevum_engine_gold64_get_digits reads 4194304 balanced natural-order int64s.
+// aevum_engine_gold64_square_minus_two performs a fused diagnostic candidate step.
+// Destroy h after validation; these outputs are never PRP/LL certificates.
+```
+
+Factors 1 and 3 are supported. The prepared RHS cache holds one register and
+rebuilds after invalidation. Input and result buffers remain distinct even for
+in-place API operations; the register is replaced only after global fatal-error
+rejection. Compact upload/readback/equality use the existing Aevum host packing.
+Arithmetic, reconstruction and carry stay on the GPU, with a 16-byte diagnostic
+readback before accepting each candidate operation. No PrMers repository change
+is needed for a C API validation harness; existing PrMers production workloads
+are explicitly rejected for this plan.
+
+## Cyclic carry and precision policy
 
 The normalized candidate APIs now use 256-digit segments and a two-level
 three-state map prefix scan. They solve the cyclic carry fixed point in five

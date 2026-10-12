@@ -274,6 +274,8 @@ u64 pfaPowMod(u64 a, u64 e, u64 p) {
 
 string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<KeyVal>& extraConf, u64 E, bool doLog,
                  bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul) {
+  if (fft.isGold64())
+    throw std::runtime_error("Gold64 requires the explicit Engine API validation backend; stock Gpu dispatch is disabled");
   map<string, string> config;
 
   // Highest priority is the requested "extra" conf

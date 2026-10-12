@@ -22,7 +22,7 @@ string numberK(u64 n);
 
 using KeyVal = std::pair<std::string, std::string>;
 
-enum FFT_TYPES {FFT64=0, FFT3161=1, FFT3261=2, FFT61=3, FFT323161=4, FFT3231=50, FFT6431=51, FFT31=52, FFT32=53};
+enum FFT_TYPES {FFT64=0, FFT3161=1, FFT3261=2, FFT61=3, FFT323161=4, FFT3231=50, FFT6431=51, FFT31=52, FFT32=53, FFT32GOLD64=54};
 
 // Device-scoped policy for the gpuowl 6cf0dc 1K radix-8 path.
 //
@@ -103,12 +103,16 @@ enum CARRY_KIND {CARRY_32=0, CARRY_64=1, CARRY_AUTO=2};
 struct FFTConfig {
 public:
   static FFTConfig bestFit(const Args& args, u64 E, const std::string& spec);
+  static bool isGold64Request(const std::string& spec) {
+    return spec.rfind("gold64-validation:", 0) == 0 || spec.rfind("54:", 0) == 0;
+  }
 
   // Which FP and NTT primes are involved in the FFT
   bool FFT_FP64;
   bool FFT_FP32;
   bool NTT_GF31;
   bool NTT_GF61;
+  bool NTT_GOLD64 = false;
   // bool NTT_NCW;	// Nick Craig-Wood prime not supported (yet?)
 
   // Size (in bytes) of integer data passed to FFTs/NTTs on the GPU
@@ -126,6 +130,7 @@ public:
   bool adaptive_type4_request = false;
   bool adaptive_type4_elided = false;
   bool isPfa() const { return pfa_radix == 3 || pfa_radix == 7 || pfa_radix == 9; }
+  bool isGold64() const { return shape.fft_type == FFT32GOLD64; }
 
   explicit FFTConfig(const string& spec);
   FFTConfig(FFTShape shape, u32 variant, enum CARRY_KIND carry);
@@ -141,3 +146,4 @@ public:
   FFTConfig promoteKnownUnsafeOrdinaryPrp(
       const Args& args, u64 exponent) const;
 };
+
