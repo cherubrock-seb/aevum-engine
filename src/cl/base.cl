@@ -262,6 +262,9 @@ typedef ulong2 GF61;        // A complex value using two Z61s.  For a GF(M61^2) 
 #if !defined(AEVUM_PFA11_DOT128) || (AEVUM_PFA11_DOT128 != 0 && AEVUM_PFA11_DOT128 != 1)
 #error PFA11 requires an explicit DOT128 selection from the host
 #endif
+#if !defined(AEVUM_PFA11_GF31_DOT64) || (AEVUM_PFA11_GF31_DOT64 != 0 && AEVUM_PFA11_GF31_DOT64 != 1)
+#error PFA11 requires an explicit GF31 DOT64 selection from the host
+#endif
 #endif
 #define FFT3261         2
 #define FFT61           3

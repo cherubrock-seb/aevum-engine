@@ -7,10 +7,14 @@ autotune was executed. No KEEP decision or measured speedup.
 - Aevum main/base: 02bbffaee03480cf9d2cf2fe530c2a333c01930d.
 - Woltman gpuowl master: e44e0976584bc3d1dd9c155c86c4d7c1c814b05a.
 - PrMers main inspected: 0e788c3a1f47dfa64f2933ded59eb6d0bc8a3161.
-- First remote source commit: 2c956221460db6357726e5400f672b56e7f25eda.
-  Follow-up source review moves the PFA11 compile guard after the FFT3161 macro
+- Last confirmed remote implementation at this checkpoint:
+  e9b049c590a14fe1b4bec075a1a9f36be0e929fa.
+  Initial source commit: 2c956221460db6357726e5400f672b56e7f25eda.
+  Follow-up source review moved the PFA11 compile guard after the FFT3161 macro
   definition; the initial ordering would reject a valid Type1 compile.
-  The final candidate SHA is recorded in the Draft PR.
+  This source milestone adds GF31 batching. Final SHA is recorded in the Draft
+  PR, since a commit cannot embed its own SHA.
+- Draft PR: https://github.com/cherubrock-seb/aevum-engine/pull/24.
 - Dedicated branch: exp/pfa11-woltman-ntt. Independent of PR #23 and #22.
 - Previous PFA11 work was reported exact but slower and rejected. Recovered
   history mentions pfa11-r58/64/67/69/70/76/77/78/79/80 and disposable r56
@@ -19,7 +23,7 @@ autotune was executed. No KEEP decision or measured speedup.
   The new mechanism is Woltman's five-term GF61 wide-dot accumulation plus
   inverse twiddle normalization, not another register-count or LDS experiment.
 
-## Focused source comparison (two opportunities)
+## Focused source comparison (three opportunities)
 1. Upstream src/cl/fft-middle.cl pfaDftR(GF61*) is called through pfaMiddleIn/
    pfaMiddleOut by fftMiddleInGF61/fftMiddleOutGF61. For PFA=11 it pairs five
    inputs, uses mul64/mad64 and one full-width weakModM61 per dot component.
@@ -30,6 +34,10 @@ autotune was executed. No KEEP decision or measured speedup.
    by 1/PFA. Connect unnormalized inverse DFT and scaled twiddle together.
    Remove eleven output normalizations in favor of one scalar normalization
    per plane; risk: double/missing normalization and layout mismatch.
+3. Beyond upstream: GF31 pfaDftR still reduces every product and partial sum.
+   Aevum pfaDft11 can accumulate five reduced-input products in 3+2 bounded
+   u64 batches using math.cl mad32. Keep [0,M31] pair values; never use the
+   GF61 unreduced pairing here. Risk: u64 accumulation and u32 fold overflow.
 
 The upstream layout has pfaRotate/row permutations and PFA_M2 row subtransforms.
 Aevum's fftP CRT gather already forms ordered odd rows with MIDDLE=11; importing
@@ -66,6 +74,22 @@ binary. Actual mode/plan are logged; invalid/conflicting modes reject.
 Apple, FP32/Type4 and other arithmetic types are excluded. No PrMers companion
 is needed for the Engine API path; no new PrMers command-line alias is provided.
 
+## Additional milestone: opt-in GF31 bounded dot batching
+Select AEVUM_PFA11_GF31_DOT64=1 in addition to the experiment gate and explicit
+PFA11 plan. This flag defaults to 0 and is independent of GF61 DOT128.
+Gpu.cpp/UseOptions.h validate/register it; base.cl requires an explicit compiler
+mode; pfaDft11(GF31*) dispatches through pfa11Dot5_31 in both directions.
+The original per-product GF31 path remains when the flag is 0.
+
+The five products use two u64 accumulators (three terms and two terms), replacing
+five product reductions and their intermediate modular sums. Bounds:
+0 <= a_i <= M31, 0 <= c_i < M31, so three products <3*2^62<2^64.
+pfa11Fold64_31 reduces (low31+middle31) before adding the top two bits, then
+combines the two reduced subtotals. This prevents a u32 overflow in a naive
+low31+middle31+high2 fold. Every output stays in [0,M31]. No field limit,
+normalization, data representation or general math.cl helper is changed.
+The grouped reductions are a new source candidate, not a measured gain.
+
 ## Execution and preserved contracts
 Engine square/prepare/multiply -> fftP CRT gather/width NTT -> middle-in
 binary twiddle + odd DFT -> existing row-local NTT tailSquare/tailMul ->
@@ -92,10 +116,13 @@ needed. Actual register allocation and unrolling remain compiler-dependent.
 Baseline production SHA is above. Candidate is the confirmed Draft PR head.
 Use existing tests/native_pfa_dense_compare.cpp, native_pfa_engine_compare.cpp
 and engine_small_factor_gpu_test.cpp plus Engine API entry points. Scope the
-DOT128 environment variable to PFA11 candidate engine construction: a harness
-creating a stock engine first must leave it unset/0 for that engine.
+DOT128/GF31_DOT64 environment variables to PFA11 candidate engine construction:
+a harness creating a stock engine first must leave them unset/0 for that engine.
 For equivalent PFA11 A/B, keep the explicit plan and experiment gate, switch
 DOT128 0/1, and record the actual instantiated plan and all effective options.
+Validate all four (DOT128, GF31_DOT64) combinations: (0,0), (1,0), (0,1), (1,1).
+For GF31, include residues around 0, M31 and the folded-limb boundaries, all
+supported MODM31 variants, and both native-ASM and NO_ASM code generation.
 
 Compile OpenCL/CUDA variants, then compare complete exported residues,
 including dense signed/boundary inputs, cyclic carry, repeated square,
@@ -111,6 +138,7 @@ GPU/backend/compiler, exponent, carry, workload and tuning. Inspect spills.
 First integrated PFA11 GF31+GF61 candidate is ready for owner compilation and
 differential validation; neither is done. Type4/FP32, composite middles,
 retained carry state and PrMers CLI exposure remain out of scope.
-Next source step after this commit: assess bounded GF31 dot batching as a
-separate opt-in improvement beyond upstream, preserving a baseline mode.
-If its accumulator bounds cannot be proved from math.cl, stop at this commit.
+Exact next step: owner compiles the four candidate/reference combinations on
+OpenCL and CUDA, then compares complete residues with the existing Engine API
+harnesses under the stated flag scoping. Record the actual head, resolved plan,
+compiler and backend before timing. Do not widen the envelope to chase a win.

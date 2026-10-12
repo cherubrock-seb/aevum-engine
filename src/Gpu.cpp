@@ -289,17 +289,19 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
 
   // A PFA11 request must reach this exact implementation, including callers
   // which construct FFTConfig directly rather than through bestFit.
-  if (const char* value = std::getenv("AEVUM_PFA11_DOT128")) {
-    auto it = config.find("AEVUM_PFA11_DOT128");
-    if (it != config.end() && it->second != value)
-      throw std::runtime_error("conflicting AEVUM_PFA11_DOT128 selections");
-    config["AEVUM_PFA11_DOT128"] = value;
-  }
-  if (auto it = config.find("AEVUM_PFA11_DOT128"); it != config.end()) {
-    if (it->second != "0" && it->second != "1")
-      throw std::runtime_error("AEVUM_PFA11_DOT128 must be 0 or 1");
-    if (it->second == "1" && fft.pfa_radix != 11)
-      throw std::runtime_error("AEVUM_PFA11_DOT128=1 requires an explicit pfa11 plan");
+  for (const char* key : {"AEVUM_PFA11_DOT128", "AEVUM_PFA11_GF31_DOT64"}) {
+    if (const char* value = std::getenv(key)) {
+      auto it = config.find(key);
+      if (it != config.end() && it->second != value)
+        throw std::runtime_error(string("conflicting selections for ") + key);
+      config[key] = value;
+    }
+    if (auto it = config.find(key); it != config.end()) {
+      if (it->second != "0" && it->second != "1")
+        throw std::runtime_error(string(key) + " must be 0 or 1");
+      if (it->second == "1" && fft.pfa_radix != 11)
+        throw std::runtime_error(string(key) + "=1 requires an explicit pfa11 plan");
+    }
   }
   if (fft.pfa_radix == 11) {
     const char* enabled = std::getenv("AEVUM_EXPERIMENT_PFA11");
@@ -313,8 +315,10 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     throw std::runtime_error("PFA11 does not support the Apple staged pipeline");
 #endif
     config.try_emplace("AEVUM_PFA11_DOT128", "1");
-    if (doLog) log("Experimental PFA11: plan=%s GF61 DOT128=%s, fused inverse twiddle; unvalidated.\n",
-                   fft.spec().c_str(), config.at("AEVUM_PFA11_DOT128").c_str());
+    config.try_emplace("AEVUM_PFA11_GF31_DOT64", "0");
+    if (doLog) log("Experimental PFA11: plan=%s GF61 DOT128=%s GF31 DOT64=%s, fused inverse twiddle; unvalidated.\n",
+                   fft.spec().c_str(), config.at("AEVUM_PFA11_DOT128").c_str(),
+                   config.at("AEVUM_PFA11_GF31_DOT64").c_str());
   }
 
 #if defined(__APPLE__)

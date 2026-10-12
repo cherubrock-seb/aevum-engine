@@ -770,6 +770,23 @@ void OVERLOAD pfaDft7(GF31 *u, Z31 w) {
 #endif
 
 #if PFA_RADIX == 11
+#if AEVUM_PFA11_GF31_DOT64
+// Extension beyond the pinned upstream GF31 path. The input pairs have
+// already been reduced to [0,M31]; all coefficients are <M31. Five products
+// would overflow u64, whereas three and two fit. Fold the low/middle limbs
+// before adding the top two bits: their unreduced three-way sum can exceed
+// u32 even when the original dot fits u64. Keep all pair reductions.
+Z31 pfa11Fold64_31(u64 a) {
+  const Z31 lo = (Z31)(a & M31), mid = (Z31)((a >> 31) & M31);
+  return add(add(lo, mid), (Z31)(a >> 62));
+}
+Z31 pfa11Dot5_31(Z31 a0, Z31 a1, Z31 a2, Z31 a3, Z31 a4,
+                Z31 c0, Z31 c1, Z31 c2, Z31 c3, Z31 c4) {
+  const u64 first = mad32(a2, c2, mad32(a1, c1, (u64)a0 * c0));
+  const u64 last = mad32(a4, c4, (u64)a3 * c3);
+  return add(pfa11Fold64_31(first), pfa11Fold64_31(last));
+}
+#endif
 // Adapted from George Woltman's pfaDftR (GF31), gpuowl
 // e44e0976584bc3d1dd9c155c86c4d7c1c814b05a, under the existing GPL license.
 // Aevum's gather already orders odd rows, so no upstream pfaRotate is needed.
@@ -786,12 +803,25 @@ void OVERLOAD pfaDft11(GF31 *u, bool inverse) {
   u[0] = dc;
   #pragma unroll
   for (u32 j = 1; j <= 5; ++j) {
+#if AEVUM_PFA11_GF31_DOT64
+    GF31 pc = U2(
+        pfa11Dot5_31(sum[0].x, sum[1].x, sum[2].x, sum[3].x, sum[4].x,
+                    c[j], c[j * 2 % 11], c[j * 3 % 11], c[j * 4 % 11], c[j * 5 % 11]),
+        pfa11Dot5_31(sum[0].y, sum[1].y, sum[2].y, sum[3].y, sum[4].y,
+                    c[j], c[j * 2 % 11], c[j * 3 % 11], c[j * 4 % 11], c[j * 5 % 11]));
+    const GF31 qs = U2(
+        pfa11Dot5_31(dif[0].x, dif[1].x, dif[2].x, dif[3].x, dif[4].x,
+                    s[j], s[j * 2 % 11], s[j * 3 % 11], s[j * 4 % 11], s[j * 5 % 11]),
+        pfa11Dot5_31(dif[0].y, dif[1].y, dif[2].y, dif[3].y, dif[4].y,
+                    s[j], s[j * 2 % 11], s[j * 3 % 11], s[j * 4 % 11], s[j * 5 % 11]));
+#else
     GF31 pc = pfaMulScalar(sum[0], c[j]), qs = pfaMulScalar(dif[0], s[j]);
     #pragma unroll
     for (u32 k = 2; k <= 5; ++k) {
       pc = add(pc, pfaMulScalar(sum[k - 1], c[j * k % 11]));
       qs = add(qs, pfaMulScalar(dif[k - 1], s[j * k % 11]));
     }
+#endif
     pc = add(x0, pc);
     // Inverse DFT = forward DFT with nonzero output indices reversed.
     u[inverse ? 11 - j : j] = add(pc, qs);
