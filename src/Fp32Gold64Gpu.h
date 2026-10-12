@@ -1,0 +1,129 @@
+// Experimental two-plane convolution. No carry or PRP execution is exposed.
+#pragma once
+#include "Gold64Gpu.h"
+#include "TrigBufCache.h"
+
+#ifndef CUDA_BACKEND
+namespace aevum_gold64 {
+struct Fp32Setup {
+  std::string defines;
+  std::vector<double> weights;
+  TrigPtr width, middle, height;
+};
+// Implemented beside Aevum's existing clDefines/genWeights helpers in Gpu.cpp.
+Fp32Setup makeFp32Setup(const Args& args, Queue& queue, U32 exponent);
+
+class Fp32Plane {
+  static constexpr U32 n = GpuPlane::words;
+  static constexpr U32 half = n / 2;
+  Queue* queue;
+  Fp32Setup setup;
+  KernelCompiler compiler;
+  Buffer<double> weights;
+  Buffer<std::int64_t> transposed;
+  Buffer<double> a, b; // FP32 data, measured in doubles as in Gpu.cpp
+  std::unique_ptr<Buffer<double>> prepared;
+  bool preparedReady = false;
+  Kernel transpose, premul, middleIn, tailSquare, middleOut, widthOut,
+         heightIn, tailMul, exportCoefficients;
+
+  template<class T> static void requireSize(const Buffer<T>& x) {
+    if (x.size != n) throw std::invalid_argument("FP32/Gold64 requires 4194304 natural-order digits");
+  }
+  void begin(const Buffer<std::int64_t>& input) {
+    requireSize(input);
+    transpose(transposed, input);
+    premul(b, transposed, setup.width, weights);
+    middleIn(a, b, setup.middle);
+  }
+  void end(Buffer<float>& coefficients) {
+    middleOut(a, b, setup.middle);
+    widthOut(b, a, setup.width);
+    exportCoefficients(b, coefficients, weights);
+  }
+
+public:
+  Fp32Plane(const Args& args, Queue& q, U32 exponent)
+    : queue(&q), setup(makeFp32Setup(args, q, exponent)),
+      compiler(args, q.context, setup.defines),
+      weights(q.context, std::move(setup.weights)),
+      transposed(nullptr, &q, n), a(nullptr, &q, half), b(nullptr, &q, half),
+      transpose("gold64_fp32_import", &compiler, nullptr, &q,
+                "fp32_gold64_bridge.cl", "gold64_fp32_import", half),
+      premul("gold64_fp32_fftP", &compiler, nullptr, &q, "fftp.cl", "fftP", half/8),
+      middleIn("gold64_fp32_middleIn", &compiler, nullptr, &q, "fftmiddlein.cl", "fftMiddleIn", half/8),
+      tailSquare("gold64_fp32_tailSquare", &compiler, nullptr, &q, "tailsquare.cl", "tailSquare", half/8),
+      middleOut("gold64_fp32_middleOut", &compiler, nullptr, &q, "fftmiddleout.cl", "fftMiddleOut", half/8),
+      widthOut("gold64_fp32_fftW", &compiler, nullptr, &q, "fftw.cl", "fftW", half/8),
+      heightIn("gold64_fp32_fftHin", &compiler, nullptr, &q, "ffthin.cl", "fftHin", half/8),
+      tailMul("gold64_fp32_tailMul", &compiler, nullptr, &q, "tailmul.cl", "tailMul", half/16),
+      exportCoefficients("gold64_fp32_unweight", &compiler, nullptr, &q,
+                         "fp32_gold64_bridge.cl", "gold64_fp32_unweight", half) {}
+
+  void squareCoefficients(const Buffer<std::int64_t>& input, Buffer<float>& coefficients) {
+    requireSize(coefficients);
+    begin(input);
+    tailSquare(b, a, setup.height);
+    end(coefficients);
+  }
+  void prepare(const Buffer<std::int64_t>& rhs) {
+    requireSize(rhs);
+    preparedReady = false;
+    if (!prepared) prepared = std::make_unique<Buffer<double>>(nullptr, queue, half);
+    begin(rhs);
+    heightIn(*prepared, a, setup.height);
+    preparedReady = true;
+  }
+  void multiplyCoefficients(const Buffer<std::int64_t>& lhs, Buffer<float>& coefficients) {
+    requireSize(coefficients);
+    if (!preparedReady) throw std::logic_error("FP32/Gold64 multiply requires a prepared RHS");
+    begin(lhs);
+    tailMul(b, a, *prepared, setup.height);
+    end(coefficients);
+  }
+};
+
+// Both outputs describe the same uncarried IBDWT coefficient X_j:
+// residue[j] = X_j mod p; estimate[j] approximates X_j (not X_j/p).
+// Preparing an RHS and changing it updates both planes together.
+class HybridConvolution {
+  GpuPlane gold;
+  Fp32Plane fp32;
+  bool preparedReady = false;
+  static U32 requireGeometry(U32 q) {
+    Tables::requireGeometry(GpuPlane::words, q);
+    // Numeric input format for this experiment, NOT a proven FP32 error bound.
+    if (q > U64(33) * GpuPlane::words)
+      throw std::invalid_argument("FP32/Gold64 experiment supports digit widths up to 33 bits");
+    return q;
+  }
+  static void requireBuffers(const Buffer<std::int64_t>& input,
+                             const Buffer<U64>& residue, const Buffer<float>& estimate) {
+    if (input.size != GpuPlane::words || residue.size != GpuPlane::words || estimate.size != GpuPlane::words)
+      throw std::invalid_argument("FP32/Gold64 coefficient buffer size mismatch");
+    if (input.get() == residue.get() || input.get() == estimate.get() || residue.get() == estimate.get())
+      throw std::invalid_argument("FP32/Gold64 inputs and plane outputs must not alias");
+  }
+public:
+  HybridConvolution(const Args& args, Queue& q, U32 exponent)
+    : gold(args, q, requireGeometry(exponent)), fp32(args, q, exponent) {}
+  void square(const Buffer<std::int64_t>& input, Buffer<U64>& residue, Buffer<float>& estimate) {
+    requireBuffers(input, residue, estimate);
+    gold.squareResidues(input, residue);
+    fp32.squareCoefficients(input, estimate);
+  }
+  void prepare(const Buffer<std::int64_t>& rhs) {
+    preparedReady = false;
+    gold.prepare(rhs);
+    fp32.prepare(rhs);
+    preparedReady = true;
+  }
+  void multiply(const Buffer<std::int64_t>& lhs, Buffer<U64>& residue, Buffer<float>& estimate) {
+    requireBuffers(lhs, residue, estimate);
+    if (!preparedReady) throw std::logic_error("FP32/Gold64 multiply requires both prepared planes");
+    gold.multiplyResidues(lhs, residue);
+    fp32.multiplyCoefficients(lhs, estimate);
+  }
+};
+} // namespace aevum_gold64
+#endif

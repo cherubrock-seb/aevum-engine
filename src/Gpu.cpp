@@ -1,6 +1,7 @@
 // Copyright (C) Mihai Preda and George Woltman.
 
 #include "Gpu.h"
+#include "Fp32Gold64Gpu.h"
 #include "StatsSlot.h"
 #include "AppleTailZero.h"
 #include "UseOptions.h"
@@ -714,6 +715,44 @@ string formatSecsPerIter(float secsPerIter) {
 }
 
 } // namespace
+
+#ifndef CUDA_BACKEND
+aevum_gold64::Fp32Setup aevum_gold64::makeFp32Setup(const Args& args, Queue& queue, U32 exponent) {
+  Tables::requireGeometry(GpuPlane::words, exponent);
+  if (exponent > U64(33) * GpuPlane::words)
+    throw std::invalid_argument("FP32/Gold64 experiment supports digit widths up to 33 bits");
+  // Internal transform-only configuration: no borrowed Type2 capacity and no
+  // carry kernel. The existing optimized FP32 kernels accept WordSize=8.
+  FFTShape shape;
+  shape.fft_type = FFT32;
+  shape.width = 512; shape.middle = 8; shape.height = 512;
+  shape.bpw.fill(0);
+  FFTConfig fft(shape, 202, CARRY_64);
+  fft.WordSize = 8;
+
+  // Keep this new layout independent of a user's production tuning overrides.
+  Args clean = args;
+  clean.flags.clear();
+  clean.perFftConfig.clear();
+  const vector<KeyVal> conf{{"INPLACE", "0"}, {"PAD", "0"},
+                            {"TAIL_KERNELS", "2"}, {"TAIL_TRIGS32", "2"},
+                            {"WMUL", "1"}, {"FUSE_WEIGHT_BUTTERFLY", "0"}};
+  bool singleWide = false, singleKernel = true;
+  u32 inplace = 0, pad = 0, wmul = 1;
+  Fp32Setup out;
+  out.defines = clDefines(clean, queue.context->deviceId(), fft, conf, exponent, false,
+                          singleWide, singleKernel, inplace, pad, wmul);
+  out.defines += " -DFFT_FP64=0 -DFFT_FP32=1 -DNTT_GF31=0 -DNTT_GF61=0";
+  if (inplace || pad || singleWide || !singleKernel)
+    throw std::logic_error("FP32/Gold64 fixed schedule configuration mismatch");
+  out.weights = genWeights(fft, exponent, 512, 4096, 8, false).weightsIF;
+  TrigBufCache cache(queue.context);
+  out.height = cache.smallTrigCombo(&clean, fft, conf, 512, 8, 512, 8, false);
+  out.middle = cache.middleTrig(&clean, fft, 512, 8, 512);
+  out.width = cache.smallTrig(&clean, fft, conf, 512, 8, 8, 512, 8, false);
+  return out;
+}
+#endif
 
 // --------
 
@@ -4024,3 +4063,4 @@ void Gpu::regProfileReport(bool emit) {
   }
   profile.reset();
 }
+
