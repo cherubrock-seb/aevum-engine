@@ -39,6 +39,17 @@ void spin() {
 #define WMUL 2
 #endif
 
+#ifndef AEVUM_CARRY_INVERSE61_FIRST_V1
+#define AEVUM_CARRY_INVERSE61_FIRST_V1 0
+#endif
+// Run the heavier inverse plane before retaining the other plane's result.
+// CUDA keeps its original programmatic dependent-launch ordering.
+#define AEVUM_CARRY_INVERSE61_FIRST_ACTIVE \
+  (AEVUM_CARRY_INVERSE61_FIRST_V1 == 1 && FFT_TYPE == FFT3161 && !PFA_RADIX && \
+   !CUDA_BACKEND && __OPENCL_C_VERSION__ >= 200 && (AMDGPU || NVIDIAGPU) && \
+   (WIDTH == 512 || WIDTH == 1024) && (NW == 4 || NW == 8) && \
+   (WMUL == 1 || WMUL == 2))
+
 #if AMDGPU
 #define CarryShuttleAccess(me,i)        ((me) * NW + (i))                       // Generates denser global_load_dwordx4 instructions
 //#define CarryShuttleAccess(me,i)      ((me) * 4 + (i)%4 + (i)/4 * 4*G_W)      // Also generates global_load_dwordx4 instructions and unit stride when NW=8
@@ -2017,6 +2028,16 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 // which causes a terrible reduction in occupancy.
   u32 zerohack = ZEROHACK_W * (u32) get_group_id(0) / 131072;
 
+#if AEVUM_CARRY_INVERSE61_FIRST_ACTIVE
+  // The two residue planes are independent until the original CRT/carry loop.
+  // Retain u61 across the GF31 FFT instead of u31 across the GF61 FFT.
+  dependentLaunchWait();   // No-op on the selected OpenCL path
+  readCarryFusedLine(in61, u61, line, lowMe);
+  fft_WIDTH1(lds61 + zerohack, u61, smallTrig61 + zerohack, WMUL, lowMe);
+
+  readCarryFusedLine(in31, u31, line, lowMe);
+  fft_WIDTH1(lds31 + zerohack, u31, smallTrig31 + zerohack, WMUL, lowMe);
+#else
   readCarryFusedLine(in31, u31, line, lowMe);
   fft_WIDTH1(lds31 + zerohack, u31, smallTrig31 + zerohack, WMUL, lowMe);
 
@@ -2024,6 +2045,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
   readCarryFusedLine(in61, u61, line, lowMe);
   fft_WIDTH1(lds61 + zerohack, u61, smallTrig61 + zerohack, WMUL, lowMe);
+#endif
 
   Word2 wu[NW];
 
