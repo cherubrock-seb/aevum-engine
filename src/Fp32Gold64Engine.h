@@ -2,6 +2,7 @@
 #pragma once
 #include "Fp32Gold64Reconstruction.h"
 #include "state.h"
+#include <algorithm>
 #include <limits>
 #include <utility>
 
@@ -38,6 +39,7 @@ class RegisterEngine {
     commit(dst);
   }
   void linear(size_t dst, size_t src, U32 operation, U32 value = 0) {
+    reconstruction.invalidateDiagnostics();
     coefficients(registers.at(dst), registers.at(src), candidates, status,
                  cl_uint(operation), cl_uint(value));
     normalize(dst);
@@ -64,10 +66,11 @@ public:
   // Compact little-endian 32-bit words are the existing Engine API ABI.
   // Reuse its host bit packing only at explicit upload/readback boundaries.
   void setWords(size_t dst, const U32* words, size_t count) {
-    registers.at(dst);
+    (void)registers.at(dst);
     if (!words || count != nWords(exponent)) throw std::invalid_argument("invalid Gold64 word buffer");
     Words compact(words, words + count);
     if (exponent % 32) compact.back() &= (U32(1) << (exponent % 32)) - 1;
+    reconstruction.invalidateDiagnostics();
     result.write(expandBits(compact, n, exponent));
     // expandBits can leave a one-unit wrap on digit zero; normalize it fully.
     coefficients(result, result, candidates, status, cl_uint(0), cl_uint(0));
@@ -111,7 +114,7 @@ public:
   }
   void multiply(size_t dst, size_t src, U32 factor) {
     requireFactor(factor);
-    registers.at(dst); registers.at(src);
+    (void)registers.at(dst); (void)registers.at(src);
     if (preparedIndex != src) prepare(src, src);
     reconstruction.multiplyChecked(registers.at(dst), candidates, result, status,
                                     factor, PrecisionPolicy::SupervisedValidation);

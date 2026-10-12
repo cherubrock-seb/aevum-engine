@@ -1,6 +1,6 @@
 # FP32 + Gold64 implementation checkpoint
 
-- Last confirmed remote implementation SHA before this milestone: `7bdd3cfcbd016c78e6638b9185f179e9031351f7`.
+- Last confirmed remote implementation SHA before this milestone: `04e6ffcef9f05d584b32c7411d8054627e84be25`.
   The containing milestone SHA is `git log -1 --format=%H -- docs/fp32-gold64-implementation-status.md`
   (a commit cannot embed its own SHA); the PR description records the confirmed remote SHA.
 - A1 complete in source: canonical Gold64 arithmetic (host/OpenCL), packed
@@ -75,6 +75,12 @@
   C API production entry points/ABI remain intact; no PrMers change required
   to call create_ex from a supervised C API harness. Existing PrMers workload
   values cannot enable this backend accidentally. CUDA rejects the new plan.
+- Source refinement after engine integration: carry-map construction loads each
+  local digit/width once for all three trajectories and stops reading a segment
+  only when all three carries are zero. Balanced remaining digits then preserve
+  zero exactly; hostile chains still traverse the complete segment. No measured
+  speedup is claimed. Register import/linear dispatch clears stale diagnostics
+  before starting, including compiler/enqueue failure paths.
 - Next exact step: owner-led OpenCL compilation and differential validation
   through create_ex at q=136279841, including upload/readback, hostile cyclic
   carry, square/factor-3/minus-two, prepared RHS invalidation and exact residues.

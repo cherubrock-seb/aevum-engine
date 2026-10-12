@@ -98,6 +98,7 @@ public:
     if (policy != PrecisionPolicy::SupervisedValidation)
       throw std::runtime_error("Gold64 UnprovenPrecision: only explicit supervised validation is supported");
   }
+  void invalidateDiagnostics() { reportReady = false; }
   ReconstructionReport diagnostics() const {
     if (!reportReady) throw std::logic_error("Gold64 has no completed normalization diagnostics");
     return summary.read(1).front();

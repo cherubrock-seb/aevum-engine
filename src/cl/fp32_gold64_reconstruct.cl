@@ -186,23 +186,32 @@ void gold64_carry_maps(__global const long * restrict local_digit,
   const uint k = (uint)get_global_id(0);
   const long base = block_carry[(k + G64_CARRY_BLOCKS - 1u) % G64_CARRY_BLOCKS];
   uint flags = block_status[k];
+  ulong2 incoming[3];
+  long carry[3] = {0L, 0L, 0L};
+  for (uint s = 0; s < 3u; ++s)
+    incoming[s] = gold64_wide_add(gold64_wide_signed(base), gold64_wide_signed((long)s - 1L));
+  for (uint i = 0; i < G64_CARRY_BLOCK; ++i) {
+    const uint j = k * G64_CARRY_BLOCK + i;
+    const uint bits = gold64_digit_width(j, exponent);
+    if (!bits || bits > 33u) { flags |= G64_UNSUPPORTED_OPERATION; break; }
+    // Load each digit/width once for all three exact carry trajectories.
+    const ulong2 d = gold64_wide_signed(local_digit[j]);
+    for (uint s = 0; s < 3u; ++s) {
+      gold64_split_wide(gold64_wide_add(incoming[s], d), bits, &carry[s], &flags);
+      incoming[s] = gold64_wide_signed(carry[s]);
+    }
+    // Every remaining local digit is already balanced. Three zero carries
+    // remain zero through the rest of the segment, irrespective of its data.
+    // Hostile long chains still traverse all 256 digits; none are truncated.
+    if (carry[0] == 0L && carry[1] == 0L && carry[2] == 0L) break;
+  }
   uint map = 0u;
-  for (int delta = -1; delta <= 1; ++delta) {
-    ulong2 incoming = gold64_wide_add(gold64_wide_signed(base), gold64_wide_signed((long)delta));
-    long carry = 0L;
-    for (uint i = 0; i < G64_CARRY_BLOCK; ++i) {
-      const uint j = k * G64_CARRY_BLOCK + i;
-      const uint bits = gold64_digit_width(j, exponent);
-      if (!bits || bits > 33u) { flags |= G64_UNSUPPORTED_OPERATION; break; }
-      const ulong2 x = gold64_wide_add(incoming, gold64_wide_signed(local_digit[j]));
-      gold64_split_wide(x, bits, &carry, &flags);
-      incoming = gold64_wide_signed(carry);
-    }
-    if (carry < -1L || carry > 1L) {
+  for (uint s = 0; s < 3u; ++s) {
+    if (carry[s] < -1L || carry[s] > 1L) {
       flags |= G64_CARRY_NONCONVERGENCE;
-      carry = 0L;
+      carry[s] = 0L;
     }
-    map |= (uint)(carry + 1L) << (2u * (uint)(delta + 1));
+    map |= (uint)(carry[s] + 1L) << (2u * s);
   }
   if (gold64_map_value(map, -1) > gold64_map_value(map, 0) ||
       gold64_map_value(map, 0) > gold64_map_value(map, 1)) flags |= G64_CARRY_NONCONVERGENCE;
