@@ -14,6 +14,23 @@ enum ReconstructionStatus : U32 {
   InvalidResidue = 16, UnsupportedOperation = 32, CarryOverflow = 64,
   CarryNonconvergence = 128
 };
+// Geometry/format checks are not precision certificates. No caller-supplied
+// tolerance or near-integer quotient can clear UnprovenPrecision.
+enum class PrecisionPolicy { RequireProven, SupervisedValidation };
+struct ReconstructionReport {
+  U32 flags, firstFatalBlock, fatalBlocks, unprovenBlocks;
+  static constexpr U32 fatalMask = Nonfinite | QuotientRange | InvalidResidue |
+      UnsupportedOperation | CarryOverflow | CarryNonconvergence;
+  bool proven() const { return !(flags & (fatalMask | UnprovenPrecision)); }
+  void requireUsable(PrecisionPolicy policy) const {
+    if (flags & fatalMask)
+      throw std::runtime_error("Gold64 reconstruction rejected: flags=" + std::to_string(flags) +
+                               ", first fatal carry block=" + std::to_string(firstFatalBlock));
+    if (policy == PrecisionPolicy::RequireProven && !proven())
+      throw std::runtime_error("Gold64 UnprovenPrecision: no certified FP32 reconstruction bound; PRP/LL acceptance disabled");
+  }
+};
+static_assert(sizeof(ReconstructionReport) == 16, "OpenCL uint4 diagnostic ABI");
 
 class ReconstructionExperiment {
   static constexpr U32 n = GpuPlane::words;
@@ -25,8 +42,11 @@ class ReconstructionExperiment {
   Buffer<float> estimates;
   Buffer<std::int64_t> carryDigits, blockCarry;
   Buffer<U32> blockStatus, maps, prefix, groupMaps, groupPrefix, totalMap;
+  Buffer<ReconstructionReport> partialReports, summary;
   Kernel lift, split;
   Kernel carryLocal, carryMaps, scanBlocks, scanGroups, carryFinish;
+  Kernel statusBlocks, statusFinish;
+  bool reportReady = false;
 
   template<class T> static void requireSize(const Buffer<T>& x) {
     if (x.size != n) throw std::invalid_argument("Gold64 reconstruction buffer size mismatch");
@@ -54,6 +74,7 @@ public:
       blockStatus(nullptr, &queue, blocks), maps(nullptr, &queue, blocks),
       prefix(nullptr, &queue, blocks), groupMaps(nullptr, &queue, groups),
       groupPrefix(nullptr, &queue, groups), totalMap(nullptr, &queue, 1),
+      partialReports(nullptr, &queue, groups), summary(nullptr, &queue, 1),
       lift("gold64_lift_candidates", &compiler, nullptr, &queue,
            "fp32_gold64_reconstruct.cl", "gold64_lift_candidates", n),
       split("gold64_split_candidates", &compiler, nullptr, &queue,
@@ -67,7 +88,20 @@ public:
       scanGroups("gold64_carry_scan_groups", &compiler, nullptr, &queue,
                  "fp32_gold64_reconstruct.cl", "gold64_carry_scan", 256),
       carryFinish("gold64_carry_finish", &compiler, nullptr, &queue,
-                  "fp32_gold64_reconstruct.cl", "gold64_carry_finish", blocks) {}
+                  "fp32_gold64_reconstruct.cl", "gold64_carry_finish", blocks),
+      statusBlocks("gold64_status_blocks", &compiler, nullptr, &queue,
+                   "fp32_gold64_reconstruct.cl", "gold64_status_blocks", blocks),
+      statusFinish("gold64_status_finish", &compiler, nullptr, &queue,
+                   "fp32_gold64_reconstruct.cl", "gold64_status_finish", 256) {}
+
+  static void requireExecution(PrecisionPolicy policy) {
+    if (policy != PrecisionPolicy::SupervisedValidation)
+      throw std::runtime_error("Gold64 UnprovenPrecision: only explicit supervised validation is supported");
+  }
+  ReconstructionReport diagnostics() const {
+    if (!reportReady) throw std::logic_error("Gold64 has no completed normalization diagnostics");
+    return summary.read(1).front();
+  }
 
   void squareCandidates(const Buffer<std::int64_t>& input,
                         Buffer<WideCoefficient>& candidates, Buffer<U32>& status,
@@ -75,6 +109,7 @@ public:
     requireSize(input); requireSize(candidates); requireSize(status);
     requireDistinct({input.get(), candidates.get(), status.get()});
     requireOperation(factor, subtractTwo);
+    reportReady = false;
     convolution.square(input, residues, estimates);
     emit(candidates, status, factor, subtractTwo);
   }
@@ -84,6 +119,7 @@ public:
     requireSize(lhs); requireSize(candidates); requireSize(status);
     requireDistinct({lhs.get(), candidates.get(), status.get()});
     requireOperation(factor, false);
+    reportReady = false;
     convolution.multiply(lhs, residues, estimates);
     emit(candidates, status, factor, false);
   }
@@ -93,22 +129,28 @@ public:
                        Buffer<U32>& status) {
     requireSize(candidates); requireSize(digits); requireSize(outgoing); requireSize(status);
     requireDistinct({candidates.get(), digits.get(), outgoing.get(), status.get()});
+    reportReady = false;
     split(candidates, digits, outgoing, status, cl_uint(exponent));
   }
   // Complete cyclic normalization of the supplied coefficients, modulo 2^q-1.
-  // Five bounded launches; no host carry loop/readback and no N-word serial sweep.
+  // Five carry launches plus two small diagnostic reductions; no host carry
+  // loop/readback and no N-word serial sweep.
   // Output is balanced, but remains a diagnostic candidate until precision is proven.
   // Any fatal status invalidates the WHOLE result, not merely the flagged digit.
   void normalizeCandidates(const Buffer<WideCoefficient>& candidates,
                            Buffer<std::int64_t>& digits, Buffer<U32>& status) {
     requireSize(candidates); requireSize(digits); requireSize(status);
     requireDistinct({candidates.get(), digits.get(), status.get()});
+    reportReady = false;
     carryLocal(candidates, carryDigits, blockCarry, blockStatus, status, cl_uint(exponent));
     carryMaps(carryDigits, blockCarry, blockStatus, maps, cl_uint(exponent));
     scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
     scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
     carryFinish(carryDigits, blockCarry, blockStatus, prefix, groupPrefix, totalMap,
                 digits, status, cl_uint(exponent));
+    statusBlocks(blockStatus, partialReports);
+    statusFinish(partialReports, summary);
+    reportReady = true;
   }
   void squareNormalized(const Buffer<std::int64_t>& input,
                         Buffer<WideCoefficient>& candidates, Buffer<std::int64_t>& digits,
@@ -125,6 +167,29 @@ public:
     requireDistinct({lhs.get(), candidates.get(), digits.get(), status.get()});
     multiplyCandidates(lhs, candidates, status, factor);
     normalizeCandidates(candidates, digits, status);
+  }
+  // The normal policy rejects BEFORE enqueuing arithmetic. The validation
+  // policy returns candidate digits plus diagnostics and still rejects every
+  // fatal flag anywhere in the ring. It never declares exactness.
+  ReconstructionReport squareChecked(const Buffer<std::int64_t>& input,
+                        Buffer<WideCoefficient>& candidates, Buffer<std::int64_t>& digits,
+                        Buffer<U32>& status, U32 factor = 1, bool subtractTwo = false,
+                        PrecisionPolicy policy = PrecisionPolicy::RequireProven) {
+    requireExecution(policy);
+    squareNormalized(input, candidates, digits, status, factor, subtractTwo);
+    auto report = diagnostics();
+    report.requireUsable(policy);
+    return report;
+  }
+  ReconstructionReport multiplyChecked(const Buffer<std::int64_t>& lhs,
+                          Buffer<WideCoefficient>& candidates, Buffer<std::int64_t>& digits,
+                          Buffer<U32>& status, U32 factor = 1,
+                          PrecisionPolicy policy = PrecisionPolicy::RequireProven) {
+    requireExecution(policy);
+    multiplyNormalized(lhs, candidates, digits, status, factor);
+    auto report = diagnostics();
+    report.requireUsable(policy);
+    return report;
   }
 };
 } // namespace aevum_gold64

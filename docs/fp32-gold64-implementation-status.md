@@ -1,6 +1,6 @@
 # FP32 + Gold64 implementation checkpoint
 
-- Last confirmed remote implementation SHA before this milestone: `2e422fa1ef5b667d48b7e36531c51b5a7226cb82`.
+- Last confirmed remote implementation SHA before this milestone: `9234d42d5336203c5eae58aab34da633d42cdcea`.
   The containing milestone SHA is `git log -1 --format=%H -- docs/fp32-gold64-implementation-status.md`
   (a commit cannot embed its own SHA); the PR description records the confirmed remote SHA.
 - A1 complete in source: canonical Gold64 arithmetic (host/OpenCL), packed
@@ -44,8 +44,20 @@
   The exact monotone segment maps compose associatively. A fixed point of the
   total map closes the cycle modulo 2^p-1; prefix maps select every block's
   incoming correction. The result can have redundant balanced encodings.
-- Next: aggregate fatal status globally and introduce explicit precision-policy
-  acceptance/rejection before wiring supervised execution into EngineApi.
+- C3 complete in source: two small metadata reductions expose global flags,
+  first fatal 256-digit block, fatal-block count and unproven-block count.
+  `squareChecked`/`multiplyChecked` reject their default RequireProven policy
+  before arithmetic dispatch. Explicit SupervisedValidation returns normalized
+  candidates only after global fatal-error rejection; diagnostics remain
+  accessible on failure. No flag/tolerance can certify a near-integer quotient.
+- Precision policy: no rigorous bound has been established for input rounding,
+  generated weights/twiddles, all FMA/butterfly stages, inverse scaling/export
+  and quotient rounding together. Target 136279841 / 4194304 remains unproven.
+  Type2 limits are not reused. Factor 3 is applied exactly after the lift, so
+  a wrong lift becomes a 3*p error, not a precision margin. Checked signed-wide
+  carry handling does not validate the chosen multiple of the Gold64 prime.
+- Next: explicit experimental FFT configuration and supervised EngineApi
+  register execution; keep every production workload rejected for this type.
 - Risks: arithmetic/codegen and root/weight agreement require validation;
   geometry legality is not a hybrid coefficient/carry capacity bound.
 - Missing: certified quotient bound, engine/type/CLI integration, all validation.

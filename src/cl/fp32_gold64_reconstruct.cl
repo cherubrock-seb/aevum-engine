@@ -234,7 +234,7 @@ void gold64_carry_scan(__global const uint * restrict maps,
 __kernel __attribute__((reqd_work_group_size(256,1,1)))
 void gold64_carry_finish(__global const long * restrict local_digit,
                          __global const long * restrict block_carry,
-                         __global const uint * restrict block_status,
+                         __global uint * restrict block_status,
                          __global const uint * restrict prefix,
                          __global const uint * restrict group_prefix,
                          __global const uint * restrict total_map,
@@ -270,4 +270,40 @@ void gold64_carry_finish(__global const long * restrict local_digit,
   if (carry != (long)gold64_map_value(through, fixed)) flags |= G64_CARRY_NONCONVERGENCE;
   // Propagate a block's late error to every digit it owns. Blocks are disjoint.
   for (uint i = 0; i < G64_CARRY_BLOCK; ++i) status[k * G64_CARRY_BLOCK + i] |= flags;
+  block_status[k] = flags;
+}
+
+// (OR of flags, first fatal block or UINT_MAX, fatal blocks, unproven blocks).
+// Only segment metadata is read: no second N-word status sweep or atomics.
+static inline uint4 gold64_report_merge(uint4 a, uint4 b) {
+  return (uint4)(a.x | b.x, min(a.y, b.y), a.z + b.z, a.w + b.w);
+}
+static inline uint4 gold64_report_reduce(__local uint4 *data) {
+  const uint lane = (uint)get_local_id(0);
+  barrier(CLK_LOCAL_MEM_FENCE);
+  for (uint stride = 128u; stride; stride >>= 1u) {
+    if (lane < stride) data[lane] = gold64_report_merge(data[lane], data[lane + stride]);
+    barrier(CLK_LOCAL_MEM_FENCE);
+  }
+  return data[0];
+}
+__kernel __attribute__((reqd_work_group_size(256,1,1)))
+void gold64_status_blocks(__global const uint * restrict block_status,
+                          __global uint4 * restrict partial) {
+  __local uint4 data[256];
+  const uint j = (uint)get_global_id(0), lane = (uint)get_local_id(0);
+  const uint flags = block_status[j], fatal = (uint)((flags & G64_FATAL) != 0u);
+  data[lane] = (uint4)(flags, fatal ? j : ~0u, fatal,
+                       (uint)((flags & G64_UNPROVEN_PRECISION) != 0u));
+  const uint4 report = gold64_report_reduce(data);
+  if (!lane) partial[get_group_id(0)] = report;
+}
+__kernel __attribute__((reqd_work_group_size(256,1,1)))
+void gold64_status_finish(__global const uint4 * restrict partial,
+                          __global uint4 * restrict summary) {
+  __local uint4 data[256];
+  const uint lane = (uint)get_local_id(0);
+  data[lane] = lane < G64_CARRY_BLOCKS / 256u ? partial[lane] : (uint4)(0u, ~0u, 0u, 0u);
+  const uint4 report = gold64_report_reduce(data);
+  if (!lane) summary[0] = report;
 }

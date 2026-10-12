@@ -18,7 +18,7 @@ transform geometries representing the same IBDWT convolution:
 | Arithmetic/tables | `Gold64Plan.h`, `gold64_arith.cl` | Canonical residues, Marin roots/weights, O(N) weight recurrence |
 | Exact modular plane | `Gold64Gpu.h`, `gold64_transform.cl` | Marin radix-64 + fused radix-1024 square/prepared multiply, natural-order modular output |
 | Approximate plane | `Fp32Gold64Gpu.h`, `fp32_gold64_bridge.cl` | Existing Aevum FP32 kernels at 512:8:512/202, signed 64-bit input, tiled layout bridge |
-| Candidate lift | `Fp32Gold64Reconstruction.h`, `fp32_gold64_reconstruct.cl` | Signed 128-bit coefficients, factor 1/3, square-minus-two, individual carry split |
+| Candidate lift/carry | `Fp32Gold64Reconstruction.h`, `fp32_gold64_reconstruct.cl` | Signed 128-bit coefficients, factor 1/3, square-minus-two, full cyclic normalization and global diagnostics |
 
 The headers expose source-level OpenCL experiments using Aevum's Queue,
 Buffer and KernelCompiler. No FFT type, CLI plan, Engine API operation or
@@ -53,11 +53,10 @@ exact integer operations on that candidate.
   invalid residues, unsupported operations and carry overflow are flagged.
 - The 33-bit digit-format gate and the 4M root geometry do **not** establish
   M136279841 capacity. A rigorous FP32 reconstruction-error bound is missing.
-- The carry primitive splits each coefficient independently into a balanced
-  digit and signed 64-bit outgoing carry. Inter-digit and cyclic long-carry
-  propagation are **not implemented**. Its output is not a normalized residue.
+- Full cyclic carry is implemented in source, with explicit overflow and
+  consistency flags. Its output remains a normalized reconstruction candidate.
 - Gerbicz/register operations, persistence and a dedicated engine/type path
-  remain unwired. Full milestones C, D and E remain incomplete.
+  remain unwired. Engine integration and all validation remain incomplete.
 
 ## Validation still required
 
@@ -69,7 +68,7 @@ Owner-led validation must first compile the headers/kernels, compare host and
 device arithmetic/root/weight tables, and compare the actual two-plane square
 and prepared multiplication against exact weighted coefficients (including
 signed inputs, impulses, boundary values and hostile patterns). Then establish
-the quotient bound, implement full carry, and validate the resulting engine
+the quotient bound, validate full carry, and validate the resulting engine
 against trusted residues, factor-3/LL and Gerbicz cases on RTX 3080 and Radeon VII.
 Paired performance measurements come after correctness; no speedup is claimed.
 
@@ -81,3 +80,32 @@ Selected Gold64 arithmetic and packed transform functions derive from Marin
 4M dispatch sequence from `include/marin/engine_gpu.h`.
 The MIT notice is retained in `licenses/Marin-MIT.txt`. Existing Aevum FP32
 kernels and repository licensing are retained.
+# Cyclic carry and precision-policy continuation
+
+The normalized candidate APIs now use 256-digit segments and a two-level
+three-state map prefix scan. They solve the cyclic carry fixed point in five
+bounded GPU launches, followed by two small diagnostic reductions. Negative
+wrap, signed-wide addition overflow, signed-64 local carry overflow and final
+block-exit consistency are explicit. This is exact normalization of the lifted
+coefficients, not evidence that FP32 selected the correct coefficients.
+
+For exponent 136279841, N=4194304, balanced inputs have 32/33-bit widths. FP32
+conversion already rounds large digits. The reused kernels then introduce
+weight/twiddle approximation, FMA/butterfly roundoff and inverse/export error.
+The quotient calculation additionally rounds the modular residue conversion,
+reciprocal correction and subtraction. A certificate would need a conservative
+combined error strictly below half a Gold64 modulus (including quotient-stage
+error), for every supported input and actual compiler arithmetic mode. No such
+bound has been established here; a small fractional quotient distance is not
+that bound. The integer range check abs(quotient)<2^23 is only representability.
+It bounds lifted candidates below 2^87 and factor-3 candidates below 2^89;
+it cannot certify the true coefficient or copy a Type2 exponent limit.
+
+`PrecisionPolicy::RequireProven` rejects before dispatch. Only an explicit
+`SupervisedValidation` request can execute the checked normalized APIs, and
+every fatal flag anywhere in the cyclic result rejects it. The report preserves
+UnprovenPrecision even when all operational checks pass. Factor 3 is exact after
+lifting, so it triples any wrong-prime-multiple error and supplies no FP32
+headroom. There is no production PRP/LL acceptance path. This source has not
+been compiled, tested or GPU-validated.
+
