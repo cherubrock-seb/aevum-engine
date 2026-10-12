@@ -1,4 +1,4 @@
-// Copyright (C) Mihai Preda
+// Copyright (C) Mihai Preda and George Woltman
 
 #include "math.cl"
 #include "trig.cl"
@@ -1021,6 +1021,34 @@ void OVERLOAD pfaDft7(GF61 *u, Z61 w) {
  const GF61 x5 = u[5];
  const GF61 x6 = u[6];
 
+#if AEVUM_PFA7_DOT128
+ // Adapted from George Woltman's GF61 pfaDftR in gpuowl
+ // e44e0976584bc3d1dd9c155c86c4d7c1c814b05a (same GPL license).
+ // Keep Aevum's row order, constants and explicit inverse-root orientation.
+ // Inputs have the ordinary GF61 range [0, M61 + epsilon]. Unreduced sums
+ // are at most 2*M61+epsilon, differences 3*M61+epsilon and remain positive.
+ const GF61 sum[3] = {x1 + x6, x2 + x5, x3 + x4};
+ const GF61 dif[3] = {x1 + neg(x6, 2), x2 + neg(x5, 2), x3 + neg(x4, 2)};
+ const Z61 c[3][3] = {{c1, c2, c3}, {c2, c3, c1}, {c3, c1, c2}};
+ const Z61 s[3][3] = {{s1, s2, s3}, {s2, M61 - s3, M61 - s1}, {s3, M61 - s1, s2}};
+ u[0] = modM61(x0 + sum[0] + sum[1] + sum[2]); // at most 7*M61+epsilon
+ #pragma unroll
+ for (u32 j = 0; j < 3; ++j) {
+   // Three products total less than 9*M61^2+epsilon (< 2^126). Do not
+   // use the 125-bit weak reduction: its unreduced result can overflow u64.
+   u128 pcx = mul64(sum[0].x, c[j][0]), pcy = mul64(sum[0].y, c[j][0]);
+   u128 qsx = mul64(dif[0].x, s[j][0]), qsy = mul64(dif[0].y, s[j][0]);
+   #pragma unroll
+   for (u32 k = 1; k < 3; ++k) {
+     pcx = mad64(sum[k].x, c[j][k], pcx); pcy = mad64(sum[k].y, c[j][k], pcy);
+     qsx = mad64(dif[k].x, s[j][k], qsx); qsy = mad64(dif[k].y, s[j][k], qsy);
+   }
+   const GF61 pc = x0 + U2(weakModM61(pcx, 128), weakModM61(pcy, 128)); // 0..3+
+   const GF61 qs = U2(weakModM61(qsx, 128), weakModM61(qsy, 128));      // 0..2+
+   u[j + 1] = modM61(pc + qs);            // 0..5+, back to ordinary GF61
+   u[6 - j] = modM61q(pc - qs, 3);        // add 3*M61 to the -2-..3+ range
+ }
+#else
  const GF61 a1 = add(x1, x6);
  const GF61 a2 = add(x2, x5);
  const GF61 a3 = add(x3, x4);
@@ -1059,6 +1087,7 @@ void OVERLOAD pfaDft7(GF61 *u, Z61 w) {
  u[5] = sub(t2, q2);
  u[3] = add(t3, q3);
  u[4] = sub(t3, q3);
+#endif
 }
 #endif
 
@@ -1321,3 +1350,4 @@ void OVERLOAD middleShuffle(local GF61 *lds, GF61 *u) {
 #undef WADDF
 #undef WSUB
 #undef WSUBF
+

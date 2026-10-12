@@ -287,6 +287,28 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  // Explicit experimental arithmetic selection, shared by CLI and Engine API.
+  // Resolve here (before compilation) so an incompatible plan cannot silently
+  // ignore the environment request. The define is part of the compiler key.
+  if (const char* value = std::getenv("AEVUM_PFA7_DOT128")) {
+    const auto it = config.find("AEVUM_PFA7_DOT128");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_PFA7_DOT128 selections");
+    config["AEVUM_PFA7_DOT128"] = value;
+  }
+  if (const auto it = config.find("AEVUM_PFA7_DOT128"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_PFA7_DOT128 must be 0 or 1");
+    if (it->second == "1") {
+      if (fft.pfa_radix != 7 || fft.shape.middle != 7 || !fft.NTT_GF61)
+        throw std::runtime_error("AEVUM_PFA7_DOT128 requires a PFA7 plan with a GF61 plane");
+#if defined(__APPLE__)
+      throw std::runtime_error("AEVUM_PFA7_DOT128 does not support the Apple staged pipeline");
+#endif
+      if (doLog) log("Experimental AEVUM_PFA7_DOT128=1: plan=%s GF61 middle-in/out; unvalidated.\n", fft.spec().c_str());
+    }
+  }
+
 #if defined(__APPLE__)
   // Keep the stock LDS transpose algorithms on Apple, but lower the middle
   // work-group pressure for the legacy OpenCL-to-Metal compiler. Explicit
@@ -4024,3 +4046,4 @@ void Gpu::regProfileReport(bool emit) {
   }
   profile.reset();
 }
+
