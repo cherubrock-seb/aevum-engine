@@ -446,6 +446,29 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
   const bool native_prp_auto =
       spec == "native-prp:auto" || spec == "native-prp:auto-amd";
   if (native_prp_auto) {
+const char* type2_auto_env =
+std::getenv("AEVUM_EXPERIMENT_TYPE2_PRP_AUTO");
+const bool type2_auto =
+type2_auto_env &&
+std::string(type2_auto_env) == "1";
+
+constexpr u64 kPrpType2MinExponent = 130000000u;
+constexpr u64 kPrpType2MaxExponent = 137000003u;
+
+if (type2_auto &&
+    E >= kPrpType2MinExponent &&
+    E <= kPrpType2MaxExponent) {
+  FFTConfig type2{
+      FFTShape{FFT3261, 512u, 8u, 512u}, 202u, CARRY_AUTO};
+  const double bits_per_word = E / double(type2.size());
+  const double factor3_safe_bpw =
+      type2.maxBpw() * args.fftOverdrive - std::log2(3.0);
+  if (bits_per_word >= type2.minBpw() &&
+      bits_per_word <= factor3_safe_bpw) {
+    return type2;
+  }
+}
+
     for (const TuneEntry& tuned : TuneEntry::readTuneFile(args)) {
       if (tuned.fft.shape.fft_type != FFT3161) continue;
       const double bits_per_word = E / double(tuned.fft.size());

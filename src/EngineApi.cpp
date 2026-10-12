@@ -651,6 +651,12 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
       report("tune-entry",normalize(entry.use));return entry.use;
     }
   }
+if (fft.shape.fft_type == FFT3261 &&
+envExactly("AEVUM_EXPERIMENT_TYPE2_PRP_AUTO", "1")) {
+auto use = parse("INPLACE=1,TAIL_TRIGS=0");
+report("experimental-type2-prp-auto", normalize(use));
+return use;
+}
   const auto control=mode();
   bool manual_kernel=false;
   for(const char* name:{"AEVUM_PFA_USE","AEVUM_RADIX1K","AEVUM_TYPE4_MULTI_Q","AEVUM_CARRY_WMUL",
@@ -1054,6 +1060,15 @@ public:
     shared_.background = &background_;
 
     std::string spec = fft_spec ? fft_spec : "";
+const bool experimental_type2_prp_auto =
+spec.empty() &&
+workload_ == aevum_autotune::Workload::Prp &&
+exponent_ >= 130000000u &&
+exponent_ <= 137000003u &&
+envExactly("AEVUM_EXPERIMENT_TYPE2_PRP_AUTO", "1");
+if (experimental_type2_prp_auto)
+spec = "native-prp:auto";
+
     // OpenCL vendor 0x1002 (4098) is AMD. Real PrMers native PRP normally
     // enters the plugin with an empty spec; route only the validated AMD
     // 210M..220M window through the device-aware pseudo-selector. Explicit
@@ -1432,6 +1447,9 @@ fft3261_env &&
 std::atoi(fft3261_env) != 0;
 const bool supported_aevum_type = fft.shape.fft_type == FFT3161 ||
 fft.shape.fft_type == FFT323161 ||
+(fft.shape.fft_type == FFT3261 &&
+pseudo_auto_spec &&
+envExactly("AEVUM_EXPERIMENT_TYPE2_PRP_AUTO", "1")) ||
 explicit_fft3261;
 if (!supported_aevum_type && !apple_diagnostic_plane)
 throw std::runtime_error(
