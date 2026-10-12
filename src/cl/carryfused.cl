@@ -1979,6 +1979,53 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
 #elif FFT_TYPE == FFT3161
 
+#ifndef AEVUM_CARRY_DEFER61_REDUCE_V1
+#define AEVUM_CARRY_DEFER61_REDUCE_V1 0
+#endif
+
+// F1: only the inverse GF61 radix-4 tail feeding FFT3161 CRT may stay
+// unreduced. Generic transforms and the forward transform retain their tails.
+#if AEVUM_CARRY_DEFER61_REDUCE_V1 && WIDTH == 1024 && NW == 4 && \
+    WordSize == 8 && (WMUL == 1 || WMUL == 2) && !PFA_RADIX && \
+    !CUDA_BACKEND && !AEVUM_GF61_LIMB32 && (AMDGPU || NVIDIAGPU) && \
+    __OPENCL_C_VERSION__ >= 200
+#define AEVUM_CARRY_DEFER61_REDUCE_ACTIVE 1
+#else
+#define AEVUM_CARRY_DEFER61_REDUCE_ACTIVE 0
+#endif
+
+#if AEVUM_CARRY_DEFER61_REDUCE_ACTIVE
+void aevumInverseWidth61DeferredReduce(local GF61 *lds, GF61 *u,
+                                     TrigGF61 trig, u32 numWG, u32 lowMe) {
+  // Same stages, twiddles, shuffles and barriers as fft_common(GF61).
+#if !UNROLL_W
+  __attribute__((opencl_unroll_hint(1)))
+#endif
+  for (u32 s = 1; s < G_W; s *= NW) {
+    fft4(u);
+    tabMul(trig, u, s, lowMe);
+    shufl(lds, u, s, numWG, lowMe);
+  }
+
+  // fft4's final butterfly, with its 3*M61 biases but no modM61 folds.
+  // Each input is at most M61+7. The sum output is <=4*M61+28;
+  // each biased difference is in [M61-14, 5*M61+14].
+  X2q(&u[0], &u[2]);
+  X2q_mul_t4(&u[1], &u[3]);
+  X2q(&u[0], &u[1]);
+  X2q(&u[2], &u[3]);
+  for (u32 i = 1; i < 4; ++i) {
+    u[i].x += 3 * M61;
+    u[i].y += 3 * M61;
+  }
+  SWAP(u[1], u[2]);
+
+  // These values are private inputs to weightAndCarryOne only. Its inverse
+  // rotation, CRT additions and final modM61 accept this bound without u64
+  // overflow; see docs/perf-f1-deferred-gf61-reduction.md for the range proof.
+}
+#endif
+
 // The "carryFused" is equivalent to the sequence: fftW, carryA, carryB, fftPremul.
 // It uses "stairway forwarding" (forwarding carry data from one workgroup to the next)
 KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShuttle, P(u32) ready, Trig smallTrig, P(uint) bufROE) {
@@ -2023,7 +2070,11 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   dependentLaunchWait();   // Previous kernel was fftMiddleOutGF61
 
   readCarryFusedLine(in61, u61, line, lowMe);
+#if AEVUM_CARRY_DEFER61_REDUCE_ACTIVE
+  aevumInverseWidth61DeferredReduce(lds61 + zerohack, u61, smallTrig61 + zerohack, WMUL, lowMe);
+#else
   fft_WIDTH1(lds61 + zerohack, u61, smallTrig61 + zerohack, WMUL, lowMe);
+#endif
 
   Word2 wu[NW];
 
