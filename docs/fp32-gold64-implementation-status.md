@@ -1,6 +1,6 @@
 # FP32 + Gold64 implementation checkpoint
 
-- Last published implementation SHA before this source correction: `8f022198cb23ea112a73215a8684d3fa2bbbaabc`.
+- Last confirmed remote implementation SHA before this milestone: `2e422fa1ef5b667d48b7e36531c51b5a7226cb82`.
   The containing milestone SHA is `git log -1 --format=%H -- docs/fp32-gold64-implementation-status.md`
   (a commit cannot embed its own SHA); the PR description records the confirmed remote SHA.
 - A1 complete in source: canonical Gold64 arithmetic (host/OpenCL), packed
@@ -27,15 +27,32 @@
   dispatch, including the differing 16-byte input / 8-byte carry output strides.
   The FP32 export preserves carry.cl's double-biased fractional counter
   (`fracBits(word)-1`), including digit zero's inverse-weight boundary.
-- Next: `src/cl/fp32_gold64_reconstruct.cl::gold64_split_wide` and
-  `Fp32Gold64Reconstruction.h`: implement complete inter-digit/cyclic long-carry
-  propagation, then derive the FP32 quotient error bound and engine gate.
+- C2 complete in source: `gold64_carry_local/maps/scan/finish` and host
+  `normalizeCandidates`, `squareNormalized`, `multiplyNormalized` perform full
+  balanced cyclic carry, including negative carries and word-zero wrap.
+  Each of 16384 segments owns 256 digits; two work-group scans compose exact
+  three-state carry maps. Five launches, O(N) work for this fixed geometry,
+  one N-word signed-64 scratch plus small segment metadata. No serial N-word
+  sweep, convergence loop or assumption that one extra pass suffices.
+  Signed-128 addition and signed-64 local-carry representability are checked;
+  failed fixed-point/exit consistency reports CarryNonconvergence. Any fatal
+  status invalidates the entire result. Input/output buffers must be distinct.
+- Carry argument: local zero-input normalization leaves balanced digits D and
+  outgoing T. For W bits in a segment, its correction for incoming x is
+  floor((R+x)/2^W), where 0 <= R < 2^W. W >= 256 and signed-64 T imply that
+  incoming T+delta, delta in {-1,0,1}, produces another correction in that set.
+  The exact monotone segment maps compose associatively. A fixed point of the
+  total map closes the cycle modulo 2^p-1; prefix maps select every block's
+  incoming correction. The result can have redundant balanced encodings.
+- Next: aggregate fatal status globally and introduce explicit precision-policy
+  acceptance/rejection before wiring supervised execution into EngineApi.
 - Risks: arithmetic/codegen and root/weight agreement require validation;
   geometry legality is not a hybrid coefficient/carry capacity bound.
-- Missing: certified quotient bound, inter-digit/cyclic long-carry propagation,
-  production carry integration, engine/type/CLI integration, all validation.
-  Milestones C (full carry), D and E are NOT complete. No explicit PRP plan exists.
+- Missing: certified quotient bound, engine/type/CLI integration, all validation.
+  Full carry is implemented in source, not compiled or validated. No explicit
+  operational PRP plan exists; UnprovenPrecision remains unconditional.
 - Explicit end-to-end Aevum path: **no**. Ready for GPU PRP validation: **no**.
-  Gold64 arithmetic/tables and two-plane square/multiply are ready for owner-led
-  compilation and GPU differential validation, not yet validated themselves.
+  Gold64 arithmetic/tables, two-plane square/multiply and normalized candidate
+  APIs are ready for owner-led compilation and GPU differential validation,
+  not yet validated themselves.
 - This session: source review only; no builds, tests, benchmarks or CI polling.

@@ -11,17 +11,22 @@ struct WideCoefficient { U64 lo, hi; };
 static_assert(sizeof(WideCoefficient) == 16, "OpenCL ulong2 coefficient ABI");
 enum ReconstructionStatus : U32 {
   UnprovenPrecision = 1, Nonfinite = 2, QuotientRange = 4, FractionalHint = 8,
-  InvalidResidue = 16, UnsupportedOperation = 32, CarryOverflow = 64
+  InvalidResidue = 16, UnsupportedOperation = 32, CarryOverflow = 64,
+  CarryNonconvergence = 128
 };
 
 class ReconstructionExperiment {
   static constexpr U32 n = GpuPlane::words;
+  static constexpr U32 blocks = n / 256, groups = blocks / 256;
   const U32 exponent;
   HybridConvolution convolution;
   KernelCompiler compiler;
   Buffer<U64> residues;
   Buffer<float> estimates;
+  Buffer<std::int64_t> carryDigits, blockCarry;
+  Buffer<U32> blockStatus, maps, prefix, groupMaps, groupPrefix, totalMap;
   Kernel lift, split;
+  Kernel carryLocal, carryMaps, scanBlocks, scanGroups, carryFinish;
 
   template<class T> static void requireSize(const Buffer<T>& x) {
     if (x.size != n) throw std::invalid_argument("Gold64 reconstruction buffer size mismatch");
@@ -45,10 +50,24 @@ public:
     : exponent(q), convolution(args, queue, q),
       compiler(args, queue.context, "-DGOLD64_N=4194304"),
       residues(nullptr, &queue, n), estimates(nullptr, &queue, n),
+      carryDigits(nullptr, &queue, n), blockCarry(nullptr, &queue, blocks),
+      blockStatus(nullptr, &queue, blocks), maps(nullptr, &queue, blocks),
+      prefix(nullptr, &queue, blocks), groupMaps(nullptr, &queue, groups),
+      groupPrefix(nullptr, &queue, groups), totalMap(nullptr, &queue, 1),
       lift("gold64_lift_candidates", &compiler, nullptr, &queue,
            "fp32_gold64_reconstruct.cl", "gold64_lift_candidates", n),
       split("gold64_split_candidates", &compiler, nullptr, &queue,
-            "fp32_gold64_reconstruct.cl", "gold64_split_candidates", n) {}
+            "fp32_gold64_reconstruct.cl", "gold64_split_candidates", n),
+      carryLocal("gold64_carry_local", &compiler, nullptr, &queue,
+                 "fp32_gold64_reconstruct.cl", "gold64_carry_local", blocks),
+      carryMaps("gold64_carry_maps", &compiler, nullptr, &queue,
+                "fp32_gold64_reconstruct.cl", "gold64_carry_maps", blocks),
+      scanBlocks("gold64_carry_scan_blocks", &compiler, nullptr, &queue,
+                 "fp32_gold64_reconstruct.cl", "gold64_carry_scan", blocks),
+      scanGroups("gold64_carry_scan_groups", &compiler, nullptr, &queue,
+                 "fp32_gold64_reconstruct.cl", "gold64_carry_scan", 256),
+      carryFinish("gold64_carry_finish", &compiler, nullptr, &queue,
+                  "fp32_gold64_reconstruct.cl", "gold64_carry_finish", blocks) {}
 
   void squareCandidates(const Buffer<std::int64_t>& input,
                         Buffer<WideCoefficient>& candidates, Buffer<U32>& status,
@@ -75,6 +94,37 @@ public:
     requireSize(candidates); requireSize(digits); requireSize(outgoing); requireSize(status);
     requireDistinct({candidates.get(), digits.get(), outgoing.get(), status.get()});
     split(candidates, digits, outgoing, status, cl_uint(exponent));
+  }
+  // Complete cyclic normalization of the supplied coefficients, modulo 2^q-1.
+  // Five bounded launches; no host carry loop/readback and no N-word serial sweep.
+  // Output is balanced, but remains a diagnostic candidate until precision is proven.
+  // Any fatal status invalidates the WHOLE result, not merely the flagged digit.
+  void normalizeCandidates(const Buffer<WideCoefficient>& candidates,
+                           Buffer<std::int64_t>& digits, Buffer<U32>& status) {
+    requireSize(candidates); requireSize(digits); requireSize(status);
+    requireDistinct({candidates.get(), digits.get(), status.get()});
+    carryLocal(candidates, carryDigits, blockCarry, blockStatus, status, cl_uint(exponent));
+    carryMaps(carryDigits, blockCarry, blockStatus, maps, cl_uint(exponent));
+    scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
+    scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
+    carryFinish(carryDigits, blockCarry, blockStatus, prefix, groupPrefix, totalMap,
+                digits, status, cl_uint(exponent));
+  }
+  void squareNormalized(const Buffer<std::int64_t>& input,
+                        Buffer<WideCoefficient>& candidates, Buffer<std::int64_t>& digits,
+                        Buffer<U32>& status, U32 factor = 1, bool subtractTwo = false) {
+    requireSize(digits);
+    requireDistinct({input.get(), candidates.get(), digits.get(), status.get()});
+    squareCandidates(input, candidates, status, factor, subtractTwo);
+    normalizeCandidates(candidates, digits, status);
+  }
+  void multiplyNormalized(const Buffer<std::int64_t>& lhs,
+                          Buffer<WideCoefficient>& candidates, Buffer<std::int64_t>& digits,
+                          Buffer<U32>& status, U32 factor = 1) {
+    requireSize(digits);
+    requireDistinct({lhs.get(), candidates.get(), digits.get(), status.get()});
+    multiplyCandidates(lhs, candidates, status, factor);
+    normalizeCandidates(candidates, digits, status);
   }
 };
 } // namespace aevum_gold64
