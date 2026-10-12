@@ -446,6 +446,17 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
   const bool native_prp_auto =
       spec == "native-prp:auto" || spec == "native-prp:auto-amd";
   if (native_prp_auto) {
+    for (const TuneEntry& tuned : TuneEntry::readTuneFile(args)) {
+      if (tuned.fft.shape.fft_type != FFT3161) continue;
+      const double bits_per_word = E / double(tuned.fft.size());
+      if (bits_per_word < tuned.fft.minBpw()) continue;
+      if (tuned.fft.maxExp() * args.fftOverdrive >= E) {
+        log("Aevum tuned PRP FFT: %s for exponent %" PRIu64 "\n",
+            tuned.fft.spec().c_str(), E);
+        return tuned.fft;
+      }
+    }
+
 const char* type2_auto_env =
 std::getenv("AEVUM_EXPERIMENT_TYPE2_PRP_AUTO");
 const bool type2_auto =
@@ -468,17 +479,6 @@ if (type2_auto &&
     return type2;
   }
 }
-
-    for (const TuneEntry& tuned : TuneEntry::readTuneFile(args)) {
-      if (tuned.fft.shape.fft_type != FFT3161) continue;
-      const double bits_per_word = E / double(tuned.fft.size());
-      if (bits_per_word < tuned.fft.minBpw()) continue;
-      if (tuned.fft.maxExp() * args.fftOverdrive >= E) {
-        log("Aevum tuned PRP FFT: %s for exponent %" PRIu64 "\n",
-            tuned.fft.spec().c_str(), E);
-        return tuned.fft;
-      }
-    }
 
     // Radeon VII high-range PRP measurements show the 8M 1K/radix-8 shape
     // materially faster than generic AUTO. Runtime enters this internal alias
