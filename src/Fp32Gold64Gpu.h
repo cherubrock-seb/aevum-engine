@@ -71,7 +71,10 @@ public:
     preparedReady = false;
     if (!prepared) prepared = std::make_unique<Buffer<double>>(nullptr, queue, half);
     begin(rhs);
-    heightIn(*prepared, a, setup.height);
+    // tailMul consumes the preserved RHS in the exact fftMidIn state.
+    // Advancing it through fftHin here makes the FP32 quotient hint describe
+    // a different convolution from the Gold64 residue plane.
+    *prepared << a;
     preparedReady = true;
   }
   void multiplyCoefficients(const Buffer<std::int64_t>& lhs, Buffer<float>& coefficients) {

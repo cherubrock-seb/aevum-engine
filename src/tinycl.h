@@ -28,6 +28,8 @@ typedef unsigned cl_profiling_info;
 typedef unsigned cl_event_info;
 typedef unsigned cl_command_queue_info;
 
+typedef u32 cl_uint;
+typedef u64 cl_ulong;
 typedef u64 cl_mem_flags;
 typedef u64 cl_svm_mem_flags;
 typedef u64 cl_device_type;
@@ -110,8 +112,10 @@ int clSetKernelArgSVMPointer(cl_kernel, unsigned, const void *);
 #define CL_PLATFORM_VERSION     0x0901
 #define CL_DEVICE_VENDOR_ID     0x1001
 #define CL_DEVICE_MAX_COMPUTE_UNITS 0x1002
+#define CL_DEVICE_MAX_WORK_GROUP_SIZE 0x1004
 #define CL_DEVICE_MAX_CLOCK_FREQUENCY 0x100C
 #define CL_DEVICE_GLOBAL_MEM_SIZE        0x101F
+#define CL_DEVICE_LOCAL_MEM_SIZE         0x1023
 #define CL_DEVICE_ERROR_CORRECTION_SUPPORT 0x1024
 #define CL_DEVICE_NAME          0x102B
 #define CL_DRIVER_VERSION       0x102D

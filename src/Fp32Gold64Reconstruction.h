@@ -19,8 +19,13 @@ enum ReconstructionStatus : U32 {
 enum class PrecisionPolicy { RequireProven, SupervisedValidation };
 struct ReconstructionReport {
   U32 flags, firstFatalBlock, fatalBlocks, unprovenBlocks;
-  static constexpr U32 fatalMask = Nonfinite | QuotientRange | InvalidResidue |
-      UnsupportedOperation | CarryOverflow | CarryNonconvergence;
+  // A large fractional quotient hint is empirically correlated with a wrong
+  // Gold64 lift on hostile dense M136279841 inputs. It remains diagnostic
+  // evidence, not a precision proof, but supervised execution must fail-stop
+  // instead of returning a known-unreliable candidate residue.
+  static constexpr U32 fatalMask = Nonfinite | QuotientRange | FractionalHint |
+      InvalidResidue | UnsupportedOperation | CarryOverflow |
+      CarryNonconvergence;
   bool proven() const { return !(flags & (fatalMask | UnprovenPrecision)); }
   void requireUsable(PrecisionPolicy policy) const {
     if (flags & fatalMask)
