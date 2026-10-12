@@ -1423,10 +1423,21 @@ args_.flags["MULTI_Q"] = "1";
                                (fft.shape.fft_type == FFT31 || fft.shape.fft_type == FFT61);
     }
 #endif
-    const bool supported_aevum_type = fft.shape.fft_type == FFT3161 ||
-                                      fft.shape.fft_type == FFT323161;
-    if (!supported_aevum_type && !apple_diagnostic_plane)
-      throw std::runtime_error("Aevum engine requires FFT3161 or FFT323161");
+const char* fft3261_env = std::getenv("AEVUM_EXPERIMENT_FFT3261");
+const bool explicit_fft3261 =
+fft.shape.fft_type == FFT3261 &&
+explicit_fft_spec &&
+!pseudo_auto_spec &&
+fft3261_env &&
+std::atoi(fft3261_env) != 0;
+const bool supported_aevum_type = fft.shape.fft_type == FFT3161 ||
+fft.shape.fft_type == FFT323161 ||
+explicit_fft3261;
+if (!supported_aevum_type && !apple_diagnostic_plane)
+throw std::runtime_error(
+"Aevum engine requires FFT3161 or FFT323161; "
+"experimental FFT3261 requires an explicit Type2 plan and "
+"AEVUM_EXPERIMENT_FFT3261=1");
 #if defined(__APPLE__)
     if (verbose && apple_diagnostic_plane) {
       log("Apple Aevum plane-isolation diagnostic: using FFT type %d (%s).\n",
