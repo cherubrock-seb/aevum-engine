@@ -38,7 +38,10 @@ KERNEL(256) gold64_fp32_unweight(CP(F2) in, P(F2) out, BigTabFP32 THREAD_WEIGHTS
   const u32 col = colBase + tx, row = rowBase + ty;
   const u32 me = col % G_W, gx = col / G_W;
   const u32 word = 2 * (col * BIG_HEIGHT + row);
-  const u32 frac = fracBits(word);
+  // carry.cl's hybrid combo_counter adds a low 0xffffffff to comboFracBits,
+  // so its low limb is fracBits(word)-1, not fracBits(word). Match that
+  // double bias, including digit zero, where a wrong comparison doubles w0.
+  const u32 frac = fracBits(word) - 1u;
   const u32 stepFrac = weightStepFracBits(gx);
   const u32 baseFrac = fracBits(me * BIG_HEIGHT * 2) + stepFrac;
   F base = fancyMul(THREAD_WEIGHTS[me].x, iweightStep(gx));
