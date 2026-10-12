@@ -1,0 +1,25 @@
+name: FP32 Gold64 experimental correctness
+
+on:
+  pull_request:
+    paths:
+      - 'src/cl/fp32_gold64_experiment.cl'
+      - 'tests/fp32_gold64_experiment_test.py'
+      - 'docs/fp32-gold64-experiment.md'
+      - '.github/workflows/fp32-gold64-experiment.yml'
+  push:
+    branches:
+      - exp/fp32-gold64-isolated-oracle
+
+permissions:
+  contents: read
+
+jobs:
+  cpu-reference:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Gold64 arithmetic, signed lift and OpenCL C syntax
+        run: |
+          python3 tests/fp32_gold64_experiment_test.py
