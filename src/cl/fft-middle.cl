@@ -812,8 +812,10 @@ void OVERLOAD pfaInverseMiddle(GF31 *u) {
 #endif
 #elif PFA_RADIX == 7
   pfaDft7(u, (Z31)PFA7_INVROOT31);
+#ifndef AEVUM_PFA_MIDOUT_INV31
 #pragma unroll
   for (u32 i = 0; i < 7; ++i) u[i] = pfaMulScalar(u[i], (Z31)PFA7_INV7_31);
+#endif
 #elif PFA_RADIX == 9
   const Z31 w9  = (Z31)473297587U;
   const Z31 w92 = (Z31)309107220U;
@@ -835,7 +837,13 @@ void OVERLOAD pfaInverseMiddle(GF31 *u) {
     o[k2] = a; o[k2+3] = b; o[k2+6] = c;
   }
 #pragma unroll
-  for (u32 i = 0; i < 9; ++i) u[i] = pfaMulScalar(o[i], inv9);
+  for (u32 i = 0; i < 9; ++i) {
+#ifdef AEVUM_PFA_MIDOUT_INV31
+    u[i] = o[i];
+#else
+    u[i] = pfaMulScalar(o[i], inv9);
+#endif
+  }
 #endif
 }
 #endif
@@ -1141,7 +1149,7 @@ void OVERLOAD pfaInverseMiddle(GF61 *u) {
   u[0] = pfaMulScalar(o0, inv); u[1] = pfaMulScalar(o1, inv); u[2] = pfaMulScalar(o2, inv);
 #endif
 #elif PFA_RADIX == 7
-#ifdef AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE
+#if defined(AEVUM_PFA_MIDOUT_INV61) || defined(AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE)
   pfaDft7(u, (Z61)PFA7_INVROOT61);
 #else
   pfaDft7(u, (Z61)PFA7_INVROOT61);
@@ -1168,7 +1176,7 @@ void OVERLOAD pfaInverseMiddle(GF61 *u) {
     pfaDft3(t[k2], t[3+k2], t[6+k2], (Z61)636260618972345635UL, &a, &b, &c);
     o[k2] = a; o[k2+3] = b; o[k2+6] = c;
   }
-#ifdef AEVUM_PFA9_MIDOUT_FUSE_INV_SCALE
+#if defined(AEVUM_PFA_MIDOUT_INV61) || defined(AEVUM_PFA9_MIDOUT_FUSE_INV_SCALE)
 #pragma unroll
   for (u32 i = 0; i < 9; ++i) u[i] = o[i];
 #else

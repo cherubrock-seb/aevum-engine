@@ -4,9 +4,25 @@
 // Inverse-only contract: omit per-output odd-axis normalization and apply it
 // once to the common binary row twiddle. Never define these in middle-in.
 // Adapted from Woltman pfaMiddleOut at e44e0976584bc3d1dd9c155c86c4d7c1c814b05a.
-#if AEVUM_PFA_FUSED_INVERSE && PFA_RADIX == 3
+#if AEVUM_PFA_FUSED_INVERSE
+#if PFA_RADIX == 3
 #define AEVUM_PFA_MIDOUT_INV31 1431655765U
 #define AEVUM_PFA_MIDOUT_INV61 1537228672809129301UL
+#elif PFA_RADIX == 7
+#define AEVUM_PFA_MIDOUT_INV31 PFA7_INV7_31
+// Preserve NVIDIA's already-integrated GF61 prescale implementation below.
+#if !NVIDIAGPU
+#define AEVUM_PFA_MIDOUT_INV61 PFA7_INV7_61
+#endif
+#elif PFA_RADIX == 9
+#define AEVUM_PFA_MIDOUT_INV31 1908874353U
+// NVIDIA already folds this GF61 scale into the common twiddle.
+#if !NVIDIAGPU
+#define AEVUM_PFA_MIDOUT_INV61 2049638230412172401UL
+#endif
+#else
+#error AEVUM_PFA_FUSED_INVERSE requires PFA_RADIX 3, 7 or 9
+#endif
 #endif
 #if NVIDIAGPU && PFA_RADIX == 7 && NTT_GF61
 #define AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE 1

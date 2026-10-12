@@ -309,8 +309,8 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     if (doLog) log("Experimental AEVUM_PFA7_DOT128=1: plan=%s GF61 middle-in/out; unvalidated.\n", fft.spec().c_str());
   }
   if (config.count("AEVUM_PFA_FUSED_INVERSE") && config.at("AEVUM_PFA_FUSED_INVERSE") == "1") {
-    if (fft.pfa_radix != 3 || fft.shape.middle != 3 || !fft.NTT_GF31 || !fft.NTT_GF61)
-      throw std::runtime_error("AEVUM_PFA_FUSED_INVERSE requires a PFA3 GF31+GF61 plan");
+    if (!fft.isPfa() || fft.shape.middle != fft.pfa_radix || !fft.NTT_GF31 || !fft.NTT_GF61)
+      throw std::runtime_error("AEVUM_PFA_FUSED_INVERSE requires a PFA3/7/9 GF31+GF61 plan");
 #if defined(__APPLE__)
     throw std::runtime_error("AEVUM_PFA_FUSED_INVERSE does not support the Apple staged pipeline");
 #endif

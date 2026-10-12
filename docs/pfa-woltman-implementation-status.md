@@ -9,8 +9,10 @@ No KEEP decision and no measured speedup.
 - PrMers main reference: 0e788c3a1f47dfa64f2933ded59eb6d0bc8a3161 (no integration change needed).
 - Woltman gpuowl master reference: e44e0976584bc3d1dd9c155c86c4d7c1c814b05a.
 - Last confirmed remote implementation commit when writing this milestone:
-  c76b53ff529adbc5f524b9aaf9fe18a5dbcfe776 (PFA7 DOT128).
-  This source commit adds the PFA3 milestone; the Draft PR records its remote SHA.
+  c58cbb203ec1bb2648c913486018d4a19e15e3e1 (PFA3 fused inverse).
+  PFA7 DOT128 was first committed as c76b53ff529adbc5f524b9aaf9fe18a5dbcfe776.
+  This source commit adds the PFA7/PFA9 inverse extension; the Draft PR records
+  the final confirmed remote head (a commit cannot embed its own SHA).
 - Draft PR: https://github.com/cherubrock-seb/aevum-engine/pull/23.
 - Dedicated branch: exp/pfa-woltman-performance. PR #22 and its FP32/Gold64 branch
   are separate. No AUTO policy, capacity, overflow/carry guard or selector change.
@@ -55,8 +57,8 @@ Do not repeat already-present paired butterflies or rejected tuning experiments.
 
 Selection: set AEVUM_PFA7_DOT128=1 and explicitly request an existing legal
 pfa7:1:<width>:7:<height>:<variant> Engine API FFT spec. Existing PFA7 plans
-with other GF61-containing types also use the candidate GF61 plane; their FP32
-and GF31 planes are unchanged. The existing capacity checks still apply.
+with FFT323161 also use the candidate GF61 plane; DOT128 alone leaves FP32
+and GF31 unchanged. The existing capacity checks still apply.
 Unset the variable or set it to 0 for the equivalent PFA baseline. Direct
 -use AEVUM_PFA7_DOT128=1 is also recognized. This option does not select a shape
 or enable any otherwise-disallowed arithmetic type. Verbose engine creation
@@ -84,7 +86,8 @@ Good-Thomas ordering and binary normalization are preserved.
 
 Selection: AEVUM_PFA_FUSED_INVERSE=1 with a legal explicit
 pfa3:1:<width>:3:<height>:<variant> plan. Set AEVUM_PFA7_DOT128=0 or unset it.
-The Gpu.cpp gate accepts only PFA3 GF31+GF61 at this milestone and rejects Apple.
+The original PFA3 milestone gated this to PFA3 GF31+GF61; the extension below
+adds PFA7/PFA9. Apple staged kernels still reject.
 UseOptions.h also accepts the same name through -use. Off/unset is the baseline.
 
 src/cl/fftmiddleout.cl defines inverse-only scaling constants before including
@@ -102,13 +105,41 @@ hash. Remaining risks are missing/double scale across compile variants and
 backend code generation; only targeted source review was performed.
 
 
+## Implemented milestone: extend inverse fusion to PFA7 / PFA9
+
+AEVUM_PFA_FUSED_INVERSE=1 now supports explicit legal
+pfa3:1:<width>:3:<height>:<variant>, pfa7:1:<width>:7:<height>:<variant> and
+pfa9:1:<width>:9:<height>:<variant> plans, plus existing full/adaptive type-4
+PFA7/PFA9 plans. Inspect the logged resolved plan, since type-4 PFA9 may elide FP32.
+Use AEVUM_PFA7_DOT128=1 as an independent, combinable option only on PFA7.
+
+fftmiddleout.cl supplies the existing 1/7 and 1/9 constants. In fft-middle.cl,
+pfaInverseMiddle omits the matching per-output scale and pfaMiddleTwiddle applies
+it once. GF31 is covered for all three radices. GF61 is covered for PFA3 and
+non-NVIDIA PFA7/PFA9; NVIDIA's existing PFA7 prescale/PFA9 fused normalization
+continues unchanged and is not counted as new work. The host gate requires a
+matching radix/middle and both NTT planes, so every accepted plan has a changed
+GF31 inverse path. Apple staged kernels are rejected.
+
+This removes seven or nine scalar output normalizations in favor of one common
+twiddle normalization per newly covered plane. Both inverse stages are changed
+in the same commit. The natural output order of the radix-3 and 3x3 radix-9
+decompositions, Aevum's CRT/Good-Thomas permutation and normalized carry input
+are preserved. No root/weight table, buffer or prepared-operand format changes.
+Only fftmiddleout.cl defines the scale macros; forward kernels cannot see them.
+
+Changed files for this milestone: src/Gpu.cpp, src/cl/fftmiddleout.cl,
+src/cl/fft-middle.cl and this checkpoint. The complete campaign additionally
+changes src/UseOptions.h. No PrMers companion change is required.
+
+
 ## Owner validation handoff (not executed)
 
 Baseline SHA is above; candidate SHA is the confirmed Draft PR head.
 Use existing tests/native_pfa_dense_compare.cpp, native_pfa_engine_compare.cpp,
 engine_small_factor_gpu_test.cpp and the Engine API. Inspect each harness before
 invocation: native_pfa_engine_compare constructs a stock plan first, so globally
-enabling this strict PFA7 option would correctly reject that stock engine.
+enabling either strict candidate option would reject an incompatible stock engine.
 Scope selection to candidate engine creation (unset for baseline/production).
 Do not weaken the guard to accommodate a harness.
 
@@ -119,6 +150,11 @@ dense signed and boundary inputs, cyclic carry, repeated square, factor-3,
 square-minus-two where supported, prepared multiply, source mutation/reprepare,
 cache invalidation and independent engine instances. Check existing carry/accuracy
 errors. Invalid flag values and incompatible requested plans must fail clearly.
+For PFA7, validate DOT128 alone, fused inverse alone, and both together against
+both options off. For PFA3/PFA9, leave DOT128 off. On NVIDIA PFA7/PFA9, confirm
+the existing GF61 normalization remains single; the new fusion affects GF31.
+Include forced full FFT323161 PFA7/PFA9 where legal (pfa9full:4 for PFA9),
+as well as the resolved paired FFT3161 plans. FP32 arithmetic is not changed.
 
 Only after exact comparisons pass, measure end-to-end operations under identical
 GPU/backend/compiler, exponent, plan, carry, tuning and workload; record actual
@@ -127,12 +163,14 @@ legal production plan. Instruction counts are not performance measurements.
 
 ## Remaining work / exact next step
 
-PFA7: compile and differential validation pending; GF31 and FP32 are unchanged.
-PFA3: inverse normalization candidate integrated; compilation/validation pending.
-PFA9: no new candidate yet. Its existing 3x3 decomposition is retained; wide
-PFA7 dots do not transfer to the different radix-3 identity. Quick arithmetic
-is not replayed as a new experiment.
-Next implementation: extend inverse-only normalization to GF31 PFA9 and to
-GF61 PFA9 where NVIDIA does not already fuse it. Preserve that existing NVIDIA
-path and commit the connected stages together.
+PFA7: DOT128 GF61 plus fused inverse GF31/non-NVIDIA GF61 are integrated.
+PFA3/PFA9: fused inverse is integrated; the existing radix-3/3x3 butterflies
+are retained. PFA7's wide dots do not transfer to the different radix-3 identity;
+quick arithmetic is not replayed as a new experiment. FP32 is unchanged for
+every radix. No new retained-state, tail, carry or global-pass optimization.
+All candidates remain uncompiled and unvalidated; no end-to-end gain is established.
+Exact next step: owner compiles the option-off/on OpenCL and CUDA variants, then
+runs complete-residue comparisons at the logged legal plans using the matrix
+above. Scope flags to candidate engine construction. Record candidate head,
+compiler, backend and validation outcome before any timing or KEEP decision.
 
