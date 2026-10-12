@@ -39,6 +39,17 @@ void spin() {
 #define WMUL 2
 #endif
 
+#ifndef AEVUM_CARRY_FRESH_LDS_V1
+#define AEVUM_CARRY_FRESH_LDS_V1 0
+#endif
+// Only the first GF31 inverse transform in carryFused owns fresh LDS.
+// Preserve the production shuffle layout and every producer/consumer fence.
+#define AEVUM_CARRY_FRESH_LDS_ACTIVE \
+  (AEVUM_CARRY_FRESH_LDS_V1 == 1 && FFT_TYPE == FFT3161 && !PFA_RADIX && \
+   !CUDA_BACKEND && __OPENCL_C_VERSION__ >= 200 && (AMDGPU || NVIDIAGPU) && \
+   WIDTH == 512 && NW == 8 && G_W == 64 && SHUFL_BYTES_W == 8 && \
+   LDSPAD_W && !NOWG2 && !FAST_BARRIER && (WMUL == 1 || WMUL == 2))
+
 #if AMDGPU
 #define CarryShuttleAccess(me,i)        ((me) * NW + (i))                       // Generates denser global_load_dwordx4 instructions
 //#define CarryShuttleAccess(me,i)      ((me) * 4 + (i)%4 + (i)/4 * 4*G_W)      // Also generates global_load_dwordx4 instructions and unit stride when NW=8
@@ -1979,6 +1990,38 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
 #elif FFT_TYPE == FFT3161
 
+#if AEVUM_CARRY_FRESH_LDS_ACTIVE
+// This entry point is only valid before any work-item has accessed this LDS.
+// The ordinary fft_WIDTH1/2 functions keep their original reuse barriers.
+void aevumFirstWidth31(local GF31 *lds, GF31 *u, TrigGF31 trig, u32 numWG, u32 lowMe) {
+#if !UNROLL_W
+  __attribute__((opencl_unroll_hint(1)))
+#endif
+  for (u32 s = 1; s < G_W; s *= NW) {
+    fft_RADIX(u);
+    tabMul(trig, u, s, lowMe);
+    if (s == 1) {
+      // Exact padded radix-8 shufl32 mapping; only its entry bar is absent.
+      local F2 *firstLds = (local F2 *) lds;
+      F2 *raw = (F2 *) u;
+      if (numWG > 1) {
+        firstLds += ((u32) get_local_id(0) / G_W) * LDS_BYTES / sizeof(F2);
+      }
+      for (u32 i = 0; i < NW; ++i) {
+        firstLds[i * (G_W + 2) + lowMe] = raw[i];
+      }
+      bar(G_W);
+      for (u32 i = 0; i < NW; ++i) {
+        raw[i] = firstLds[i * G_W / 8 + lowMe / 8 + (lowMe & 7) * (G_W + 2)];
+      }
+    } else {
+      shufl(lds, u, s, numWG, lowMe);
+    }
+  }
+  fft_RADIX(u);
+}
+#endif
+
 // The "carryFused" is equivalent to the sequence: fftW, carryA, carryB, fftPremul.
 // It uses "stairway forwarding" (forwarding carry data from one workgroup to the next)
 KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShuttle, P(u32) ready, Trig smallTrig, P(uint) bufROE) {
@@ -2018,7 +2061,11 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   u32 zerohack = ZEROHACK_W * (u32) get_group_id(0) / 131072;
 
   readCarryFusedLine(in31, u31, line, lowMe);
+#if AEVUM_CARRY_FRESH_LDS_ACTIVE
+  aevumFirstWidth31(lds31 + zerohack, u31, smallTrig31 + zerohack, WMUL, lowMe);
+#else
   fft_WIDTH1(lds31 + zerohack, u31, smallTrig31 + zerohack, WMUL, lowMe);
+#endif
 
   dependentLaunchWait();   // Previous kernel was fftMiddleOutGF61
 
