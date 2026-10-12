@@ -42,10 +42,15 @@ void spin() {
 #ifndef AEVUM_CARRY_INVERSE61_FIRST_V1
 #define AEVUM_CARRY_INVERSE61_FIRST_V1 0
 #endif
+#ifndef AEVUM_CARRY_FRESH_LDS_V1
+#define AEVUM_CARRY_FRESH_LDS_V1 0
+#endif
 // Run the heavier inverse plane before retaining the other plane's result.
 // CUDA keeps its original programmatic dependent-launch ordering.
+// Fresh-LDS elision requires GF31 to stay first; do not combine both paths.
 #define AEVUM_CARRY_INVERSE61_FIRST_ACTIVE \
-  (AEVUM_CARRY_INVERSE61_FIRST_V1 == 1 && FFT_TYPE == FFT3161 && !PFA_RADIX && \
+  (AEVUM_CARRY_INVERSE61_FIRST_V1 == 1 && !AEVUM_CARRY_FRESH_LDS_V1 && \
+   FFT_TYPE == FFT3161 && !PFA_RADIX && \
    !CUDA_BACKEND && __OPENCL_C_VERSION__ >= 200 && (AMDGPU || NVIDIAGPU) && \
    (WIDTH == 512 || WIDTH == 1024) && (NW == 4 || NW == 8) && \
    (WMUL == 1 || WMUL == 2))
