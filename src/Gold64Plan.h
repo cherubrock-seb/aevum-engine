@@ -3,6 +3,7 @@
 // See licenses/Marin-MIT.txt. Aevum integration follows the repository license.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
