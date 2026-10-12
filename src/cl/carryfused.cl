@@ -1979,6 +1979,21 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 
 #elif FFT_TYPE == FFT3161
 
+// The first finalized word is balanced to at most 31 bits. Encode its two
+// residues from one 32-bit sign bias, without the generic wide reductions.
+#ifndef AEVUM_CARRY_SHARED_RESIDUE_V1
+#define AEVUM_CARRY_SHARED_RESIDUE_V1 0
+#endif
+#if AEVUM_CARRY_SHARED_RESIDUE_V1 && WordSize == 8 && \
+    EXP / NWORDS >= 1 && EXP / NWORDS <= 30 && \
+    (WIDTH == 512 || WIDTH == 1024) && (NW == 4 || NW == 8) && \
+    (WMUL == 1 || WMUL == 2) && !PFA_RADIX && !CUDA_BACKEND && \
+    (AMDGPU || NVIDIAGPU) && __OPENCL_C_VERSION__ >= 200
+#define AEVUM_CARRY_SHARED_RESIDUE_ACTIVE 1
+#else
+#define AEVUM_CARRY_SHARED_RESIDUE_ACTIVE 0
+#endif
+
 // The "carryFused" is equivalent to the sequence: fftW, carryA, carryB, fftPremul.
 // It uses "stairway forwarding" (forwarding carry data from one workgroup to the next)
 KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShuttle, P(u32) ready, Trig smallTrig, P(uint) bufROE) {
@@ -2236,8 +2251,21 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Generate big-word/little-word flag, propagate final carry
     bool biglit0 = frac_bits <= FRAC_BPW_HI;
     wu[i] = carryFinal(wu[i], carry[i], biglit0);
+#if AEVUM_CARRY_SHARED_RESIDUE_ACTIVE
+    // carryFinal balances x to bitlen(biglit0) <= 31, so x fits in i32.
+    // For x < 0, x-1 holds the low limb of x+M61; its low 31 bits are x+M31.
+    // For x >= 0, both residues are x. The second word is not narrowed.
+    i32 firstWord = (i32)wu[i].x;
+    u32 firstSign = (u32)(firstWord >> 31);
+    u32 firstLo = (u32)firstWord - (u32)(firstWord < 0);
+    Z31 first31 = firstLo & M31;
+    Z61 first61 = make_u64(firstSign & 0x1FFFFFFFu, firstLo);
+    u31[i] = U2(shl(first31, m31_weight_shift0), shl(make_Z31(wu[i].y), m31_weight_shift1));
+    u61[i] = U2(shl(first61, m61_weight_shift0), shl(make_Z61(wu[i].y), m61_weight_shift1));
+#else
     u31[i] = U2(shl(make_Z31(wu[i].x), m31_weight_shift0), shl(make_Z31(wu[i].y), m31_weight_shift1));
     u61[i] = U2(shl(make_Z61(wu[i].x), m61_weight_shift0), shl(make_Z61(wu[i].y), m61_weight_shift1));
+#endif
 
     // Generate weight shifts and frac_bits for next pair
     m31_combo_counter += m31_combo_bigstep;
