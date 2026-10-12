@@ -48,8 +48,8 @@ std::vector<KeyVal> parse(const std::string& text) {
        ((k.rfind("TABMUL_CHAIN",0)==0 || k.rfind("ZEROHACK_",0)==0) && n>1))
       throw std::runtime_error("unsupported AEVUM_PRP_USE value: "+k);
     if(k=="LOADS" || k=="STORES") {
-      if(n>(k=="LOADS"?44444u:44u))throw std::runtime_error("invalid load/store policy");
-      for(auto x=n;x;x/=10)if(x%10>4)throw std::runtime_error("invalid load/store digit");
+      if(n>(k=="LOADS"?55555u:44u))throw std::runtime_error("invalid load/store policy");
+      for(auto x=n;x;x/=10)if(x%10>(k.size()==5?5:4))throw std::runtime_error("invalid load/store digit");
     }
     // Native Gpu config is a map constructed from the use vector: first wins.
     values.emplace(k,std::to_string(n));
