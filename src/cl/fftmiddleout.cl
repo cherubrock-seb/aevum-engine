@@ -1,6 +1,11 @@
 // Copyright (C) Mihai Preda and George Woltman
 
 #include "base.cl"
+#if PFA_RADIX == 11
+// Woltman pfaMiddleOut: apply 1/11 to the common row twiddle, not to each
+// inverse output. This macro is deliberately absent from forward kernels.
+#define AEVUM_PFA11_INVERSE_TWIDDLE 1
+#endif
 #if NVIDIAGPU && PFA_RADIX == 7 && NTT_GF61
 #define AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE 1
 #endif

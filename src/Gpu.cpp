@@ -287,6 +287,36 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  // A PFA11 request must reach this exact implementation, including callers
+  // which construct FFTConfig directly rather than through bestFit.
+  if (const char* value = std::getenv("AEVUM_PFA11_DOT128")) {
+    auto it = config.find("AEVUM_PFA11_DOT128");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_PFA11_DOT128 selections");
+    config["AEVUM_PFA11_DOT128"] = value;
+  }
+  if (auto it = config.find("AEVUM_PFA11_DOT128"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_PFA11_DOT128 must be 0 or 1");
+    if (it->second == "1" && fft.pfa_radix != 11)
+      throw std::runtime_error("AEVUM_PFA11_DOT128=1 requires an explicit pfa11 plan");
+  }
+  if (fft.pfa_radix == 11) {
+    const char* enabled = std::getenv("AEVUM_EXPERIMENT_PFA11");
+    if (!enabled || string(enabled) != "1")
+      throw std::runtime_error("PFA11 requires AEVUM_EXPERIMENT_PFA11=1");
+    if (fft.shape.fft_type != FFT3161 || fft.shape.middle != 11)
+      throw std::runtime_error("PFA11 currently supports only FFT3161 with middle 11");
+    if (E > fft.maxExp())
+      throw std::runtime_error("PFA11 exponent exceeds the experimental capacity envelope");
+#if defined(__APPLE__)
+    throw std::runtime_error("PFA11 does not support the Apple staged pipeline");
+#endif
+    config.try_emplace("AEVUM_PFA11_DOT128", "1");
+    if (doLog) log("Experimental PFA11: plan=%s GF61 DOT128=%s, fused inverse twiddle; unvalidated.\n",
+                   fft.spec().c_str(), config.at("AEVUM_PFA11_DOT128").c_str());
+  }
+
 #if defined(__APPLE__)
   // Keep the stock LDS transpose algorithms on Apple, but lower the middle
   // work-group pressure for the legacy OpenCL-to-Metal compiler. Explicit
@@ -451,6 +481,31 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     const u32 nwords = fft.shape.size();
     defines += toDefine("PFA_LOG2_ROOT_TWO31", inverseModSmall(nwords % 31u, 31u));
     defines += toDefine("PFA_LOG2_ROOT_TWO61", inverseModSmall(nwords % 61u, 61u));
+
+    if (fft.pfa_radix == 11) {
+      // Woltman pfaDftR constants, generated for Aevum's base-field root
+      // convention. Do not copy upstream row permutation/trig layout.
+      for (const u32 bits : {31u, 61u}) {
+        const u64 p = (u64(1) << bits) - 1;
+        if ((p - 1) % 11) throw std::runtime_error("PFA11 requires an order-11 base-field root");
+        const u64 root = pfaPowMod(5, (p - 1) / 11, p);
+        if (root == 1 || pfaPowMod(root, 11, p) != 1)
+          throw std::runtime_error("PFA11 root-order proof failed");
+        const u64 inv2 = (p + 1) / 2;
+        string cosines, sines;
+        for (u32 k = 0; k < 11; ++k) {
+          const u64 a = pfaPowMod(root, k, p), b = pfaPowMod(root, (11 - k) % 11, p);
+          if (k) { cosines += ','; sines += ','; }
+          const string suffix = bits == 61 ? "UL" : "U";
+          cosines += to_string(pfaMulMod((a + b) % p, inv2, p)) + suffix;
+          sines += to_string(pfaMulMod((a + p - b) % p, inv2, p)) + suffix;
+        }
+        const string plane = to_string(bits);
+        defines += " -DPFA11_C" + plane + "=" + cosines;
+        defines += " -DPFA11_S" + plane + "=" + sines;
+        defines += toDefine("PFA11_INV" + plane, pfaPowMod(11, p - 2, p));
+      }
+    }
 
     if (fft.pfa_radix == 7) {
       constexpr u64 M31 = (u64(1) << 31) - 1;

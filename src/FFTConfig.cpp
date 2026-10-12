@@ -159,11 +159,16 @@ FFTShape::FFTShape(enum FFT_TYPES t, u32 w, u32 m, u32 h) :
   // Type 4 adds the FP32 residue plane.  Until dedicated tune data is
   // collected, inherit the next stock power-of-two plan and retain the
   // existing conservative capacity margin.
-  if ((t == FFT3161 && (m == 3 || m == 7 || m == 9)) ||
+  if ((t == FFT3161 && (m == 3 || m == 7 || m == 9 || m == 11)) ||
       (t == FFT323161 && (m == 7 || m == 9))) {
     const u32 reference_middle = m == 3 ? 4 : (m == 7 ? 8 : 16);
     bpw = FFTShape{t, w, reference_middle, h}.bpw;
-    for (float& value : bpw) value -= 0.20f;
+    for (float& value : bpw) {
+      value -= 0.20f;
+      // PFA11 has no validated capacity window. Restrict the experimental
+      // admission envelope; this is not a claim of calibrated capacity.
+      if (m == 11) value = std::min(value, 32.0f);
+    }
     return;
   }
 
@@ -249,6 +254,12 @@ FFTConfig::FFTConfig(const string& input_spec) {
   else if (startsWith(spec, "pfa9full:")) { requested_pfa = 9; force_full_type4 = true; spec = spec.substr(9); }
   else if (startsWith(spec, "pfa9fast:")) { requested_pfa = 9; adaptive_type4 = true; spec = spec.substr(9); }
   else if (startsWith(spec, "pfa9:")) { requested_pfa = 9; spec = spec.substr(5); }
+  else if (startsWith(spec, "pfa11:")) {
+    const char* enabled = std::getenv("AEVUM_EXPERIMENT_PFA11");
+    if (!enabled || string(enabled) != "1")
+      throw std::runtime_error("pfa11 requires AEVUM_EXPERIMENT_PFA11=1; source candidate is unvalidated");
+    requested_pfa = 11; spec = spec.substr(6);
+  }
   auto v = split(spec, ':');
 
   enum FFT_TYPES fft_type = FFT3161;
@@ -278,7 +289,7 @@ FFTConfig::FFTConfig(const string& input_spec) {
     }
     if (fft_type != FFT64 && fft_type != FFT32 && (m & (m - 1)) &&
         !(requested_pfa && m == requested_pfa)) {
-      log("NTT middle must be a power of two unless an explicit pfa3:/pfa7:/pfa9: plan is used.\n");
+      log("NTT middle must be a power of two unless an explicit pfa3:/pfa7:/pfa9:/pfa11: plan is used.\n");
       throw "Invalid FFT spec";
     }
   }
@@ -301,11 +312,11 @@ FFTConfig::FFTConfig(const string& input_spec) {
   }
   if (requested_pfa) {
     const bool paired_ntt = shape.fft_type == FFT3161 &&
-                            (requested_pfa == 3 || requested_pfa == 7 || requested_pfa == 9);
+                            (requested_pfa == 3 || requested_pfa == 7 || requested_pfa == 9 || requested_pfa == 11);
     const bool hybrid_fp32_crt = shape.fft_type == FFT323161 &&
                                  (requested_pfa == 7 || requested_pfa == 9);
     if ((!paired_ntt && !hybrid_fp32_crt) || shape.middle != requested_pfa)
-      throw std::runtime_error("PFA plans require FFT3161 middle 3/7/9 or FFT323161 middle 7/9");
+      throw std::runtime_error("PFA plans require FFT3161 middle 3/7/9/11 or FFT323161 middle 7/9");
     pfa_radix = requested_pfa;
     // Keep the existing PFA9 capacity-adaptive policy unchanged.  PFA7 Type4
     // is an explicit full FP32+GF31+GF61 diagnostic path until it has its own
@@ -728,6 +739,10 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
   // A FFT-spec was given, simply take the first FFT from the spec that can handle E
   if (!spec.empty()) {
     FFTConfig fft{spec};
+    // Neither -od nor the engine overcapacity escape hatch can widen the
+    // unvalidated PFA11 envelope. Existing radices retain their policy.
+    if (fft.pfa_radix == 11 && E > fft.maxExp())
+      throw std::runtime_error("PFA11 exponent exceeds the experimental capacity envelope; use a larger plan");
 
     // FFT323161 only pays for itself when its FP32 plane is required to lift
     // the coefficient range beyond the 92-bit GF31*GF61 CRT.  Every ordinary

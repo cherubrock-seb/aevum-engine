@@ -1,4 +1,4 @@
-// Copyright (C) Mihai Preda
+// Copyright (C) Mihai Preda and George Woltman
 
 #include "math.cl"
 #include "trig.cl"
@@ -769,7 +769,42 @@ void OVERLOAD pfaDft7(GF31 *u, Z31 w) {
 }
 #endif
 
+#if PFA_RADIX == 11
+// Adapted from George Woltman's pfaDftR (GF31), gpuowl
+// e44e0976584bc3d1dd9c155c86c4d7c1c814b05a, under the existing GPL license.
+// Aevum's gather already orders odd rows, so no upstream pfaRotate is needed.
+void OVERLOAD pfaDft11(GF31 *u, bool inverse) {
+  const Z31 c[11] = {PFA11_C31}, s[11] = {PFA11_S31};
+  const GF31 x0 = u[0];
+  GF31 sum[5], dif[5], dc = x0;
+  #pragma unroll
+  for (u32 k = 1; k <= 5; ++k) {
+    sum[k - 1] = add(u[k], u[11 - k]);
+    dif[k - 1] = sub(u[k], u[11 - k]);
+    dc = add(dc, sum[k - 1]);
+  }
+  u[0] = dc;
+  #pragma unroll
+  for (u32 j = 1; j <= 5; ++j) {
+    GF31 pc = pfaMulScalar(sum[0], c[j]), qs = pfaMulScalar(dif[0], s[j]);
+    #pragma unroll
+    for (u32 k = 2; k <= 5; ++k) {
+      pc = add(pc, pfaMulScalar(sum[k - 1], c[j * k % 11]));
+      qs = add(qs, pfaMulScalar(dif[k - 1], s[j * k % 11]));
+    }
+    pc = add(x0, pc);
+    // Inverse DFT = forward DFT with nonzero output indices reversed.
+    u[inverse ? 11 - j : j] = add(pc, qs);
+    u[inverse ? j : 11 - j] = sub(pc, qs);
+  }
+}
+#endif
+
+
 void OVERLOAD pfaForwardMiddle(GF31 *u) {
+#if PFA_RADIX == 11
+  pfaDft11(u, false);
+#endif
 #if PFA_RADIX == 3
   GF31 o0, o1, o2;
   pfaDft3(u[0], u[1], u[2], (Z31)1513477735U, &o0, &o1, &o2);
@@ -801,6 +836,13 @@ void OVERLOAD pfaForwardMiddle(GF31 *u) {
 }
 
 void OVERLOAD pfaInverseMiddle(GF31 *u) {
+#if PFA_RADIX == 11
+  pfaDft11(u, true);
+#ifndef AEVUM_PFA11_INVERSE_TWIDDLE
+  #pragma unroll
+  for (u32 k = 0; k < 11; ++k) u[k] = pfaMulScalar(u[k], (Z31)PFA11_INV31);
+#endif
+#endif
 #if PFA_RADIX == 3
   GF31 o0, o1, o2;
   pfaDft3(u[0], u[1], u[2], (Z31)634005911U, &o0, &o1, &o2);
@@ -853,7 +895,10 @@ void OVERLOAD pfaMiddleTwiddle(GF31 *u, u32 x, u32 y, TrigGF31 trig) {
   assert(x < WIDTH);
   assert(y < SMALL_HEIGHT);
   const u32 desired_root = x * y;
-  const GF31 w = cmul(TFLOAD(&trig[WIDTH + desired_root % SMALL_HEIGHT]), TFLOAD(&trig[desired_root / SMALL_HEIGHT]));
+  GF31 w = cmul(TFLOAD(&trig[WIDTH + desired_root % SMALL_HEIGHT]), TFLOAD(&trig[desired_root / SMALL_HEIGHT]));
+#ifdef AEVUM_PFA11_INVERSE_TWIDDLE
+  w = pfaMulScalar(w, (Z31)PFA11_INV31);
+#endif
   for (u32 k = 0; k < MIDDLE; ++k) { WADD(k, w); }
 }
 #endif
@@ -876,6 +921,8 @@ void OVERLOAD fft_MIDDLE(GF31 *u) {
 #elif PFA_RADIX == 7 && MIDDLE == 7
   pfaForwardMiddle(u);
 #elif PFA_RADIX == 9 && MIDDLE == 9
+  pfaForwardMiddle(u);
+#elif PFA_RADIX == 11 && MIDDLE == 11
   pfaForwardMiddle(u);
 #else
 #error UNRECOGNIZED MIDDLE
@@ -1062,7 +1109,65 @@ void OVERLOAD pfaDft7(GF61 *u, Z61 w) {
 }
 #endif
 
+#if PFA_RADIX == 11
+// Adapted from Woltman's GF61 pfaDftR at the same pinned commit as GF31.
+// Unlike upstream's y[11], output is written after all input pairs have been
+// captured. Only x0, five sums and five differences need to survive the loop.
+void OVERLOAD pfaDft11(GF61 *u, bool inverse) {
+  const Z61 c[11] = {PFA11_C61}, s[11] = {PFA11_S61};
+  const GF61 x0 = u[0];
+  GF61 sum[5], dif[5];
+  #pragma unroll
+  for (u32 k = 1; k <= 5; ++k) {
+#if AEVUM_PFA11_DOT128
+    sum[k - 1] = u[k] + u[11 - k];          // 0..2*M61+epsilon
+    dif[k - 1] = u[k] + neg(u[11 - k], 2); // positive, <=3*M61+epsilon
+#else
+    sum[k - 1] = add(u[k], u[11 - k]);
+    dif[k - 1] = sub(u[k], u[11 - k]);
+#endif
+  }
+  // Never sum all eleven loose inputs in u64: split 7 then 5 M61 bounds.
+  u[0] = modM61(modM61(x0 + sum[0] + sum[1] + sum[2]) + sum[3] + sum[4]);
+  #pragma unroll
+  for (u32 j = 1; j <= 5; ++j) {
+#if AEVUM_PFA11_DOT128
+    // Five products < 3*M61^2 each fit below 2^126. Full-width folding is
+    // required; weakModM61(...,125) could overflow its u64 intermediate.
+    u128 pcx = mul64(sum[0].x, c[j]), pcy = mul64(sum[0].y, c[j]);
+    u128 qsx = mul64(dif[0].x, s[j]), qsy = mul64(dif[0].y, s[j]);
+    #pragma unroll
+    for (u32 k = 2; k <= 5; ++k) {
+      pcx = mad64(sum[k - 1].x, c[j * k % 11], pcx);
+      pcy = mad64(sum[k - 1].y, c[j * k % 11], pcy);
+      qsx = mad64(dif[k - 1].x, s[j * k % 11], qsx);
+      qsy = mad64(dif[k - 1].y, s[j * k % 11], qsy);
+    }
+    const GF61 pc = x0 + U2(weakModM61(pcx, 128), weakModM61(pcy, 128)); // 0..3+
+    const GF61 qs = U2(weakModM61(qsx, 128), weakModM61(qsy, 128));      // 0..2+
+    u[inverse ? 11 - j : j] = modM61(pc + qs);      // 0..5+
+    u[inverse ? j : 11 - j] = modM61q(pc - qs, 3); // positive, <8*M61
+#else
+    // Equivalent PFA11 reference plan for later differential/performance A/B.
+    GF61 pc = pfaMulScalar(sum[0], c[j]), qs = pfaMulScalar(dif[0], s[j]);
+    #pragma unroll
+    for (u32 k = 2; k <= 5; ++k) {
+      pc = add(pc, pfaMulScalar(sum[k - 1], c[j * k % 11]));
+      qs = add(qs, pfaMulScalar(dif[k - 1], s[j * k % 11]));
+    }
+    pc = add(x0, pc);
+    u[inverse ? 11 - j : j] = add(pc, qs);
+    u[inverse ? j : 11 - j] = sub(pc, qs);
+#endif
+  }
+}
+#endif
+
+
 void OVERLOAD pfaForwardMiddle(GF61 *u) {
+#if PFA_RADIX == 11
+  pfaDft11(u, false);
+#endif
 #if PFA_RADIX == 3
   GF61 o0, o1, o2;
   pfaDft3(u[0], u[1], u[2], (Z61)1669582390241348315UL, &o0, &o1, &o2);
@@ -1094,6 +1199,13 @@ void OVERLOAD pfaForwardMiddle(GF61 *u) {
 }
 
 void OVERLOAD pfaInverseMiddle(GF61 *u) {
+#if PFA_RADIX == 11
+  pfaDft11(u, true);
+#ifndef AEVUM_PFA11_INVERSE_TWIDDLE
+  #pragma unroll
+  for (u32 k = 0; k < 11; ++k) u[k] = pfaMulScalar(u[k], (Z61)PFA11_INV61);
+#endif
+#endif
 #if PFA_RADIX == 3
   GF61 o0, o1, o2;
   pfaDft3(u[0], u[1], u[2], (Z61)636260618972345635UL, &o0, &o1, &o2);
@@ -1145,7 +1257,10 @@ void OVERLOAD pfaMiddleTwiddle(GF61 *u, u32 x, u32 y, TrigGF61 trig) {
   assert(x < WIDTH);
   assert(y < SMALL_HEIGHT);
   const u32 desired_root = x * y;
-#if defined(AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE)
+#if defined(AEVUM_PFA11_INVERSE_TWIDDLE)
+  const GF61 w = pfaMulScalar(cmul(TFLOAD(&trig[WIDTH + desired_root % SMALL_HEIGHT]),
+      TFLOAD(&trig[desired_root / SMALL_HEIGHT])), (Z61)PFA11_INV61);
+#elif defined(AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE)
 #if AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE == 1
   const GF61 w = cmul(
       pfaMulScalar(TFLOAD(&trig[WIDTH + desired_root % SMALL_HEIGHT]), (Z61)PFA7_INV7_61),
@@ -1185,6 +1300,8 @@ void OVERLOAD fft_MIDDLE(GF61 *u) {
 #elif PFA_RADIX == 7 && MIDDLE == 7
   pfaForwardMiddle(u);
 #elif PFA_RADIX == 9 && MIDDLE == 9
+  pfaForwardMiddle(u);
+#elif PFA_RADIX == 11 && MIDDLE == 11
   pfaForwardMiddle(u);
 #else
 #error UNRECOGNIZED MIDDLE
