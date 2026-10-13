@@ -3,10 +3,13 @@
 #include "fftwidth.cl"
 #include "middle.cl"
 #include "gold3_arith.cl"
-#if WIDTH != 512 || SMALL_HEIGHT != 512 || MIDDLE != 4 || NW != 8 || NH != 8 || WordSize != 8
-#error Gold3 requires 512:4:512 with 64-bit reduced modular input
+#if WIDTH != 512 || SMALL_HEIGHT != 512 || MIDDLE != 4 || NW != 8 || NH != 8
+#error Gold3 requires 512:4:512
 #endif
 #if FFT_TYPE == FFT61 && NTT_GF61 && !NTT_GF31 && !FFT_FP32 && !FFT_FP64
+#if WordSize != 8
+#error Gold3 GF61 input residue storage must be 64-bit
+#endif
 #define G3_GF GF61
 #define G3_TRIG TrigGF61
 #define G3_SCALAR u64
@@ -14,8 +17,11 @@
 #define G3_ROOT_TWO M61_LOG2_ROOT_TWO
 #define G3_REDUCE g3_digit61
 #define G3_MAKE make_Z61
-#define G3_GET get_Z61
+#define G3_CANON g3_mod61
 #elif FFT_TYPE == FFT31 && NTT_GF31 && !NTT_GF61 && !FFT_FP32 && !FFT_FP64
+#if WordSize != 4
+#error Gold3 GF31 input residue storage must be 32-bit
+#endif
 #define G3_GF GF31
 #define G3_TRIG TrigGF31
 #define G3_SCALAR u32
@@ -23,7 +29,7 @@
 #define G3_ROOT_TWO M31_LOG2_ROOT_TWO
 #define G3_REDUCE g3_digit31
 #define G3_MAKE make_Z31
-#define G3_GET get_Z31
+#define G3_CANON g3_mod31
 #else
 #error Gold3 companion requires exactly one modular plane
 #endif
@@ -74,7 +80,9 @@ KERNEL(G_W) gold3_fftW_export(P(G3_SCALAR) out, CP(G3_GF) in, G3_TRIG roots) {
 #pragma unroll
   for (u32 i = 0; i < NW; ++i) {
     const u32 j = 2*((me+G_W*i)*BIG_HEIGHT+row);
-    out[j] = G3_GET(shr(u[i].y, (gold3_weight_shift(j)+22u) % G3_PERIOD));
-    out[j+1] = G3_GET(shr(u[i].x, (gold3_weight_shift(j+1)+22u) % G3_PERIOD));
+    // Aevum permits redundant representatives; a zero inverse shift must
+    // still perform full canonical reduction before entering the CRT.
+    out[j] = G3_CANON(shr(u[i].y, (gold3_weight_shift(j)+22u) % G3_PERIOD));
+    out[j+1] = G3_CANON(shr(u[i].x, (gold3_weight_shift(j+1)+22u) % G3_PERIOD));
   }
 }

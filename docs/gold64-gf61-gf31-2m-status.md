@@ -2,7 +2,10 @@
 
 - Branch: `exp/gold64-gf61-gf31-exact-2m`, independent of PR #22.
 - Base: `ce0b8b5ee3aa4d7c79d55858f5bb1fa783073610`.
-- Last confirmed implementation commit (C): `9d1babbc59ec3ec6988201f77859bc4d116f4bd5`.
+- Last confirmed implementation commit (D): `b05ddac13ce7cfd9885fb20c264709533ab71568`.
+- Concurrent portable-scalar corrections and the external smoke harness were
+  preserved. This implementation session has not run that harness or reviewed
+  external execution evidence.
 - A implemented in `src/Gold3Plan.h` and `src/cl/gold3_arith.cl`: shared
   128-bit digit ABI, signed 192-bit arithmetic, exact Garner CRT constants,
   three residue conversions, balanced splitting, root/geometry checks.
@@ -34,6 +37,15 @@
   Production capacity stays zero; AUTO and existing selector policies unchanged.
 - Wide cyclic carry and Engine API: implemented, unvalidated.
 - Full owner-led compilation/differential GPU validation can begin.
-- Next source task: inspect integration and remove redundant scratch/launches
-  only where exactness and ownership remain clear (milestone E).
-- Production blocked. No builds, tests, benchmarks, SSH or CI polling run.
+- E in source: GF31 reduced import uses 32-bit storage (8 MiB less scratch),
+  final carry copies balanced remainders after the correction vanishes,
+  and modular export canonically reduces even zero-shift redundant residues.
+- Remaining validation blockers: compilation on RTX 3080 and gfx906, exact
+  dense/sparse/hostile plane comparisons against an independent integer oracle,
+  Gold64 radix-32 ordering, signs/digit-zero/normalization, cyclic long carry,
+  64/65-bit compact packing, factors 1/3, LL -2, prepared-cache invalidation.
+  Source capacity proof does not certify device code or production readiness.
+- Next exact step: owner-led OpenCL compilation, then plane comparisons via
+  `aevum_engine_gold3_set_digits` / `aevum_engine_gold3_get_residues`; no source
+  implementation milestone is intentionally left as a stub.
+- Production blocked. No builds, tests, benchmarks, SSH or CI polling run here.

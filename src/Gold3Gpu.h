@@ -89,7 +89,8 @@ template<bool GF61> class ModularPlane {
   Queue* queue;
   ModularSetup setup;
   KernelCompiler compiler;
-  Buffer<std::int64_t> transposed;
+  // Canonical GF31 residues fit 32 bits: save 8 MiB and halve import traffic.
+  Buffer<Residue> transposed;
   Buffer<double> a, b;
   std::unique_ptr<Buffer<double>> prepared;
   bool ready = false;

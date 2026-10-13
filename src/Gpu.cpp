@@ -761,7 +761,7 @@ aevum_gold3::ModularSetup aevum_gold3::makeModularSetup(
 #endif
   FFTConfig fft(FFTShape(gf61 ? FFT61 : FFT31, 512, 4, 512), 202, CARRY_64);
   // These are already-reduced field residues, not truncated wide digits.
-  fft.WordSize = 8;
+  fft.WordSize = gf61 ? 8 : 4;
   const vector<KeyVal> conf{{"PAD", "0"}, {"INPLACE", "0"}, {"TAIL_KERNELS", "2"},
       {"IN_WG", "128"}, {"OUT_WG", "128"}, {"IN_SIZEX", "16"}, {"OUT_SIZEX", "16"},
       {"FUSE_WEIGHT_BUTTERFLY", "0"}};

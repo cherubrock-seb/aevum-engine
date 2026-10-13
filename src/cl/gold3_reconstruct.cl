@@ -175,6 +175,12 @@ void gold3_apply_carry(__global const g3_digit* baseDigits, __global const g3_i1
   const uint expected = g3_eval(prefixes[s], groupState);
   g3_i192 carry = g3_add(tails[(s+G3_SEGMENTS-1) % G3_SEGMENTS], g3_state(state));
   for (uint i = 0; i < G3_SEGMENT; ++i) {
+    if (g3_equal(carry, g3_zero())) {
+      // Base digits are already balanced. Once the correction vanishes, no
+      // width fetch or further 192-bit arithmetic can change the remainder.
+      for (; i < G3_SEGMENT; ++i) { out[first+i] = baseDigits[first+i]; }
+      break;
+    }
     const uint j = first+i;
     g3_digit digit;
     carry = g3_split(g3_checked_add(g3_from_digit(baseDigits[j]), carry, status, s), widths[j], &digit);
