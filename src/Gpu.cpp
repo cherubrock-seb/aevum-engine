@@ -300,6 +300,15 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     if (const auto it = config.find(key); it != config.end() && it->second != "0" && it->second != "1")
       throw std::runtime_error(string(key) + " must be 0 or 1");
   }
+  bool pfa3_fused_gfx906_default = false;
+  if (!config.count("AEVUM_PFA_FUSED_INVERSE") &&
+      fft.isPfa() && fft.pfa_radix == 3 && fft.shape.middle == 3 &&
+      fft.NTT_GF31 && fft.NTT_GF61 &&
+      getDeviceName(id).find("gfx906") != string::npos) {
+    config["AEVUM_PFA_FUSED_INVERSE"] = "1";
+    pfa3_fused_gfx906_default = true;
+  }
+
   if (config.count("AEVUM_PFA7_DOT128") && config.at("AEVUM_PFA7_DOT128") == "1") {
     if (fft.pfa_radix != 7 || fft.shape.middle != 7 || !fft.NTT_GF61)
       throw std::runtime_error("AEVUM_PFA7_DOT128 requires a PFA7 plan with a GF61 plane");
@@ -314,7 +323,12 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
 #if defined(__APPLE__)
     throw std::runtime_error("AEVUM_PFA_FUSED_INVERSE does not support the Apple staged pipeline");
 #endif
-    if (doLog) log("Experimental AEVUM_PFA_FUSED_INVERSE=1: plan=%s inverse NTT row twiddle; unvalidated.\n", fft.spec().c_str());
+    if (doLog) {
+      if (pfa3_fused_gfx906_default)
+        log("Validated gfx906 PFA3 fused inverse default: plan=%s; set AEVUM_PFA_FUSED_INVERSE=0 to disable.\n", fft.spec().c_str());
+      else
+        log("Experimental AEVUM_PFA_FUSED_INVERSE=1: plan=%s inverse NTT row twiddle; unvalidated.\n", fft.spec().c_str());
+    }
   }
 
 #if defined(__APPLE__)
