@@ -72,6 +72,13 @@ class ReconstructionExperiment {
   bool reportReady = false;
 
   static U32 chooseCarryBlock(Queue& queue) {
+    if (const char* overrideValue = std::getenv("AEVUM_GOLD64_CARRY_BLOCK")) {
+      char* end = nullptr;
+      const unsigned long parsed = std::strtoul(overrideValue, &end, 10);
+      if (!*overrideValue || !end || *end || (parsed != 64ul && parsed != 128ul && parsed != 256ul))
+        throw std::invalid_argument("AEVUM_GOLD64_CARRY_BLOCK must be 64, 128, or 256");
+      return static_cast<U32>(parsed);
+    }
     cl_uint vendor = 0u;
     const auto id = queue.context->deviceId();
     if (clGetDeviceInfo(id, CL_DEVICE_VENDOR_ID, sizeof(vendor), &vendor, nullptr) != CL_SUCCESS)
