@@ -1,5 +1,6 @@
-// Experimental coefficient lift, not an acceptance test for PRP.
-// UNPROVEN_PRECISION is ALWAYS set until a certified FP32 error bound exists.
+// Gold64 reconstruction kernels.
+// Estimate-based FP32 diagnostic lifts set UNPROVEN_PRECISION themselves.
+// Exact CRT/linear paths enter the shared carry normalizer with status 0.
 #include "gold64_arith.cl"
 #if !defined(GOLD64_N) || GOLD64_N != 4194304
 #error Gold64 reconstruction currently requires the 4M-word convolution
@@ -250,8 +251,8 @@ void gold64_lift_candidates_fp64_diagnostic(
   status[j] = flags;
 }
 
-// Inspect wide carry boundaries without claiming a normalized Mersenne result.
-// All outputs retain UNPROVEN_PRECISION; the host exposes no PRP/LL entry point.
+// Inspect wide carry boundaries while preserving the precision status
+// supplied by the producing lift. Exact and diagnostic lifts share this code.
 __kernel __attribute__((reqd_work_group_size(256,1,1)))
 void gold64_split_candidates(__global const ulong2 * restrict candidate,
                              __global long * restrict digit,
@@ -261,7 +262,7 @@ void gold64_split_candidates(__global const ulong2 * restrict candidate,
   const ulong qj = (ulong)exponent * j;
   const uint width = (uint)(((qj + exponent + GOLD64_N - 1) >> 22) -
                             ((qj + GOLD64_N - 1) >> 22));
-  uint flags = status[j] | G64_UNPROVEN_PRECISION;
+  uint flags = status[j];
   if (!width || width > 33u || (flags & G64_FATAL)) {
     status[j] = flags | G64_UNSUPPORTED_OPERATION;
     digit[j] = 0; outgoing[j] = 0;
@@ -308,7 +309,9 @@ void gold64_carry_local(__global const ulong2 * restrict candidate,
                         __global uint * restrict status, uint exponent) {
   const uint k = (uint)get_global_id(0);
   long carry = 0L;
-  uint flags = G64_UNPROVEN_PRECISION;
+  // Precision provenance belongs to the coefficient-producing path. Preserve
+  // per-digit status instead of forcing every exact carry to be unproven.
+  uint flags = 0u;
   for (uint i = 0; i < G64_CARRY_BLOCK; ++i) {
     const uint j = k * G64_CARRY_BLOCK + i;
     flags |= status[j];
