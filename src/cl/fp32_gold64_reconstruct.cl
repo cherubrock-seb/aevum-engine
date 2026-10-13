@@ -291,6 +291,7 @@ void gold64_split_candidates(__global const ulong2 * restrict candidate,
 #define G64_CARRY_BLOCK 256u
 #endif
 #define G64_CARRY_BLOCKS (GOLD64_N / G64_CARRY_BLOCK)
+#define G64_CARRY_GROUPS (G64_CARRY_BLOCKS / 256u)
 #define G64_MAP_IDENTITY 36u
 static inline int gold64_map_value(uint map, int input) {
   return (int)((map >> (2u * (uint)(input + 1))) & 3u) - 1;
@@ -410,7 +411,15 @@ void gold64_carry_finish(__global const long * restrict block_carry,
     else if (gold64_map_value(total, 1) == 1) fixed = 1;
     else flags |= G64_CARRY_NONCONVERGENCE;
   }
+#if G64_CARRY_GROUPS > 256u
+  const uint super = group >> 8;
+  const uint group_lane = group & 255u;
+  const uint before_super = super ? super_prefix[super - 1u] : G64_MAP_IDENTITY;
+  const uint before_local_group = group_lane ? group_prefix[group - 1u] : G64_MAP_IDENTITY;
+  const uint before_group = gold64_map_compose(before_local_group, before_super);
+#else
   const uint before_group = group ? group_prefix[group - 1u] : G64_MAP_IDENTITY;
+#endif
   const uint before = (k % 256u) ? gold64_map_compose(prefix[k - 1u], before_group) : before_group;
   const uint through = gold64_map_compose(prefix[k], before_group);
   const int delta = gold64_map_value(before, fixed);
@@ -468,11 +477,22 @@ void gold64_status_blocks(__global const uint * restrict block_status,
   if (!lane) partial[get_group_id(0)] = report;
 }
 __kernel __attribute__((reqd_work_group_size(256,1,1)))
+void gold64_status_reduce(__global const uint4 * restrict input,
+                          __global uint4 * restrict partial,
+                          uint count) {
+  __local uint4 data[256];
+  const uint j = (uint)get_global_id(0), lane = (uint)get_local_id(0);
+  data[lane] = j < count ? input[j] : (uint4)(0u, ~0u, 0u, 0u);
+  const uint4 report = gold64_report_reduce(data);
+  if (!lane) partial[get_group_id(0)] = report;
+}
+__kernel __attribute__((reqd_work_group_size(256,1,1)))
 void gold64_status_finish(__global const uint4 * restrict partial,
-                          __global uint4 * restrict summary) {
+                          __global uint4 * restrict summary,
+                          uint count) {
   __local uint4 data[256];
   const uint lane = (uint)get_local_id(0);
-  data[lane] = lane < G64_CARRY_BLOCKS / 256u ? partial[lane] : (uint4)(0u, ~0u, 0u, 0u);
+  data[lane] = lane < count ? partial[lane] : (uint4)(0u, ~0u, 0u, 0u);
   const uint4 report = gold64_report_reduce(data);
   if (!lane) summary[0] = report;
 }
