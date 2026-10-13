@@ -44,6 +44,7 @@ class RegisterEngine {
                  cl_uint(operation), cl_uint(value));
     normalize(dst);
   }
+  void scale3(size_t dst) { linear(dst, dst, 4); }
 
 public:
   RegisterEngine(const Args& args, const Context& context, U32 q, size_t count)
@@ -131,21 +132,25 @@ public:
   }
   void square(size_t reg, U32 factor, bool subtractTwo = false) {
     requireFactor(factor);
-    // RequireProven is intentionally not bypassable through an environment flag.
+    if (subtractTwo && factor != 1)
+      throw std::invalid_argument("Gold64 square-minus-two requires factor 1");
+    // Match Engine API production semantics for small factors: first complete
+    // the exact square/carry at factor 1, then multiply the normalized residue.
     reconstruction.squareChecked(registers.at(reg), candidates, result, status,
-                                  factor, subtractTwo, PrecisionPolicy::SupervisedValidation);
-    // squareChecked already read/rejected the global report.
+                                  1, subtractTwo, PrecisionPolicy::SupervisedValidation);
     std::swap(registers.at(reg), result);
     invalidate(reg);
+    if (factor == 3) scale3(reg);
   }
   void multiply(size_t dst, size_t src, U32 factor) {
     requireFactor(factor);
     (void)registers.at(dst); (void)registers.at(src);
     if (preparedIndex != src) prepare(src, src);
     reconstruction.multiplyChecked(registers.at(dst), candidates, result, status,
-                                    factor, PrecisionPolicy::SupervisedValidation);
+                                    1, PrecisionPolicy::SupervisedValidation);
     std::swap(registers.at(dst), result);
     invalidate(dst);
+    if (factor == 3) scale3(dst);
   }
   void add(size_t dst, size_t src) { linear(dst, src, 1); }
   void subtract(size_t dst, size_t src) { linear(dst, src, 2); }
