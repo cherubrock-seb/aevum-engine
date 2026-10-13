@@ -274,11 +274,12 @@ void gold64_split_candidates(__global const ulong2 * restrict candidate,
   status[j] = flags;
 }
 
-// Cyclic carry lookahead. A work-item owns 256 consecutive digits, never N.
+// Cyclic carry lookahead. A work-item owns 64 consecutive digits, never N.
 // After a zero-input local normalization, block k has digits D_k and outgoing
 // signed-64 carry T_k. Its true outgoing carry is T_k + delta_k, where
 // delta_k = normalize_out(D_k, T_(k-1) + delta_(k-1)).
-// Each block contains at least 256 bits. For any signed-64 T and delta in
+// The host accepts this layout only when every 64-digit block spans at least
+// 256 exponent bits. For any signed-64 T and delta in
 // {-1,0,1}, the correction is in {-1,0,1}: normalization of balanced D plus
 // that input is floor((R + input)/2^W), 0 <= R < 2^W, W >= 256.
 // Thus each block is an exact monotone map of THREE states. Two levels of
@@ -286,7 +287,7 @@ void gold64_split_candidates(__global const ulong2 * restrict candidate,
 // closes the cycle, including negative wrap into digit zero. No iteration or
 // probabilistic stopping criterion is used. Multiple fixed points are valid
 // redundant balanced encodings of the same residue; prefer the zero state.
-#define G64_CARRY_BLOCK 256u
+#define G64_CARRY_BLOCK 64u
 #define G64_CARRY_BLOCKS (GOLD64_N / G64_CARRY_BLOCK)
 #define G64_MAP_IDENTITY 36u
 static inline int gold64_map_value(uint map, int input) {
