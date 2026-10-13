@@ -2044,6 +2044,20 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
 #endif
     throw std::runtime_error("Gold64 diagnostics require a Gold64 validation handle");
   }
+  void gold64_quotient_diagnostics(aevum_gold64_quotient_diagnostics* output) {
+    if (!output) throw std::invalid_argument("null Gold64 quotient diagnostics output");
+#ifndef CUDA_BACKEND
+    if (gold64_) {
+      const auto report = gold64_->quotientDiagnostics();
+      *output = {report.coefficients, report.fp32Fractional, report.fp64Fractional,
+                 report.quotientDisagreements, report.fp64Range,
+                 report.firstDisagreement, report.firstFp32Fractional,
+                 report.firstFp64Fractional};
+      return;
+    }
+#endif
+    throw std::runtime_error("Gold64 quotient diagnostics require a Gold64 validation handle");
+  }
   void gold64_get_digits(size_t src, int64_t* output, size_t count) {
     check_reg(src);
 #ifndef CUDA_BACKEND
@@ -2351,6 +2365,10 @@ int aevum_engine_debug_square_trace(aevum_engine_handle handle, size_t src, uint
 
 int aevum_engine_gold64_diagnostics(aevum_engine_handle handle, aevum_gold64_diagnostics* output) {
   return invoke([&] { runtime(handle).gold64_diagnostics(output); });
+}
+int aevum_engine_gold64_quotient_diagnostics(
+    aevum_engine_handle handle, aevum_gold64_quotient_diagnostics* output) {
+  return invoke([&] { runtime(handle).gold64_quotient_diagnostics(output); });
 }
 int aevum_engine_gold64_get_digits(aevum_engine_handle handle, size_t src, int64_t* output, size_t count) {
   return invoke([&] { runtime(handle).gold64_get_digits(src, output, count); });
