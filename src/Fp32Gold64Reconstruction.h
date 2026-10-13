@@ -57,26 +57,29 @@ class ReconstructionExperiment {
   const U32 carryBlock;
   const U32 blocks;
   const U32 groups;
+  const U32 superGroups;
   HybridConvolution convolution;
   KernelCompiler compiler;
   Buffer<U64> residues;
   Buffer<U32> residues31;
   Buffer<float> estimates;
   Buffer<std::int64_t> blockCarry;
-  Buffer<U32> blockStatus, maps, prefix, groupMaps, groupPrefix, totalMap;
+  Buffer<U32> blockStatus, maps, prefix, groupMaps, groupPrefix, superMaps, superPrefix, totalMap;
   Buffer<U32> quotientFlags;
-  Buffer<ReconstructionReport> partialReports, summary;
+  Buffer<ReconstructionReport> partialReports, superReports, summary;
   Kernel lift, liftFp64Diagnostic, liftM31Diagnostic, split, quotientProbe;
-  Kernel carryLocal, carryMaps, scanBlocks, scanGroups, carryFinish;
-  Kernel statusBlocks, statusFinish;
+  Kernel carryLocal, carryMaps, scanBlocks, scanGroups, scanSupers, carryFinish;
+  Kernel statusBlocks, statusReduce, statusFinish;
   bool reportReady = false;
 
   static U32 chooseCarryBlock(Queue& queue) {
     if (const char* overrideValue = std::getenv("AEVUM_GOLD64_CARRY_BLOCK")) {
       char* end = nullptr;
       const unsigned long parsed = std::strtoul(overrideValue, &end, 10);
-      if (!*overrideValue || !end || *end || (parsed != 64ul && parsed != 128ul && parsed != 256ul))
-        throw std::invalid_argument("AEVUM_GOLD64_CARRY_BLOCK must be 64, 128, or 256");
+      if (!*overrideValue || !end || *end ||
+          (parsed != 8ul && parsed != 16ul && parsed != 32ul &&
+           parsed != 64ul && parsed != 128ul && parsed != 256ul))
+        throw std::invalid_argument("AEVUM_GOLD64_CARRY_BLOCK must be 8, 16, 32, 64, 128, or 256");
       return static_cast<U32>(parsed);
     }
     cl_uint vendor = 0u;
@@ -142,6 +145,7 @@ public:
   ReconstructionExperiment(const Args& args, Queue& queue, U32 q)
     : exponent(q), carryBlock(chooseCarryBlock(queue)),
       blocks(n / carryBlock), groups(blocks / 256u),
+      superGroups((groups + 255u) / 256u),
       convolution(args, queue, q),
       compiler(args, queue.context, carryCompilerDefines(carryBlock)),
       residues(nullptr, &queue, n), residues31(nullptr, &queue, n),
@@ -149,9 +153,11 @@ public:
       blockCarry(nullptr, &queue, blocks),
       blockStatus(nullptr, &queue, blocks), maps(nullptr, &queue, blocks),
       prefix(nullptr, &queue, blocks), groupMaps(nullptr, &queue, groups),
-      groupPrefix(nullptr, &queue, groups), totalMap(nullptr, &queue, 1),
+      groupPrefix(nullptr, &queue, groups), superMaps(nullptr, &queue, superGroups),
+      superPrefix(nullptr, &queue, superGroups), totalMap(nullptr, &queue, 1),
       quotientFlags(nullptr, &queue, n),
-      partialReports(nullptr, &queue, groups), summary(nullptr, &queue, 1),
+      partialReports(nullptr, &queue, groups), superReports(nullptr, &queue, superGroups),
+      summary(nullptr, &queue, 1),
       lift("gold64_lift_candidates", &compiler, nullptr, &queue,
            "fp32_gold64_reconstruct.cl", "gold64_lift_candidates", n),
       liftFp64Diagnostic("gold64_lift_candidates_fp64_diagnostic", &compiler, nullptr, &queue,
@@ -174,10 +180,14 @@ public:
                   "fp32_gold64_reconstruct.cl", "gold64_carry_finish", blocks),
       statusBlocks("gold64_status_blocks", &compiler, nullptr, &queue,
                    "fp32_gold64_reconstruct.cl", "gold64_status_blocks", blocks),
+      statusReduce("gold64_status_reduce", &compiler, nullptr, &queue,
+                   "fp32_gold64_reconstruct.cl", "gold64_status_reduce",
+                   groups > 256u ? groups : 256u),
       statusFinish("gold64_status_finish", &compiler, nullptr, &queue,
                    "fp32_gold64_reconstruct.cl", "gold64_status_finish", 256) {
-    if (!carryBlock || n % carryBlock || blocks % 256u || !groups || groups > 256u)
-      throw std::logic_error("Gold64 carry block selection is incompatible with the two-level scan");
+    if (!carryBlock || n % carryBlock || blocks % 256u || !groups ||
+        !superGroups || superGroups > 256u)
+      throw std::logic_error("Gold64 carry block selection exceeds the three-level scan hierarchy");
     // The three-state carry map assumes the incoming signed-64 correction is
     // negligible versus a block radix. Keep at least 256 exponent bits per
     // selected block on every device.
@@ -258,9 +268,14 @@ public:
     carryLocal(candidates, digits, blockCarry, blockStatus, status, cl_uint(exponent));
     carryMaps(digits, blockCarry, blockStatus, maps, cl_uint(exponent));
     scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
-    scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
-    carryFinish(blockCarry, blockStatus, prefix, groupPrefix, totalMap,
-                 digits, status, cl_uint(exponent));
+    if (groups <= 256u) {
+      scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
+    } else {
+      scanGroups(groupMaps, groupPrefix, superMaps, cl_uint(groups));
+      scanSupers(superMaps, superPrefix, totalMap, cl_uint(superGroups));
+    }
+    carryFinish(blockCarry, blockStatus, prefix, groupPrefix, superPrefix, totalMap,
+                digits, status, cl_uint(exponent));
 
     // FractionalHint is expected to remain diagnostic here.  Reject only true
     // operational/range failures before exposing scratch output to the harness.
@@ -287,9 +302,14 @@ public:
     carryLocal(candidates, digits, blockCarry, blockStatus, status, cl_uint(exponent));
     carryMaps(digits, blockCarry, blockStatus, maps, cl_uint(exponent));
     scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
-    scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
-    carryFinish(blockCarry, blockStatus, prefix, groupPrefix, totalMap,
-                 digits, status, cl_uint(exponent));
+    if (groups <= 256u) {
+      scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
+    } else {
+      scanGroups(groupMaps, groupPrefix, superMaps, cl_uint(groups));
+      scanSupers(superMaps, superPrefix, totalMap, cl_uint(superGroups));
+    }
+    carryFinish(blockCarry, blockStatus, prefix, groupPrefix, superPrefix, totalMap,
+                digits, status, cl_uint(exponent));
 
     constexpr U32 operationalFatal =
         Nonfinite | QuotientRange | InvalidResidue | UnsupportedOperation |
@@ -353,25 +373,45 @@ public:
         scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
       });
       lastScanGroupsUs = profileStage([&] {
-        scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
+        if (groups <= 256u) {
+          scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
+        } else {
+          scanGroups(groupMaps, groupPrefix, superMaps, cl_uint(groups));
+          scanSupers(superMaps, superPrefix, totalMap, cl_uint(superGroups));
+        }
       });
       lastCarryFinishUs = profileStage([&] {
-        carryFinish(blockCarry, blockStatus, prefix, groupPrefix, totalMap,
-                 digits, status, cl_uint(exponent));
+        carryFinish(blockCarry, blockStatus, prefix, groupPrefix, superPrefix, totalMap,
+                    digits, status, cl_uint(exponent));
       });
       lastStatusUs = profileStage([&] {
         statusBlocks(blockStatus, partialReports);
-        statusFinish(partialReports, summary);
+        if (groups <= 256u) {
+          statusFinish(partialReports, summary, cl_uint(groups));
+        } else {
+          statusReduce(partialReports, superReports, cl_uint(groups));
+          statusFinish(superReports, summary, cl_uint(superGroups));
+        }
       });
     } else {
       carryLocal(candidates, digits, blockCarry, blockStatus, status, cl_uint(exponent));
       carryMaps(digits, blockCarry, blockStatus, maps, cl_uint(exponent));
       scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
-      scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
-      carryFinish(blockCarry, blockStatus, prefix, groupPrefix, totalMap,
-                 digits, status, cl_uint(exponent));
+      if (groups <= 256u) {
+        scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
+      } else {
+        scanGroups(groupMaps, groupPrefix, superMaps, cl_uint(groups));
+        scanSupers(superMaps, superPrefix, totalMap, cl_uint(superGroups));
+      }
+      carryFinish(blockCarry, blockStatus, prefix, groupPrefix, superPrefix, totalMap,
+                  digits, status, cl_uint(exponent));
       statusBlocks(blockStatus, partialReports);
-      statusFinish(partialReports, summary);
+      if (groups <= 256u) {
+        statusFinish(partialReports, summary, cl_uint(groups));
+      } else {
+        statusReduce(partialReports, superReports, cl_uint(groups));
+        statusFinish(superReports, summary, cl_uint(superGroups));
+      }
     }
     reportReady = true;
 
