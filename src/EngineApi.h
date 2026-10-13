@@ -178,11 +178,23 @@ AEVUM_ENGINE_API int aevum_engine_gold64_get_estimates(
 AEVUM_ENGINE_API int aevum_engine_gold64_get_residues(
     aevum_engine_handle handle, uint64_t* residues, size_t count);
 
+// Diagnostic only: read the retained natural-order companion M31 residues from
+// the same most recent Gold64 square/multiply attempt.
+AEVUM_ENGINE_API int aevum_engine_gold64_get_residues31(
+    aevum_engine_handle handle, uint32_t* residues, size_t count);
+
 // Diagnostic only: normalize a scratch candidate using FP64 quotient arithmetic
 // over the same retained FP32 estimate/residue from the most recent square or
 // multiply. The live register and published fail-stop diagnostics are unchanged.
 AEVUM_ENGINE_API int aevum_engine_gold64_fp64_candidate_words(
     aevum_engine_handle handle, uint32_t factor, uint32_t* words, size_t count);
+
+// Diagnostic only: normalize a scratch candidate reconstructed exactly from
+// retained Gold64 and M31 residues. Does not modify the live register or
+// published fail-stop diagnostics; UNPROVEN_PRECISION remains mandatory.
+AEVUM_ENGINE_API int aevum_engine_gold64_m31_candidate_words(
+    aevum_engine_handle handle, uint32_t factor, uint32_t subtract_two,
+    uint32_t* words, size_t count);
 
 AEVUM_ENGINE_API int aevum_engine_gold64_get_digits(
     aevum_engine_handle handle, size_t src, int64_t* digits, size_t count);
