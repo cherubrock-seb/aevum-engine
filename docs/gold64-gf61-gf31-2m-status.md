@@ -2,7 +2,7 @@
 
 - Branch: `exp/gold64-gf61-gf31-exact-2m`, independent of PR #22.
 - Base: `ce0b8b5ee3aa4d7c79d55858f5bb1fa783073610`.
-- Last confirmed implementation commit (A): `c3bafb5a2025096fbc16fdd0a97b856f5d7ee91e`.
+- Last confirmed implementation commit (B): `dfdef34f28ddb47d8225958c768622267747fe12`.
 - A implemented in `src/Gold3Plan.h` and `src/cl/gold3_arith.cl`: shared
   128-bit digit ABI, signed 192-bit arithmetic, exact Garner CRT constants,
   three residue conversions, balanced splitting, root/geometry checks.
@@ -18,9 +18,14 @@
 - Source reference: PR #22 `f1c5662c7b0a49636e3ae37eab888536f58be716`.
   Marin license retained. No FP32 backend or old carry imported.
 - Three GPU planes connected: yes, square and prepared multiply, one Queue.
-  CRT arithmetic: yes; reconstruction GPU dispatch: not yet.
-- Wide cyclic carry: split primitive only. Engine API: not yet.
-- Next: `gold3_reconstruct.cl` CRT and segmented wide cyclic normalization,
-  then the `Gold3Reconstruction.h` dispatch wrapper.
+  CRT arithmetic and reconstruction GPU dispatch: yes.
+- C in source: `gold3_reconstruct.cl` / `Gold3Reconstruction.h`: exact CRT,
+  post-CRT factor 3 and LL -2, range/overflow diagnostics, 8192 parallel
+  256-digit segments, wide tails below 2^91, three-state correction maps,
+  two-level prefix, deterministic cyclic fixed point and exit checks.
+  Five bounded carry launches; no serial full-length sweep or convergence loop.
+- Wide cyclic carry: implemented, unvalidated. Engine API: not yet.
+- Next: `Gold3Engine.h` register ownership and 65-bit compact bit packing,
+  then explicit-only `FFTConfig` / `EngineApi` integration.
 - Transform-level GPU validation can begin; full Engine API validation cannot.
 - Production blocked. No builds, tests, benchmarks, SSH or CI polling run.
