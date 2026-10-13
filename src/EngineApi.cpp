@@ -2040,6 +2040,15 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     flush_pending_square();
     gpu_->regDebugType1Precarry(reg(src), limbs, limb_count);
   }
+  void debug_type1_set_raw_digits(size_t dst, const int64_t* digits, size_t digit_count) {
+    check_reg(dst);
+#ifndef CUDA_BACKEND
+    if (gold64_) throw std::runtime_error("Type1 raw-digit diagnostics require a production FFT3161 handle");
+#endif
+    flush_pending_square();
+    invalidate_if(dst);
+    gpu_->regDebugSetType1RawDigits(reg(dst), digits, digit_count);
+  }
 
   void gold64_diagnostics(aevum_gold64_diagnostics* output) const {
     if (!output) throw std::invalid_argument("null Gold64 diagnostics output");
@@ -2406,6 +2415,10 @@ int aevum_engine_debug_square_trace(aevum_engine_handle handle, size_t src, uint
 int aevum_engine_debug_type1_precarry(
     aevum_engine_handle handle, size_t src, uint64_t* limbs, size_t limb_count) {
   return invoke([&] { runtime(handle).debug_type1_precarry(src, limbs, limb_count); });
+}
+int aevum_engine_debug_type1_set_raw_digits(
+    aevum_engine_handle handle, size_t dst, const int64_t* digits, size_t digit_count) {
+  return invoke([&] { runtime(handle).debug_type1_set_raw_digits(dst, digits, digit_count); });
 }
 
 int aevum_engine_gold64_diagnostics(aevum_engine_handle handle, aevum_gold64_diagnostics* output) {
