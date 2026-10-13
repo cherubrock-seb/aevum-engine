@@ -317,6 +317,12 @@ test-gpu: $(BIN)/aevum
 
 -include $(wildcard $(ENGINE_DEPDIR)/*.d)
 
+GOLD3_HOSTILE_GPU_SMOKE := build-tests/aevum-gold3-hostile-gpu-smoke
+
+$(GOLD3_HOSTILE_GPU_SMOKE): tests/gold3_hostile_gpu_smoke.cpp $(ENGINE_OBJS)
+	@mkdir -p $(dir $@)
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc $< $(ENGINE_OBJS) $(OPENCL_LIBS) -o $@
+
 GOLD3_ENGINE_API_SMOKE := build-tests/aevum-gold3-engine-api-smoke
 
 .PHONY: test-gold3-engine-api-smoke
