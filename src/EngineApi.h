@@ -131,6 +131,23 @@ typedef struct aevum_gold64_diagnostics {
 } aevum_gold64_diagnostics;
 AEVUM_ENGINE_API int aevum_engine_gold64_diagnostics(
     aevum_engine_handle handle, aevum_gold64_diagnostics* report);
+
+// Diagnostic only. Recomputes quotient selection in FP64 from the SAME FP32
+// estimate and Gold64 residue. It never changes reconstruction, acceptance,
+// register contents, or UNPROVEN_PRECISION. UINT32_MAX means no such index.
+typedef struct aevum_gold64_quotient_diagnostics {
+  uint32_t coefficients;
+  uint32_t fp32_fractional;
+  uint32_t fp64_fractional;
+  uint32_t quotient_disagreements;
+  uint32_t fp64_range;
+  uint32_t first_disagreement;
+  uint32_t first_fp32_fractional;
+  uint32_t first_fp64_fractional;
+} aevum_gold64_quotient_diagnostics;
+AEVUM_ENGINE_API int aevum_engine_gold64_quotient_diagnostics(
+    aevum_engine_handle handle, aevum_gold64_quotient_diagnostics* report);
+
 AEVUM_ENGINE_API int aevum_engine_gold64_get_digits(
     aevum_engine_handle handle, size_t src, int64_t* digits, size_t count);
 AEVUM_ENGINE_API int aevum_engine_gold64_square_minus_two(
