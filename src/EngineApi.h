@@ -34,7 +34,9 @@ enum aevum_engine_workload {
   AEVUM_WORKLOAD_PM1 = 3,
   AEVUM_WORKLOAD_PM1_LOWMEM = 4,
   AEVUM_WORKLOAD_PM1_ULTRALOWMEM = 5,
-  AEVUM_WORKLOAD_ECM = 6
+  AEVUM_WORKLOAD_ECM = 6,
+  // Explicit opt-in for an unvalidated backend; never an ordinary PRP/LL workload.
+  AEVUM_WORKLOAD_GOLD3_VALIDATION = 101
 };
 
 AEVUM_ENGINE_API const char* aevum_engine_version(void);
@@ -110,6 +112,23 @@ AEVUM_ENGINE_API int aevum_engine_equal(aevum_engine_handle handle, size_t lhs, 
 AEVUM_ENGINE_API int aevum_engine_debug_square_trace(
     aevum_engine_handle handle, size_t src, uint64_t* trace, size_t trace_count);
 
+// Gold3-only supervised diagnostics. No production correctness certification.
+// Flags: 1 noncanonical residue, 2 CRT range, 4 overflow, 8 carry range,
+// 16 no cyclic fixed point, 32 exit mismatch. first_segment is UINT32_MAX
+// on success. Cyclic correction state 0/1/2 encodes -1/0/+1.
+typedef struct aevum_engine_gold3_report {
+  uint32_t flags, first_segment, error_count, cyclic_state;
+} aevum_engine_gold3_report;
+AEVUM_ENGINE_API int aevum_engine_gold3_diagnostics(aevum_engine_handle handle, aevum_engine_gold3_report* report);
+// Two uint64 limbs per signed 128-bit digit, natural order. count is 2097152
+// DIGITS, so callers provide storage for 2*count limbs. set checks 64/65-bit
+// per-digit magnitude and preserves raw inputs for differential validation.
+AEVUM_ENGINE_API int aevum_engine_gold3_set_digits(aevum_engine_handle handle, size_t dst, const uint64_t* limbs, size_t count);
+AEVUM_ENGINE_API int aevum_engine_gold3_get_digits(aevum_engine_handle handle, size_t src, uint64_t* limbs, size_t count);
+AEVUM_ENGINE_API int aevum_engine_gold3_get_residues(aevum_engine_handle handle, uint64_t* gold, uint64_t* gf61, uint32_t* gf31, size_t count);
+AEVUM_ENGINE_API int aevum_engine_gold3_square_minus_two(aevum_engine_handle handle, size_t reg);
+
 #ifdef __cplusplus
 }
 #endif
+

@@ -5,6 +5,7 @@ Licensed under GNU GPL version 3. See LICENSE and UPSTREAM.md.
 */
 
 #include "EngineApi.h"
+#include "Gold3Engine.h"
 
 #include "Args.h"
 #include "Background.h"
@@ -1026,6 +1027,19 @@ public:
     if (exponent_ < 3) throw std::runtime_error("Aevum exponent must be at least 3");
     if (register_count_ == 0) throw std::runtime_error("Aevum register count must be positive");
 
+    const std::string requested = fft_spec ? fft_spec : "";
+    const bool gold3_requested = requested.starts_with("gold3-validation:") || requested.starts_with("55:");
+    if (gold3_requested || workload == AEVUM_WORKLOAD_GOLD3_VALIDATION) {
+      if (!gold3_requested || workload != AEVUM_WORKLOAD_GOLD3_VALIDATION) {
+        throw std::runtime_error("Gold3 requires both an explicit gold3-validation plan and AEVUM_WORKLOAD_GOLD3_VALIDATION");
+      }
+      const FFTConfig checked(requested);
+      const aevum_gold3::Plan geometry(exponent_);
+#if defined(CUDA_BACKEND) || defined(__APPLE__)
+      throw std::runtime_error("Gold3 currently supports non-Apple OpenCL validation only");
+#endif
+    }
+
     args_.device = static_cast<int>(device);
     args_.verbose = verbose;
     args_.safeMath = true;
@@ -1070,6 +1084,17 @@ public:
     shared_.background = &background_;
 
     std::string spec = fft_spec ? fft_spec : "";
+#ifndef CUDA_BACKEND
+    if (gold3_requested) {
+      gold3_ = std::make_unique<aevum_gold3::RegisterEngine>(args_, *context_, exponent_, register_count_);
+      transform_size_ = aevum_gold3::Plan::words;
+      plan_spec_ = FFTConfig(spec).spec();
+      timing_enabled_ = false;
+      if (verbose) { log("Gold3 2M: unvalidated exact three-plane source; supervised use only.\n"); }
+      return;
+    }
+#endif
+
 
 #if defined(__APPLE__)
     // Apple OpenCL 1.2 keeps the stock FFT3161 production path. Type2 has
@@ -1769,11 +1794,21 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     }
   }
 
+#ifndef CUDA_BACKEND
+  aevum_gold3::RegisterEngine& gold3() {
+    if (!gold3_) { throw std::runtime_error("This API requires an explicit Gold3 validation engine"); }
+    return *gold3_;
+  }
+#endif
+
   size_t transform_size() const { return transform_size_; }
   const std::string& plan_spec() const { return plan_spec_; }
   size_t word_count() const { return word_count_; }
 
   void sync() {
+#ifndef CUDA_BACKEND
+    if (gold3_) { gold3_->sync(); return; }
+#endif
     flush_pending_square();
     if (!timing_enabled_) {
       gpu_->regSync();
@@ -1789,16 +1824,25 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   void timing_reset() { timing_ = {}; }
 
   void timing_get(aevum_engine_timing_stats* stats) const {
+#ifndef CUDA_BACKEND
+    if (gold3_) { throw std::runtime_error("Gold3 production timing counters are not implemented"); }
+#endif
     if (!stats) throw std::runtime_error("null Aevum timing output");
     *stats = timing_;
   }
 
   void profile_report(bool emit) {
+#ifndef CUDA_BACKEND
+    if (gold3_) { throw std::runtime_error("Gold3 kernel timing report is not implemented"); }
+#endif
     sync();
     gpu_->regProfileReport(emit);
   }
 
   void set_u32(size_t dst, uint32_t value) {
+#ifndef CUDA_BACKEND
+    if (gold3_) { gold3_->setU32(dst, value); return; }
+#endif
     check_reg(dst);
     flush_pending_square();
     invalidate_if(dst);
@@ -1806,6 +1850,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   }
 
   void set_words(size_t dst, const uint32_t* words, size_t count) {
+#ifndef CUDA_BACKEND
+    if (gold3_) { gold3_->setWords(dst, words, count); return; }
+#endif
     check_reg(dst);
     flush_pending_square();
     invalidate_if(dst);
@@ -1816,6 +1863,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   }
 
   void get_words(size_t src, uint32_t* words, size_t count) {
+#ifndef CUDA_BACKEND
+    if (gold3_) { gold3_->getWords(src, words, count); return; }
+#endif
     check_reg(src);
     flush_pending_square();
     if (!words || count != word_count_) throw std::runtime_error("invalid Aevum output word buffer");
@@ -1832,6 +1882,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   }
 
   void copy(size_t dst, size_t src) {
+#ifndef CUDA_BACKEND
+    if (gold3_) { gold3_->copy(dst, src); return; }
+#endif
     check_reg(dst);
     check_reg(src);
     flush_pending_square();
@@ -1850,6 +1903,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   }
 
   void prepare(size_t dst, size_t src) {
+#ifndef CUDA_BACKEND
+    if (gold3_) { gold3_->prepare(dst, src); return; }
+#endif
     check_reg(dst);
     check_reg(src);
     flush_pending_square();
@@ -1863,6 +1919,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   }
 
   void square_mul(size_t index, uint32_t factor) {
+#ifndef CUDA_BACKEND
+    if (gold3_) { gold3_->square(index, factor); return; }
+#endif
     check_reg(index);
     if (factor == 0) throw std::runtime_error("Aevum square factor must be positive");
     if (timing_enabled_) ++timing_.square_calls;
@@ -1892,6 +1951,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   }
 
   void mul(size_t dst, size_t src, uint32_t factor) {
+#ifndef CUDA_BACKEND
+    if (gold3_) { gold3_->multiply(dst, src, factor); return; }
+#endif
     check_reg(dst);
     check_reg(src);
     if (factor == 0) throw std::runtime_error("Aevum multiplication factor must be positive");
@@ -1941,6 +2003,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   }
 
   void add(size_t dst, size_t src) {
+#ifndef CUDA_BACKEND
+    if (gold3_) { gold3_->add(dst, src); return; }
+#endif
     check_reg(dst);
     check_reg(src);
     flush_pending_square();
@@ -1949,6 +2014,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   }
 
   void sub_reg(size_t dst, size_t src) {
+#ifndef CUDA_BACKEND
+    if (gold3_) { gold3_->subtract(dst, src); return; }
+#endif
     check_reg(dst);
     check_reg(src);
     flush_pending_square();
@@ -1957,6 +2025,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   }
 
   void sub_u32(size_t dst, uint32_t value) {
+#ifndef CUDA_BACKEND
+    if (gold3_) { gold3_->subtractU32(dst, value); return; }
+#endif
     check_reg(dst);
     // Fold precisely one adjacent square-minus-two into the existing LL carry.
     // A second subtraction or any observable boundary must materialize first.
@@ -1970,6 +2041,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   }
 
   bool equal(size_t lhs, size_t rhs) {
+#ifndef CUDA_BACKEND
+    if (gold3_) { return gold3_->equal(lhs, rhs); }
+#endif
     check_reg(lhs);
     check_reg(rhs);
     flush_pending_square();
@@ -1983,6 +2057,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   }
 
   void debug_square_trace(size_t src, uint64_t* trace, size_t trace_count) {
+#ifndef CUDA_BACKEND
+    if (gold3_) { throw std::runtime_error("Use Gold3 residue and digit diagnostics for this backend"); }
+#endif
     check_reg(src);
     flush_pending_square();
     if (!trace || trace_count < 12) throw std::runtime_error("Aevum square trace buffer must contain at least 12 uint64 values");
@@ -2123,6 +2200,9 @@ private:
   std::unique_ptr<TrigBufCache> cache_;
   GpuCommon shared_{};
   std::unique_ptr<Gpu> gpu_;
+#ifndef CUDA_BACKEND
+  std::unique_ptr<aevum_gold3::RegisterEngine> gold3_;
+#endif
   std::vector<Buffer<Word>> buffers_;
   std::vector<Buffer<double>> prepared_buffers_;
   std::vector<PreparedSlot> prepared_slots_;
@@ -2278,8 +2358,57 @@ int aevum_engine_debug_square_trace(aevum_engine_handle handle, size_t src, uint
   return invoke([&] { runtime(handle).debug_square_trace(src, trace, trace_count); });
 }
 
+int aevum_engine_gold3_diagnostics(aevum_engine_handle handle, aevum_engine_gold3_report* report) {
+  return invoke([&] {
+#ifndef CUDA_BACKEND
+    if (!report) { throw std::invalid_argument("null Gold3 report"); }
+    const auto r = runtime(handle).gold3().diagnostics();
+    *report = {r.flags, r.firstSegment, r.errorCount, r.cyclicState};
+#else
+    throw std::runtime_error("Gold3 is not implemented in native CUDA");
+#endif
+  });
+}
+int aevum_engine_gold3_set_digits(aevum_engine_handle handle, size_t dst, const uint64_t* limbs, size_t count) {
+  return invoke([&] {
+#ifndef CUDA_BACKEND
+    runtime(handle).gold3().setDigits(dst, limbs, count);
+#else
+    throw std::runtime_error("Gold3 is not implemented in native CUDA");
+#endif
+  });
+}
+int aevum_engine_gold3_get_digits(aevum_engine_handle handle, size_t src, uint64_t* limbs, size_t count) {
+  return invoke([&] {
+#ifndef CUDA_BACKEND
+    runtime(handle).gold3().getDigits(src, limbs, count);
+#else
+    throw std::runtime_error("Gold3 is not implemented in native CUDA");
+#endif
+  });
+}
+int aevum_engine_gold3_get_residues(aevum_engine_handle handle, uint64_t* gold, uint64_t* gf61, uint32_t* gf31, size_t count) {
+  return invoke([&] {
+#ifndef CUDA_BACKEND
+    runtime(handle).gold3().getResidues(gold, gf61, gf31, count);
+#else
+    throw std::runtime_error("Gold3 is not implemented in native CUDA");
+#endif
+  });
+}
+int aevum_engine_gold3_square_minus_two(aevum_engine_handle handle, size_t reg) {
+  return invoke([&] {
+#ifndef CUDA_BACKEND
+    runtime(handle).gold3().square(reg, 1, true);
+#else
+    throw std::runtime_error("Gold3 is not implemented in native CUDA");
+#endif
+  });
+}
+
 } // extern "C"
 
 extern "C" int aevum_engine_profile_report(aevum_engine_handle handle, int emit) {
   return invoke([&] { runtime(handle).profile_report(emit != 0); });
 }
+

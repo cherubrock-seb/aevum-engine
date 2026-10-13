@@ -317,6 +317,38 @@ test-gpu: $(BIN)/aevum
 
 -include $(wildcard $(ENGINE_DEPDIR)/*.d)
 
+GOLD3_PERF_PROBE := build-tests/aevum-gold3-perf-probe
+
+$(GOLD3_PERF_PROBE): tests/gold3_perf_probe.cpp $(ENGINE_LIB)
+	@mkdir -p $(dir $@)
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc $< $(ENGINE_LIB) $(EXAMPLE_RPATH) -o $@
+
+GOLD3_HOSTILE_GPU_SMOKE := build-tests/aevum-gold3-hostile-gpu-smoke
+
+$(GOLD3_HOSTILE_GPU_SMOKE): tests/gold3_hostile_gpu_smoke.cpp $(ENGINE_OBJS)
+	@mkdir -p $(dir $@)
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc $< $(ENGINE_OBJS) $(OPENCL_LIBS) -o $@
+
+GOLD3_ENGINE_API_SMOKE := build-tests/aevum-gold3-engine-api-smoke
+
+.PHONY: test-gold3-engine-api-smoke
+test-gold3-engine-api-smoke: engine-lib $(GOLD3_ENGINE_API_SMOKE)
+	$(GOLD3_ENGINE_API_SMOKE) ${AEVUM_TEST_DEVICE:-0}
+
+$(GOLD3_ENGINE_API_SMOKE): tests/gold3_engine_api_smoke.cpp $(ENGINE_LIB)
+	@mkdir -p $(dir $@)
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc $< $(ENGINE_LIB) $(EXAMPLE_RPATH) -o $@
+
+GOLD3_GPU_SMOKE := build-tests/aevum-gold3-gpu-smoke
+
+.PHONY: test-gold3-gpu-smoke
+test-gold3-gpu-smoke: engine-lib $(GOLD3_GPU_SMOKE)
+	$(GOLD3_GPU_SMOKE) ${AEVUM_TEST_DEVICE:-0}
+
+$(GOLD3_GPU_SMOKE): tests/gold3_gpu_smoke.cpp $(ENGINE_OBJS)
+	@mkdir -p $(dir $@)
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc $< $(ENGINE_OBJS) $(OPENCL_LIBS) -o $@
+
 EXAMPLE_BIN := build-examples
 EXAMPLE_NAMES := fft_plans register_ops power_chain
 EXAMPLE_TARGETS := $(addprefix $(EXAMPLE_BIN)/,$(EXAMPLE_NAMES))

@@ -19,6 +19,7 @@
 #include "TrigBufCache.h"
 #include "fs.h"
 #include "Sha3Hash.h"
+#include "Gold3Gpu.h"
 
 #include <algorithm>
 #include <bitset>
@@ -273,6 +274,9 @@ u64 pfaPowMod(u64 a, u64 e, u64 p) {
 
 string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<KeyVal>& extraConf, u64 E, bool doLog,
                  bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul) {
+  if (fft.isGold3()) {
+    throw std::runtime_error("Gold3 requires the dedicated supervised Engine API backend");
+  }
   map<string, string> config;
 
   // Highest priority is the requested "extra" conf
@@ -748,9 +752,45 @@ string formatSecsPerIter(float secsPerIter) {
 
 } // namespace
 
+#ifndef CUDA_BACKEND
+aevum_gold3::ModularSetup aevum_gold3::makeModularSetup(
+    const Args& args, Queue& queue, U32 exponent, bool gf61) {
+  Plan plan(exponent);
+#if defined(__APPLE__)
+  throw std::runtime_error("Gold3 validation currently requires non-Apple OpenCL");
+#endif
+  FFTConfig fft(FFTShape(gf61 ? FFT61 : FFT31, 512, 4, 512), 202, CARRY_64);
+  // These are already-reduced field residues, not truncated wide digits.
+  fft.WordSize = gf61 ? 8 : 4;
+  const vector<KeyVal> conf{{"PAD", "0"}, {"INPLACE", "0"}, {"TAIL_KERNELS", "2"},
+      {"IN_WG", "128"}, {"OUT_WG", "128"}, {"IN_SIZEX", "16"}, {"OUT_SIZEX", "16"},
+      {"FUSE_WEIGHT_BUTTERFLY", "0"}};
+  bool tailWide = false, tailKernel = true;
+  u32 inPlace = 0, pad = 0, wmul = 1;
+  auto defines = clDefines(args, queue.context->deviceId(), fft, conf, exponent,
+                          false, tailWide, tailKernel, inPlace, pad, wmul);
+  if (tailWide || !tailKernel || inPlace || pad) {
+    throw std::runtime_error("Gold3 modular schedule configuration mismatch");
+  }
+  defines += " -DFFT_FP64=0 -DFFT_FP32=0 -DNTT_GF31=" + string(gf61 ? "0" : "1") +
+             " -DNTT_GF61=" + string(gf61 ? "1" : "0");
+  Args rootArgs = args;
+  TrigBufCache cache(queue.context);
+  ModularSetup setup;
+  setup.defines = std::move(defines);
+  setup.width = cache.smallTrig(&rootArgs, fft, conf, 512, 8, 4, 512, 8, tailWide);
+  setup.middle = cache.middleTrig(&rootArgs, fft, 512, 4, 512);
+  setup.height = cache.smallTrigCombo(&rootArgs, fft, conf, 512, 4, 512, 8, tailWide);
+  return setup;
+}
+#endif
+
 // --------
 
 unique_ptr<Gpu> Gpu::make(u64 E, GpuCommon shared, FFTConfig fftConfig, const vector<KeyVal>& extraConf, bool logFftSize) {
+  if (fftConfig.isGold3()) {
+    throw std::runtime_error("Gold3 cannot run through ordinary Gpu/PRP/LL dispatch");
+  }
   return make_unique<Gpu>(shared, fftConfig, E, extraConf, logFftSize);
 }
 

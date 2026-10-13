@@ -1,6 +1,7 @@
 // Copyright (C) Mihai Preda.
 
 #include "FFTConfig.h"
+#include "Gold3Plan.h"
 #include "Args.h"
 #include "common.h"
 #include "log.h"
@@ -154,6 +155,14 @@ FFTShape::FFTShape(enum FFT_TYPES t, u32 w, u32 m, u32 h) :
   // Un-initialized shape, don't set BPW
   if (w == 1 && m == 1 && h == 1) { return; }
 
+  if (t == FFTGOLD3) {
+    if (w != 512 || m != 4 || h != 512) {
+      throw std::invalid_argument("Gold3 validation requires 512:4:512");
+    }
+    bpw.fill(0); // No certified production capacity, regardless of overdrive.
+    return;
+  }
+
   // PFA replaces the power-of-two middle axis by a coprime odd
   // Good-Thomas axis.  Type 1 uses the paired GF31/GF61 arithmetic and
   // Type 4 adds the FP32 residue plane.  Until dedicated tune data is
@@ -241,6 +250,9 @@ bool FFTShape::isFavoredShape() const {
 
 FFTConfig::FFTConfig(const string& input_spec) {
   string spec = input_spec;
+  if (startsWith(spec, "gold3-validation:")) {
+    spec = "55:" + spec.substr(string("gold3-validation:").size());
+  }
   u32 requested_pfa = 0;
   bool adaptive_type4 = false;
   bool force_full_type4 = false;
@@ -332,7 +344,15 @@ FFTConfig::FFTConfig(FFTShape shape, u32 variant, enum CARRY_KIND carry) :
     throw "Invalid FFT spec";
   }
 
-  if      (shape.fft_type == FFT64)     FFT_FP64 = 1, FFT_FP32 = 0, NTT_GF31 = 0, NTT_GF61 = 0, WordSize = 4;
+  if (shape.fft_type == FFTGOLD3) {
+    if (shape.width != 512 || shape.middle != 4 || shape.height != 512 ||
+        variant != 202 || carry != CARRY_AUTO) {
+      throw std::invalid_argument("Gold3 requires explicit gold3-validation:512:4:512:202 with wide carry");
+    }
+    FFT_FP64 = false; FFT_FP32 = false; NTT_GF31 = true; NTT_GF61 = true;
+    NTT_GOLD64 = true; WordSize = 16;
+  }
+  else if (shape.fft_type == FFT64)     FFT_FP64 = 1, FFT_FP32 = 0, NTT_GF31 = 0, NTT_GF61 = 0, WordSize = 4;
   else if (shape.fft_type == FFT3161)   FFT_FP64 = 0, FFT_FP32 = 0, NTT_GF31 = 1, NTT_GF61 = 1, WordSize = 8;
   else if (shape.fft_type == FFT3261)   FFT_FP64 = 0, FFT_FP32 = 1, NTT_GF31 = 0, NTT_GF61 = 1, WordSize = 8;
   else if (shape.fft_type == FFT61)     FFT_FP64 = 0, FFT_FP32 = 0, NTT_GF31 = 0, NTT_GF61 = 1, WordSize = 4;
@@ -345,6 +365,7 @@ FFTConfig::FFTConfig(FFTShape shape, u32 variant, enum CARRY_KIND carry) :
 }
 
 string FFTConfig::spec() const {
+  if (isGold3()) { return "gold3-validation:512:4:512:202"; }
   string s = shape.spec() + ":" + to_string(variant_W(variant)) + to_string(variant_M(variant)) + to_string(variant_H(variant));
   if (isPfa()) s = string("pfa") + to_string(pfa_radix) + ":" + s;
   return carry == CARRY_AUTO ? s : (s + (carry == CARRY_32 ? ":0" : ":1"));
@@ -428,6 +449,11 @@ FFTConfig FFTConfig::promoteKnownUnsafeOrdinaryPrp(
 }
 
 FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
+  if (startsWith(spec, "gold3-validation:") || startsWith(spec, "55:")) {
+    if (E > UINT32_MAX) { throw std::invalid_argument("Gold3 exponent exceeds uint32"); }
+    aevum_gold3::Plan plan(static_cast<u32>(E));
+    return FFTConfig(spec); // Geometry only; Engine API separately requires validation workload.
+  }
 #if defined(__APPLE__)
   // Apple exposes OpenCL 1.2 through a legacy compiler.  The staged FFT3161
   // path is supported, while the monolithic Type-4 and native-PFA pipelines
@@ -850,3 +876,4 @@ string numberK(u64 n) {
     return to_string(n);
   }
 }
+
