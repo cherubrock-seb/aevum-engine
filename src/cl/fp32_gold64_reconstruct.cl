@@ -395,8 +395,7 @@ void gold64_carry_scan(__global const uint * restrict maps,
 }
 
 __kernel __attribute__((reqd_work_group_size(256,1,1)))
-void gold64_carry_finish(__global const long * restrict local_digit,
-                         __global const long * restrict block_carry,
+void gold64_carry_finish(__global const long * restrict block_carry,
                          __global uint * restrict block_status,
                          __global const uint * restrict prefix,
                          __global const uint * restrict group_prefix,
@@ -421,10 +420,16 @@ void gold64_carry_finish(__global const long * restrict local_digit,
   long carry = 0L;
   for (uint i = 0; i < G64_CARRY_BLOCK; ++i) {
     const uint j = k * G64_CARRY_BLOCK + i;
+    // carry_local already wrote balanced digits into the final buffer. Once
+    // the incoming correction reaches zero, the untouched suffix is final.
+    if (!(flags & G64_FATAL) && incoming.x == 0UL && incoming.y == 0UL) {
+      carry = 0L;
+      break;
+    }
     const uint bits = gold64_digit_width(j, exponent);
     long d = 0L;
     if (bits && bits <= 33u && !(flags & G64_FATAL)) {
-      const ulong2 x = gold64_wide_add(incoming, gold64_wide_signed(local_digit[j]));
+      const ulong2 x = gold64_wide_add(incoming, gold64_wide_signed(digit[j]));
       d = gold64_split_wide(x, bits, &carry, &flags);
     } else { flags |= G64_UNSUPPORTED_OPERATION; carry = 0L; }
     digit[j] = d;
