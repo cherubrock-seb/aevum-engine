@@ -2040,6 +2040,17 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     flush_pending_square();
     gpu_->regDebugType1Precarry(reg(src), limbs, limb_count);
   }
+  void debug_type1_precarry_with_m31(
+      size_t src, uint64_t* limbs, size_t limb_count,
+      uint32_t* residues31, size_t residue_count) {
+    check_reg(src);
+#ifndef CUDA_BACKEND
+    if (gold64_) throw std::runtime_error("Type1 pre-carry M31 diagnostics require a production FFT3161 handle");
+#endif
+    flush_pending_square();
+    gpu_->regDebugType1PrecarryWithM31(
+        reg(src), limbs, limb_count, residues31, residue_count);
+  }
   void debug_type1_set_raw_digits(size_t dst, const int64_t* digits, size_t digit_count) {
     check_reg(dst);
 #ifndef CUDA_BACKEND
@@ -2415,6 +2426,15 @@ int aevum_engine_debug_square_trace(aevum_engine_handle handle, size_t src, uint
 int aevum_engine_debug_type1_precarry(
     aevum_engine_handle handle, size_t src, uint64_t* limbs, size_t limb_count) {
   return invoke([&] { runtime(handle).debug_type1_precarry(src, limbs, limb_count); });
+}
+int aevum_engine_debug_type1_precarry_with_m31(
+    aevum_engine_handle handle, size_t src,
+    uint64_t* limbs, size_t limb_count,
+    uint32_t* residues31, size_t residue_count) {
+  return invoke([&] {
+    runtime(handle).debug_type1_precarry_with_m31(
+        src, limbs, limb_count, residues31, residue_count);
+  });
 }
 int aevum_engine_debug_type1_set_raw_digits(
     aevum_engine_handle handle, size_t dst, const int64_t* digits, size_t digit_count) {
