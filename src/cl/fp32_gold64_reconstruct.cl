@@ -305,20 +305,39 @@ static inline uint gold64_map_compose(uint later, uint earlier) {
   return result;
 }
 
+// Reduce per-digit producer status into the carry-block metadata in parallel.
+// Every supported G64_CARRY_BLOCK is a power of two <= 256, so each 256-lane
+// work-group contains an integer number of independent status segments.
+__kernel __attribute__((reqd_work_group_size(256,1,1)))
+void gold64_status_seed(__global const uint * restrict status,
+                        __global uint * restrict block_status) {
+  __local uint data[256];
+  const uint j = (uint)get_global_id(0), lane = (uint)get_local_id(0);
+  data[lane] = status[j];
+  barrier(CLK_LOCAL_MEM_FENCE);
+  const uint segment_lane = lane & (G64_CARRY_BLOCK - 1u);
+  for (uint offset = 1u; offset < G64_CARRY_BLOCK; offset <<= 1u) {
+    uint value = data[lane];
+    if (segment_lane >= offset) value |= data[lane - offset];
+    barrier(CLK_LOCAL_MEM_FENCE);
+    data[lane] = value;
+    barrier(CLK_LOCAL_MEM_FENCE);
+  }
+  if (segment_lane == G64_CARRY_BLOCK - 1u)
+    block_status[j / G64_CARRY_BLOCK] = data[lane];
+}
+
 __kernel __attribute__((reqd_work_group_size(256,1,1)))
 void gold64_carry_local(__global const ulong2 * restrict candidate,
                         __global long * restrict local_digit,
                         __global long * restrict block_carry,
-                        __global uint * restrict block_status,
-                        __global const uint * restrict status, uint exponent) {
+                        __global uint * restrict block_status, uint exponent) {
   const uint k = (uint)get_global_id(0);
   long carry = 0L;
-  // Precision provenance belongs to the coefficient-producing path. Preserve
-  // per-digit status instead of forcing every exact carry to be unproven.
-  uint flags = 0u;
+  // Producer precision/error provenance was reduced by gold64_status_seed.
+  uint flags = block_status[k];
   for (uint i = 0; i < G64_CARRY_BLOCK; ++i) {
     const uint j = k * G64_CARRY_BLOCK + i;
-    flags |= status[j];
     const uint bits = gold64_digit_width(j, exponent);
     if (!bits || bits > 33u) flags |= G64_UNSUPPORTED_OPERATION;
     long d = 0L;
