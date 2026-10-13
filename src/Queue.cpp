@@ -72,7 +72,7 @@ void Queue::print() {
 }
 
 void Queue::add(EventHolder&& e, TimeInfo* ti) {
-  if (hasEvents) { events.emplace_back(std::move(e), ti); }
+  if (hasEvents && ti && e) { events.emplace_back(std::move(e), ti); }
   if (isAuxQueue) return;
   queueCount++;
   if (queueCount == MAX_QUEUE_COUNT) queueMarkerEvent();
@@ -92,7 +92,8 @@ void Queue::copyBuf(cl_mem src, cl_mem dst, u32 size, TimeInfo* tInfo) {
 }
 
 void Queue::run(cl_kernel kernel, size_t groupSize, size_t workSize, TimeInfo* tInfo) {
-  add(::run(get(), kernel, groupSize, workSize, {}, tInfo->name, hasEvents), tInfo);
+  const string name = tInfo ? tInfo->name : "OpenCL kernel";
+  add(::run(get(), kernel, groupSize, workSize, {}, name, hasEvents), tInfo);
 }
 
 void Queue::finish() {
