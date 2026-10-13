@@ -19,6 +19,33 @@
 #define G64_ROOT_R4I_DECL __global const ulong2 * restrict const r4i = (__global const ulong2 *)(root + 2*GOLD64_N)
 
 
+// Import signed natural-order digits; arithmetic is exact modulo p for every
+// signed 64-bit input. Hybrid reconstruction still needs a separate bound.
+static inline ulong gold64_from_signed(long x) {
+  const ulong bits = as_ulong(x);
+  return x < 0 ? GOLD64_P - (~bits + 1UL) : bits;
+}
+
+static inline uint gold64_weight_index(uint j) {
+  return (j & 3u) * (GOLD64_N / 4u) + (j >> 2);
+}
+static inline ulong2 gold64_weighted_input_pair(
+    __global const long * restrict digits,
+    __global const ulong2 * restrict weights, uint pair_index) {
+  const uint j = pair_index << 1;
+  return (ulong2)(
+      gold64_mul(gold64_from_signed(digits[j]), weights[gold64_weight_index(j)].x),
+      gold64_mul(gold64_from_signed(digits[j + 1u]), weights[gold64_weight_index(j + 1u)].x));
+}
+static inline ulong2 gold64_unweighted_output_pair(
+    ulong2 x, __global const ulong2 * restrict weights, uint pair_index) {
+  const uint j = pair_index << 1;
+  return (ulong2)(
+      gold64_mul(x.x, weights[gold64_weight_index(j)].y),
+      gold64_mul(x.y, weights[gold64_weight_index(j + 1u)].y));
+}
+
+
 static inline void gold64_fwd4(ulong2 * const x, const ulong r1, const ulong2 r23)
 {
 	const ulong2 u0 = x[0], u2 = gold64_mul2(x[2], r1), u1 = gold64_mul2(x[1], r23.s0), u3 = gold64_mul2(x[3], r23.s1);
@@ -162,6 +189,33 @@ static inline void gold64_backward_4o_0(const uint mg, __global ulong2 * restric
 	gold64_storeg2(4, x, mg, xl);
 }
 
+
+static inline void gold64_forward_4i_0_weighted(
+    const uint ml, __local ulong2 * restrict const X, const uint mg,
+    __global const long * restrict digits,
+    __global const ulong2 * restrict weights, const uint pair_index)
+{
+	ulong2 xl[4];
+	for (uint l = 0; l < 4u; ++l)
+		xl[l] = gold64_weighted_input_pair(digits, weights, pair_index + l * mg);
+	gold64_fwd4_0(xl);
+	gold64_storel2(4, X, ml, xl);
+}
+
+static inline void gold64_backward_4o_0_unweighted(
+    const uint mg, __global ulong2 * restrict const out,
+    __global const ulong2 * restrict weights, const uint pair_index,
+    const uint ml, __local const ulong2 * restrict const X)
+{
+	barrier(CLK_LOCAL_MEM_FENCE);
+	ulong2 xl[4]; gold64_loadl2(4, xl, X, ml);
+	gold64_bck4_0(xl);
+	for (uint l = 0; l < 4u; ++l) {
+		const uint q = pair_index + l * mg;
+		out[q] = gold64_unweighted_output_pair(xl[l], weights, q);
+	}
+}
+
 static inline void gold64_forward_mul_4o(__global ulong2 * restrict const x, __local const ulong2 * restrict const X, const ulong2 r)
 {
 	barrier(CLK_LOCAL_MEM_FENCE);
@@ -277,6 +331,39 @@ void gold64_backward64_0(__global ulong * restrict const reg, __global const ulo
 	gold64_backward_4o_0(16u << lm, &x[ki], 16 * G64_CHUNK64, &X[i]);
 }
 
+
+__kernel
+__attribute__((reqd_work_group_size(128,1,1)))
+void gold64_forward64_0_weighted(
+    __global const long * restrict digits,
+    __global ulong * restrict const reg,
+    __global const ulong * restrict const root G64_ROOT_EXTRA_ARGS,
+    __global const ulong2 * restrict weights, const ulong offset)
+{
+	const uint s = 64 / 4; const uint lm = G64_LN_SZ_S5 - 1 - 4;
+	G64_DECLARE_VAR(64 / 4, G64_CHUNK64);
+
+	gold64_forward_4i_0_weighted(16 * G64_CHUNK64, &X[i], 16u << lm,
+	                            digits, weights, ki);
+	G64_FORWARD_64_80(G64_CHUNK64);
+}
+
+__kernel
+__attribute__((reqd_work_group_size(128,1,1)))
+void gold64_backward64_0_unweighted(
+    __global ulong * restrict const reg,
+    __global const ulong * restrict const root G64_ROOT_EXTRA_ARGS,
+    __global ulong2 * restrict residues,
+    __global const ulong2 * restrict weights, const ulong offset)
+{
+	const uint s = 64 / 4; const uint lm = G64_LN_SZ_S5 - 1 - 4;
+	G64_DECLARE_VAR(64 / 4, G64_CHUNK64);
+
+	G64_BACKWARD_64_80(G64_CHUNK64);
+	gold64_backward_4o_0_unweighted(16u << lm, residues, weights, ki,
+	                               16 * G64_CHUNK64, &X[i]);
+}
+
 __kernel
 __attribute__((reqd_work_group_size(256,1,1)))
 void gold64_forward_mul1024(__global ulong * restrict const reg, __global const ulong * restrict const root G64_ROOT_EXTRA_ARGS, const ulong offset)
@@ -324,12 +411,6 @@ void gold64_mul1024(__global ulong * restrict const reg, __global const ulong * 
 	gold64_backward_4o(128, &x[k128], 128, &X[i128], r2i[sj128], r4i[sj128]);
 }
 
-// Import signed natural-order digits; arithmetic is exact modulo p for every
-// signed 64-bit input. Hybrid reconstruction still needs a separate bound.
-static inline ulong gold64_from_signed(long x) {
-  const ulong bits = as_ulong(x);
-  return x < 0 ? GOLD64_P - (~bits + 1UL) : bits;
-}
 __kernel __attribute__((reqd_work_group_size(256,1,1)))
 void gold64_weight(__global const long4 * restrict digits,
                    __global ulong4 * restrict reg,
