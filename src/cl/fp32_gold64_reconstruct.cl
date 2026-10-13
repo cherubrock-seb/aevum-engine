@@ -45,6 +45,67 @@ static inline ulong2 gold64_lift_signed(ulong r, int quotient) {
   return (ulong2)(lo, (ulong)(q + (long)(lo < r)));
 }
 
+
+#define GOLD64_M31_P 0x7fffffffU
+#define GOLD64_M31_INV3 1431655765UL
+
+static inline ulong2 gold64_wide_sub(ulong2 a, ulong2 b) {
+  const ulong lo = a.x - b.x;
+  return (ulong2)(lo, a.y - b.y - (ulong)(a.x < b.x));
+}
+static inline int gold64_wide_unsigned_gt(ulong2 a, ulong2 b) {
+  return a.y > b.y || (a.y == b.y && a.x > b.x);
+}
+static inline ulong2 gold64_wide_unsigned_shr1(ulong2 a) {
+  return (ulong2)((a.x >> 1) | (a.y << 63), a.y >> 1);
+}
+static inline uint gold64_reduce_m31(ulong x) {
+  ulong y = (x & GOLD64_M31_P) + (x >> 31);
+  y = (y & GOLD64_M31_P) + (y >> 31);
+  y = (y & GOLD64_M31_P) + (y >> 31);
+  if (y >= GOLD64_M31_P) y -= GOLD64_M31_P;
+  return (uint)y;
+}
+
+// Diagnostic exact lift from the two modular convolution planes.  Since
+// Gold64_P mod M31 == 3, k=(r31-r64)*3^-1 selects the unique CRT representative.
+// For 4M digits with |digit|<=2^32, one convolution coefficient is <=2^86;
+// factor 3 remains <2^88, well below (Gold64_P*M31)/2 (~2^94).
+__kernel __attribute__((reqd_work_group_size(256,1,1)))
+void gold64_crt_m31_candidates(__global const ulong * restrict residue,
+                               __global const uint * restrict residue31,
+                               __global ulong2 * restrict candidate,
+                               __global uint * restrict status,
+                               uint factor, uint subtract_two) {
+  const uint j = (uint)get_global_id(0);
+  const ulong r = residue[j];
+  const uint r31 = residue31[j];
+  uint flags = G64_UNPROVEN_PRECISION;
+
+  if (r >= GOLD64_P || r31 >= GOLD64_M31_P) flags |= G64_INVALID_RESIDUE;
+  if ((factor != 1u && factor != 3u) || subtract_two > 1u || (subtract_two && factor != 1u))
+    flags |= G64_UNSUPPORTED_OPERATION;
+  if (flags & G64_FATAL) {
+    candidate[j] = (ulong2)(0UL, 0UL);
+    status[j] = flags;
+    return;
+  }
+
+  const uint r64m = gold64_reduce_m31(r);
+  const uint delta = r31 >= r64m ? r31 - r64m : r31 + GOLD64_M31_P - r64m;
+  const ulong k = ((ulong)delta * GOLD64_M31_INV3) % (ulong)GOLD64_M31_P;
+
+  ulong2 x = gold64_lift_signed(r, (int)k);
+  const ulong2 modulus = gold64_lift_signed(0UL, (int)GOLD64_M31_P);
+  const ulong2 half = gold64_wide_unsigned_shr1(modulus);
+  if (gold64_wide_unsigned_gt(x, half)) x = gold64_wide_sub(x, modulus);
+
+  if (factor == 3u) x = gold64_wide_add(gold64_wide_add(x, x), x);
+  if (subtract_two && j == 0u) x = gold64_wide_add(x, gold64_wide_signed(-2L));
+  candidate[j] = x;
+  status[j] = flags;
+}
+
 // Exact single-digit balanced carry primitive: x = digit + 2^bits * carry.
 // bits in [1,33]. It reports overflow instead of truncating a wide carry.
 // Inter-digit/cyclic propagation is implemented by the segmented kernels below.
