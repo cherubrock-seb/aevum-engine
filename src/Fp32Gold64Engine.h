@@ -64,10 +64,18 @@ public:
   ReconstructionReport diagnostics() const { return reconstruction.diagnostics(); }
   void getEstimates(float* output, size_t count) { reconstruction.getEstimates(output, count); }
   void getResidues(U64* output, size_t count) { reconstruction.getResidues(output, count); }
+  void getResidues31(U32* output, size_t count) { reconstruction.getResidues31(output, count); }
   QuotientDiagnostics quotientDiagnostics() { return reconstruction.quotientDiagnostics(); }
   Words fp64DiagnosticWords(U32 factor) {
     requireFactor(factor);
     reconstruction.fp64DiagnosticNormalized(candidates, result, status, factor);
+    return compactBits(result.read(), exponent);
+  }
+  Words m31DiagnosticWords(U32 factor, bool subtractTwo = false) {
+    requireFactor(factor);
+    if (subtractTwo && factor != 1)
+      throw std::invalid_argument("Gold64 M31 CRT square-minus-two requires factor 1");
+    reconstruction.m31DiagnosticNormalized(candidates, result, status, factor, subtractTwo);
     return compactBits(result.read(), exponent);
   }
 
