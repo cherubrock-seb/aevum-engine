@@ -2099,6 +2099,13 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
 #endif
     throw std::runtime_error("Gold64 digit readback requires a Gold64 validation handle");
   }
+  void gold64_set_raw_digits(size_t dst, const int64_t* input, size_t count) {
+    check_reg(dst);
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->setRawDigits(dst, input, count); return; }
+#endif
+    throw std::runtime_error("Gold64 raw digit diagnostics require a Gold64 validation handle");
+  }
   void gold64_square_minus_two(size_t reg) {
     check_reg(reg);
 #ifndef CUDA_BACKEND
@@ -2422,6 +2429,10 @@ int aevum_engine_gold64_fp64_candidate_words(
 }
 int aevum_engine_gold64_get_digits(aevum_engine_handle handle, size_t src, int64_t* output, size_t count) {
   return invoke([&] { runtime(handle).gold64_get_digits(src, output, count); });
+}
+int aevum_engine_gold64_set_raw_digits(
+    aevum_engine_handle handle, size_t dst, const int64_t* input, size_t count) {
+  return invoke([&] { runtime(handle).gold64_set_raw_digits(dst, input, count); });
 }
 int aevum_engine_gold64_square_minus_two(aevum_engine_handle handle, size_t reg) {
   return invoke([&] { runtime(handle).gold64_square_minus_two(reg); });
