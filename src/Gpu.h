@@ -488,6 +488,8 @@ public:
   void regDebugSquareTrace(Buffer<Word>& io, u64* trace, size_t trace_count);
   void regDebugSetType1RawDigits(Buffer<Word>& io, const i64* digits, size_t digit_count);
   void regDebugType1Precarry(Buffer<Word>& io, u64* limbs, size_t limb_count);
+  void regDebugType1PrecarryWithM31(Buffer<Word>& io, u64* limbs, size_t limb_count,
+                                    u32* residues31, size_t residue_count);
 
   void clear(bool isPRP);
 
