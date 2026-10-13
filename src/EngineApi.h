@@ -160,6 +160,11 @@ AEVUM_ENGINE_API int aevum_engine_gold64_quotient_diagnostics(
 AEVUM_ENGINE_API int aevum_engine_gold64_get_estimates(
     aevum_engine_handle handle, float* estimates, size_t count);
 
+// Diagnostic only: read the retained natural-order Gold64 modular residues from
+// the most recent square/multiply attempt, before FP32 quotient reconstruction.
+AEVUM_ENGINE_API int aevum_engine_gold64_get_residues(
+    aevum_engine_handle handle, uint64_t* residues, size_t count);
+
 // Diagnostic only: normalize a scratch candidate using FP64 quotient arithmetic
 // over the same retained FP32 estimate/residue from the most recent square or
 // multiply. The live register and published fail-stop diagnostics are unchanged.
