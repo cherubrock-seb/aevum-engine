@@ -56,6 +56,33 @@ int main(int argc, char** argv) {
     require_call(aevum_engine_plan_spec(h, plan, sizeof(plan)), "plan_spec");
     std::cout << "PLAN=" << plan << "\n";
 
+    const size_t compactCount = aevum_engine_word_count(h);
+    std::vector<uint32_t> packed(compactCount, 0), packedOut(compactCount, 0);
+    const auto bitOffset = [&](uint32_t j) {
+      return uint32_t((uint64_t(exponent) * j + n - 1) / n);
+    };
+    uint32_t boundary = 1;
+    while (boundary + 1 < n &&
+           bitOffset(boundary) - bitOffset(boundary - 1) ==
+           bitOffset(boundary + 1) - bitOffset(boundary)) {
+      ++boundary;
+    }
+    require(boundary + 1 < n, "compact packing width transition not found");
+    const auto setBit = [&](uint32_t bit) {
+      require(bit < exponent, "compact test bit outside exponent");
+      packed[bit / 32] |= uint32_t(1) << (bit % 32);
+    };
+    setBit(0);
+    setBit(bitOffset(boundary) - 1);
+    setBit(bitOffset(boundary));
+    setBit(bitOffset(boundary) + 63);
+    setBit(bitOffset(boundary) + 64);
+    setBit(exponent - 1);
+    require_call(aevum_engine_set_words(h, 0, packed.data(), packed.size()), "set_words compact");
+    require_call(aevum_engine_get_words(h, 0, packedOut.data(), packedOut.size()), "get_words compact");
+    require(packedOut == packed, "compact 64/65-bit packing roundtrip mismatch");
+    std::cout << "COMPACT_64_65_ROUNDTRIP=PASS BOUNDARY=" << boundary << "\n";
+
     std::vector<uint64_t> limbs(2 * n, 0);
     limbs[0] = 1;
     limbs[1] = 1;
@@ -72,6 +99,11 @@ int main(int argc, char** argv) {
     require_small_value(h, 0, 4);
     std::cout << "API_SQUARE_2_TO_4=PASS\n";
 
+    require_call(aevum_engine_set_u32(h, 0, 2), "set_u32(2) factor3");
+    require_call(aevum_engine_square_mul(h, 0, 3), "square factor3");
+    require_small_value(h, 0, 12);
+    std::cout << "API_SQUARE_FACTOR3_2_TO_12=PASS\n";
+
     require_call(aevum_engine_gold3_square_minus_two(h, 0), "square_minus_two");
     require_small_value(h, 0, 14);
     std::cout << "API_SQUARE_MINUS_TWO_4_TO_14=PASS\n";
@@ -81,6 +113,23 @@ int main(int argc, char** argv) {
     require_call(aevum_engine_mul(h, 0, 1, 1), "mul 14 by 3");
     require_small_value(h, 0, 42);
     std::cout << "API_PREPARED_MUL_14_BY_3=PASS\n";
+
+    require_call(aevum_engine_set_u32(h, 0, 2), "set_u32(2) mul factor3");
+    require_call(aevum_engine_set_u32(h, 1, 3), "set_u32(3) mul factor3");
+    require_call(aevum_engine_prepare(h, 1, 1), "prepare 3 factor3");
+    require_call(aevum_engine_mul(h, 0, 1, 3), "mul factor3 2 by 3");
+    require_small_value(h, 0, 18);
+    std::cout << "API_PREPARED_MUL_FACTOR3_2_BY_3_TO_18=PASS\n";
+
+    require_call(aevum_engine_set_u32(h, 0, 2), "set_u32(2) cache");
+    require_call(aevum_engine_set_u32(h, 1, 3), "set_u32(3) cache");
+    require_call(aevum_engine_prepare(h, 1, 1), "prepare cache 3");
+    require_call(aevum_engine_mul(h, 0, 1, 1), "mul cache 2 by 3");
+    require_small_value(h, 0, 6);
+    require_call(aevum_engine_set_u32(h, 1, 5), "mutate prepared register to 5");
+    require_call(aevum_engine_mul(h, 0, 1, 1), "mul after prepared invalidation");
+    require_small_value(h, 0, 30);
+    std::cout << "API_PREPARED_CACHE_INVALIDATION=PASS\n";
 
     aevum_engine_gold3_report report{};
     require_call(aevum_engine_gold3_diagnostics(h, &report), "gold3_diagnostics");
