@@ -1028,7 +1028,7 @@ public:
     if (register_count_ == 0) throw std::runtime_error("Aevum register count must be positive");
 
     const std::string requested = fft_spec ? fft_spec : "";
-    const bool gold3_requested = startsWith(requested, "gold3-validation:") || startsWith(requested, "55:");
+    const bool gold3_requested = requested.starts_with("gold3-validation:") || requested.starts_with("55:");
     if (gold3_requested || workload == AEVUM_WORKLOAD_GOLD3_VALIDATION) {
       if (!gold3_requested || workload != AEVUM_WORKLOAD_GOLD3_VALIDATION) {
         throw std::runtime_error("Gold3 requires both an explicit gold3-validation plan and AEVUM_WORKLOAD_GOLD3_VALIDATION");
