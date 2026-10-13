@@ -590,6 +590,129 @@ KERNEL(G_W) carry(P(Word2) out, CP(T2) in, u32 posROE, P(CarryABM) carryOut, P(u
 #endif
 }
 
+// Validation-only exact pre-carry oracle for FFT3161.  Input is the canonical
+// fftW output.  Each natural-order digit is exported as a sign-extended
+// two's-complement 128-bit value (lo64, hi64).  No carry is applied and no
+// production register is modified.
+KERNEL(G_W) debugPrecarry3161(P(ulong2) out, CP(T2) in) {
+  u32 g  = get_group_id(0);
+  u32 me = get_local_id(0);
+  u32 gx = g % NW;
+  u32 gy = g / NW;
+  u32 H = BIG_HEIGHT;
+  u32 line = gy * CARRY_LEN;
+
+  CP(GF31) in31 = (CP(GF31)) (in + DISTGF31);
+  CP(GF61) in61 = (CP(GF61)) (in + DISTGF61);
+
+  u32 word_index = (gx * G_W * H + me * H + line) * 2;
+
+  const u32 m31_log2_root_two = M31_LOG2_ROOT_TWO;
+  const u32 m31_bigword_weight_shift = (NWORDS - EXP % NWORDS) * m31_log2_root_two % 31;
+  const u32 m31_bigword_weight_shift_minus1 = (m31_bigword_weight_shift + 30) % 31;
+  const u32 m61_log2_root_two = M61_LOG2_ROOT_TWO;
+  const u32 m61_bigword_weight_shift = (NWORDS - EXP % NWORDS) * m61_log2_root_two % 61;
+  const u32 m61_bigword_weight_shift_minus1 = (m61_bigword_weight_shift + 60) % 61;
+
+  union { uint2 a; u64 b; } m31_combo, m61_combo;
+  const u64 m31_combo_step = make_u64(m31_bigword_weight_shift_minus1, FRAC_BPW_HI);
+  m31_combo.b = comboFracBits(word_index) + make_u64(word_index * m31_bigword_weight_shift_minus1, 0xFFFFFFFF);
+  const u64 m61_combo_step = make_u64(m61_bigword_weight_shift_minus1, FRAC_BPW_HI);
+  m61_combo.b = comboFracBits(word_index) + make_u64(word_index % 61 * m61_bigword_weight_shift_minus1, 0xFFFFFFFF);
+
+  const u32 log2_NWORDS = (WIDTH == 256 ? 8 : WIDTH == 512 ? 9 : WIDTH == 1024 ? 10 : 12) +
+                          (PFA_RADIX ? 0 : (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 : MIDDLE == 8 ? 3 : 4)) +
+                          (SMALL_HEIGHT == 256 ? 8 : SMALL_HEIGHT == 512 ? 9 : SMALL_HEIGHT == 1024 ? 10 : 12) + 1;
+  m31_combo.a[1] = (m31_combo.a[1] + log2_NWORDS + 1) % 31;
+  m61_combo.a[1] = (m61_combo.a[1] + log2_NWORDS + 1) % 61;
+
+  for (i32 i = 0; i < CARRY_LEN; ++i) {
+    u32 p = G_W * gx + WIDTH * (CARRY_LEN * gy + i) + me;
+
+    u32 m31_weight_shift0 = m31_combo.a[1];
+    m31_combo.b += m31_combo_step;
+    m31_combo.a[1] = adjust_m31_weight_shift(m31_combo.a[1]);
+    u32 m31_weight_shift1 = m31_combo.a[1];
+
+    u32 m61_weight_shift0 = m61_combo.a[1];
+    m61_combo.b += m61_combo_step;
+    m61_combo.a[1] = adjust_m61_weight_shift(m61_combo.a[1]);
+    u32 m61_weight_shift1 = m61_combo.a[1];
+
+    GF31 u31 = SWAP_XY(in31[p]);
+    GF61 u61 = SWAP_XY(in61[p]);
+    u32 roundMax = 0;
+    i96 x0 = weightAndCarryOne(u31.x, u61.x, m31_weight_shift0, m61_weight_shift0, false, 0, &roundMax);
+    i96 x1 = weightAndCarryOne(u31.y, u61.y, m31_weight_shift1, m61_weight_shift1, false, 0, &roundMax);
+
+    const u32 natural = word_index + 2u * i;
+    out[natural] = (ulong2)(i96_lo64(x0), (ulong)(long)(i32)i96_hi32(x0));
+    out[natural + 1u] = (ulong2)(i96_lo64(x1), (ulong)(long)(i32)i96_hi32(x1));
+
+    m31_combo.b += m31_combo_step;
+    m31_combo.a[1] = adjust_m31_weight_shift(m31_combo.a[1]);
+    m61_combo.b += m61_combo_step;
+    m61_combo.a[1] = adjust_m61_weight_shift(m61_combo.a[1]);
+  }
+}
+
+
+// Validation-only companion to debugPrecarry3161.  Export the same exact
+// pre-carry coefficient modulo M31 in natural order, after applying the Type1
+// inverse NTT weight.  This allows independent Gold64*M31 CRT experiments
+// without changing production carry or register state.
+KERNEL(G_W) debugPrecarry3161M31(P(u32) out, CP(T2) in) {
+  u32 g  = get_group_id(0);
+  u32 me = get_local_id(0);
+  u32 gx = g % NW;
+  u32 gy = g / NW;
+  u32 H = BIG_HEIGHT;
+  u32 line = gy * CARRY_LEN;
+
+  CP(GF31) in31 = (CP(GF31)) (in + DISTGF31);
+
+  u32 word_index = (gx * G_W * H + me * H + line) * 2;
+
+  const u32 m31_log2_root_two = M31_LOG2_ROOT_TWO;
+  const u32 m31_bigword_weight_shift =
+      (NWORDS - EXP % NWORDS) * m31_log2_root_two % 31;
+  const u32 m31_bigword_weight_shift_minus1 =
+      (m31_bigword_weight_shift + 30) % 31;
+
+  union { uint2 a; u64 b; } m31_combo;
+  const u64 m31_combo_step =
+      make_u64(m31_bigword_weight_shift_minus1, FRAC_BPW_HI);
+  m31_combo.b =
+      comboFracBits(word_index) +
+      make_u64(word_index * m31_bigword_weight_shift_minus1, 0xFFFFFFFF);
+
+  const u32 log2_NWORDS =
+      (WIDTH == 256 ? 8 : WIDTH == 512 ? 9 : WIDTH == 1024 ? 10 : 12) +
+      (PFA_RADIX ? 0 :
+       (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 :
+        MIDDLE == 8 ? 3 : 4)) +
+      (SMALL_HEIGHT == 256 ? 8 : SMALL_HEIGHT == 512 ? 9 :
+       SMALL_HEIGHT == 1024 ? 10 : 12) + 1;
+  m31_combo.a[1] = (m31_combo.a[1] + log2_NWORDS + 1) % 31;
+
+  for (i32 i = 0; i < CARRY_LEN; ++i) {
+    u32 p = G_W * gx + WIDTH * (CARRY_LEN * gy + i) + me;
+
+    u32 m31_weight_shift0 = m31_combo.a[1];
+    m31_combo.b += m31_combo_step;
+    m31_combo.a[1] = adjust_m31_weight_shift(m31_combo.a[1]);
+    u32 m31_weight_shift1 = m31_combo.a[1];
+
+    GF31 u31 = SWAP_XY(in31[p]);
+    const u32 natural = word_index + 2u * i;
+    out[natural] = get_Z31(shr(u31.x, m31_weight_shift0));
+    out[natural + 1u] = get_Z31(shr(u31.y, m31_weight_shift1));
+
+    m31_combo.b += m31_combo_step;
+    m31_combo.a[1] = adjust_m31_weight_shift(m31_combo.a[1]);
+  }
+}
+
 
 /******************************************************************************/
 /*  Similar to above, but for a hybrid FFT based on FP32*GF(M31^2)*GF(M61^2)  */

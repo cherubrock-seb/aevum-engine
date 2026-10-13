@@ -10,6 +10,7 @@ Licensed under GNU GPL version 3. See LICENSE and UPSTREAM.md.
 #include "Background.h"
 #include "Context.h"
 #include "FFTConfig.h"
+#include "Fp32Gold64Engine.h"
 #include "File.h"
 #include "Gpu.h"
 #include "GpuCommon.h"
@@ -1026,6 +1027,19 @@ public:
     if (exponent_ < 3) throw std::runtime_error("Aevum exponent must be at least 3");
     if (register_count_ == 0) throw std::runtime_error("Aevum register count must be positive");
 
+    // Reject before device discovery/allocation. This path never enters the
+    // production selector, autotuner, GF61 scheduler, or workload promotion.
+    const std::string requested_spec = fft_spec ? fft_spec : "";
+    const bool gold64_request = FFTConfig::isGold64Request(requested_spec);
+    std::optional<FFTConfig> gold64_plan;
+    if (gold64_request) {
+      if (workload != AEVUM_WORKLOAD_GOLD64_VALIDATION)
+        throw std::runtime_error("Gold64 UnprovenPrecision: create_ex requires AEVUM_WORKLOAD_GOLD64_VALIDATION; all production workloads are disabled");
+      gold64_plan = FFTConfig::bestFit(args_, exponent_, requested_spec);
+    } else if (workload == AEVUM_WORKLOAD_GOLD64_VALIDATION) {
+      throw std::runtime_error("Gold64 validation requires an explicit gold64-validation:512:8:512:202 plan");
+    }
+
     args_.device = static_cast<int>(device);
     args_.verbose = verbose;
     args_.safeMath = true;
@@ -1062,6 +1076,16 @@ public:
     aevumSetDefaultRadix8For1K(isNvidiaGpu(selected_device));
 
     context_ = std::make_unique<Context>(selected_device);
+#ifndef CUDA_BACKEND
+    if (gold64_plan) {
+      plan_spec_ = gold64_plan->spec();
+      transform_size_ = gold64_plan->size();
+      gold64_ = std::make_unique<aevum_gold64::RegisterEngine>(args_, *context_, exponent_, register_count_);
+      if (verbose) log("AEVUM_PLAN source=explicit-gold64-validation validated=0 precision=unproven shape=%s\n", plan_spec_.c_str());
+      gold64_->sync();
+      return;
+    }
+#endif
     cache_ = std::make_unique<TrigBufCache>(context_.get());
 
     shared_.context = context_.get();
@@ -1762,6 +1786,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
 
   ~Runtime() noexcept {
     try {
+#ifndef CUDA_BACKEND
+      if (gold64_) { gold64_->sync(); return; }
+#endif
       flush_pending_square();
       if (gpu_) gpu_->regSync();
     } catch (...) {
@@ -1774,6 +1801,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   size_t word_count() const { return word_count_; }
 
   void sync() {
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->sync(); return; }
+#endif
     flush_pending_square();
     if (!timing_enabled_) {
       gpu_->regSync();
@@ -1794,12 +1824,18 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   }
 
   void profile_report(bool emit) {
+#ifndef CUDA_BACKEND
+    if (gold64_) throw std::runtime_error("Gold64 validation does not expose production kernel timing counters");
+#endif
     sync();
     gpu_->regProfileReport(emit);
   }
 
   void set_u32(size_t dst, uint32_t value) {
     check_reg(dst);
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->setU32(dst, value); return; }
+#endif
     flush_pending_square();
     invalidate_if(dst);
     gpu_->regSetU32(reg(dst), value);
@@ -1807,6 +1843,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
 
   void set_words(size_t dst, const uint32_t* words, size_t count) {
     check_reg(dst);
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->setWords(dst, words, count); return; }
+#endif
     flush_pending_square();
     invalidate_if(dst);
     if (!words || count != word_count_) throw std::runtime_error("invalid Aevum word buffer");
@@ -1817,6 +1856,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
 
   void get_words(size_t src, uint32_t* words, size_t count) {
     check_reg(src);
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->getWords(src, words, count); return; }
+#endif
     flush_pending_square();
     if (!words || count != word_count_) throw std::runtime_error("invalid Aevum output word buffer");
     const auto t0 = timing_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
@@ -1834,6 +1876,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   void copy(size_t dst, size_t src) {
     check_reg(dst);
     check_reg(src);
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->copy(dst, src); return; }
+#endif
     flush_pending_square();
     if (dst != src) {
       invalidate_if(dst);
@@ -1852,6 +1897,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   void prepare(size_t dst, size_t src) {
     check_reg(dst);
     check_reg(src);
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->prepare(dst, src); return; }
+#endif
     flush_pending_square();
     if (dst != src) {
       invalidate_if(dst);
@@ -1864,6 +1912,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
 
   void square_mul(size_t index, uint32_t factor) {
     check_reg(index);
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->square(index, factor); return; }
+#endif
     if (factor == 0) throw std::runtime_error("Aevum square factor must be positive");
     if (timing_enabled_) ++timing_.square_calls;
 
@@ -1894,6 +1945,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   void mul(size_t dst, size_t src, uint32_t factor) {
     check_reg(dst);
     check_reg(src);
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->multiply(dst, src, factor); return; }
+#endif
     if (factor == 0) throw std::runtime_error("Aevum multiplication factor must be positive");
 
 #if !defined(__APPLE__)
@@ -1943,6 +1997,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   void add(size_t dst, size_t src) {
     check_reg(dst);
     check_reg(src);
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->add(dst, src); return; }
+#endif
     flush_pending_square();
     invalidate_if(dst);
     gpu_->regAddWords(reg(dst), reg(src));
@@ -1951,6 +2008,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   void sub_reg(size_t dst, size_t src) {
     check_reg(dst);
     check_reg(src);
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->subtract(dst, src); return; }
+#endif
     flush_pending_square();
     invalidate_if(dst);
     gpu_->regSubWords(reg(dst), reg(src));
@@ -1958,6 +2018,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
 
   void sub_u32(size_t dst, uint32_t value) {
     check_reg(dst);
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->subtractU32(dst, value); return; }
+#endif
     // Fold precisely one adjacent square-minus-two into the existing LL carry.
     // A second subtraction or any observable boundary must materialize first.
     if (fused_ll_enabled_ && pending_kind_ == PendingKind::Square && pending_reg_ == dst && !pending_ll_ && value == 2) {
@@ -1972,6 +2035,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   bool equal(size_t lhs, size_t rhs) {
     check_reg(lhs);
     check_reg(rhs);
+#ifndef CUDA_BACKEND
+    if (gold64_) return gold64_->equal(lhs, rhs);
+#endif
     flush_pending_square();
     if (!timing_enabled_) return gpu_->regEqual(reg(lhs), reg(rhs));
     const auto t0 = std::chrono::steady_clock::now();
@@ -1984,14 +2050,141 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
 
   void debug_square_trace(size_t src, uint64_t* trace, size_t trace_count) {
     check_reg(src);
+#ifndef CUDA_BACKEND
+    if (gold64_) throw std::runtime_error("GF31/GF61 square trace is unavailable for Gold64; use gold64_diagnostics/get_digits");
+#endif
     flush_pending_square();
     if (!trace || trace_count < 12) throw std::runtime_error("Aevum square trace buffer must contain at least 12 uint64 values");
     if (small_factor_scratch_.empty()) throw std::runtime_error("Aevum square trace scratch is unavailable");
     gpu_->regCopy(small_factor_scratch_[0], reg(src));
     gpu_->regDebugSquareTrace(small_factor_scratch_[0], trace, trace_count);
   }
+  void debug_type1_precarry(size_t src, uint64_t* limbs, size_t limb_count) {
+    check_reg(src);
+#ifndef CUDA_BACKEND
+    if (gold64_) throw std::runtime_error("Type1 pre-carry diagnostics require a production FFT3161 handle");
+#endif
+    flush_pending_square();
+    gpu_->regDebugType1Precarry(reg(src), limbs, limb_count);
+  }
+  void debug_type1_precarry_with_m31(
+      size_t src, uint64_t* limbs, size_t limb_count,
+      uint32_t* residues31, size_t residue_count) {
+    check_reg(src);
+#ifndef CUDA_BACKEND
+    if (gold64_) throw std::runtime_error("Type1 pre-carry M31 diagnostics require a production FFT3161 handle");
+#endif
+    flush_pending_square();
+    gpu_->regDebugType1PrecarryWithM31(
+        reg(src), limbs, limb_count, residues31, residue_count);
+  }
+  void debug_type1_set_raw_digits(size_t dst, const int64_t* digits, size_t digit_count) {
+    check_reg(dst);
+#ifndef CUDA_BACKEND
+    if (gold64_) throw std::runtime_error("Type1 raw-digit diagnostics require a production FFT3161 handle");
+#endif
+    flush_pending_square();
+    invalidate_if(dst);
+    gpu_->regDebugSetType1RawDigits(reg(dst), digits, digit_count);
+  }
 
-private:
+  void gold64_diagnostics(aevum_gold64_diagnostics* output) const {
+    if (!output) throw std::invalid_argument("null Gold64 diagnostics output");
+#ifndef CUDA_BACKEND
+    if (gold64_) {
+      const auto report = gold64_->diagnostics();
+      *output = {report.flags, report.firstFatalBlock, report.fatalBlocks, report.unprovenBlocks};
+      return;
+    }
+#endif
+    throw std::runtime_error("Gold64 diagnostics require a Gold64 validation handle");
+  }
+  void gold64_get_estimates(float* output, size_t count) {
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->getEstimates(output, count); return; }
+#endif
+    throw std::runtime_error("Gold64 estimate diagnostics require a Gold64 validation handle");
+  }
+  void gold64_get_residues(uint64_t* output, size_t count) {
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->getResidues(output, count); return; }
+#endif
+    throw std::runtime_error("Gold64 residue diagnostics require a Gold64 validation handle");
+  }
+  void gold64_get_residues31(uint32_t* output, size_t count) {
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->getResidues31(output, count); return; }
+#endif
+    throw std::runtime_error("Gold64 M31 residue diagnostics require a Gold64 validation handle");
+  }
+  void gold64_quotient_diagnostics(aevum_gold64_quotient_diagnostics* output) {
+    if (!output) throw std::invalid_argument("null Gold64 quotient diagnostics output");
+#ifndef CUDA_BACKEND
+    if (gold64_) {
+      const auto report = gold64_->quotientDiagnostics();
+      *output = {report.coefficients, report.fp32Fractional, report.fp64Fractional,
+                 report.quotientDisagreements, report.fp64Range,
+                 report.firstDisagreement, report.firstFp32Fractional,
+                 report.firstFp64Fractional};
+      return;
+    }
+#endif
+    throw std::runtime_error("Gold64 quotient diagnostics require a Gold64 validation handle");
+  }
+  void gold64_fp64_candidate_words(uint32_t factor, uint32_t* output, size_t count) {
+    if (!output || count != word_count_)
+      throw std::invalid_argument("invalid Gold64 FP64 diagnostic output buffer");
+#ifndef CUDA_BACKEND
+    if (gold64_) {
+      const auto words = gold64_->fp64DiagnosticWords(factor);
+      if (words.size() != count)
+        throw std::logic_error("Gold64 FP64 diagnostic compact word count mismatch");
+      std::copy(words.begin(), words.end(), output);
+      return;
+    }
+#endif
+    throw std::runtime_error("Gold64 FP64 diagnostic requires a Gold64 validation handle");
+  }
+  void gold64_m31_candidate_words(
+      uint32_t factor, uint32_t subtract_two, uint32_t* output, size_t count) {
+    if (!output || count != word_count_)
+      throw std::invalid_argument("invalid Gold64 M31 diagnostic output buffer");
+#ifndef CUDA_BACKEND
+    if (gold64_) {
+      if (subtract_two > 1)
+        throw std::invalid_argument("Gold64 M31 subtract_two must be 0 or 1");
+      const auto words = gold64_->m31DiagnosticWords(factor, subtract_two != 0);
+      if (words.size() != count)
+        throw std::logic_error("Gold64 M31 diagnostic compact word count mismatch");
+      std::copy(words.begin(), words.end(), output);
+      return;
+    }
+#endif
+    throw std::runtime_error("Gold64 M31 diagnostic requires a Gold64 validation handle");
+  }
+  void gold64_get_digits(size_t src, int64_t* output, size_t count) {
+    check_reg(src);
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->getDigits(src, output, count); return; }
+#endif
+    throw std::runtime_error("Gold64 digit readback requires a Gold64 validation handle");
+  }
+  void gold64_set_raw_digits(size_t dst, const int64_t* input, size_t count) {
+    check_reg(dst);
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->setRawDigits(dst, input, count); return; }
+#endif
+    throw std::runtime_error("Gold64 raw digit diagnostics require a Gold64 validation handle");
+  }
+  void gold64_square_minus_two(size_t reg) {
+    check_reg(reg);
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->square(reg, 1, true); return; }
+#endif
+    throw std::runtime_error("Gold64 square-minus-two requires a Gold64 validation handle");
+  }
+
+ private:
   static constexpr size_t no_prepared = std::numeric_limits<size_t>::max();
   enum class PendingKind { None, Square, PreparedMul };
 
@@ -2123,6 +2316,9 @@ private:
   std::unique_ptr<TrigBufCache> cache_;
   GpuCommon shared_{};
   std::unique_ptr<Gpu> gpu_;
+#ifndef CUDA_BACKEND
+  std::unique_ptr<aevum_gold64::RegisterEngine> gold64_;
+#endif
   std::vector<Buffer<Word>> buffers_;
   std::vector<Buffer<double>> prepared_buffers_;
   std::vector<PreparedSlot> prepared_slots_;
@@ -2277,9 +2473,68 @@ int aevum_engine_equal(aevum_engine_handle handle, size_t lhs, size_t rhs, int* 
 int aevum_engine_debug_square_trace(aevum_engine_handle handle, size_t src, uint64_t* trace, size_t trace_count) {
   return invoke([&] { runtime(handle).debug_square_trace(src, trace, trace_count); });
 }
+int aevum_engine_debug_type1_precarry(
+    aevum_engine_handle handle, size_t src, uint64_t* limbs, size_t limb_count) {
+  return invoke([&] { runtime(handle).debug_type1_precarry(src, limbs, limb_count); });
+}
+int aevum_engine_debug_type1_precarry_with_m31(
+    aevum_engine_handle handle, size_t src,
+    uint64_t* limbs, size_t limb_count,
+    uint32_t* residues31, size_t residue_count) {
+  return invoke([&] {
+    runtime(handle).debug_type1_precarry_with_m31(
+        src, limbs, limb_count, residues31, residue_count);
+  });
+}
+int aevum_engine_debug_type1_set_raw_digits(
+    aevum_engine_handle handle, size_t dst, const int64_t* digits, size_t digit_count) {
+  return invoke([&] { runtime(handle).debug_type1_set_raw_digits(dst, digits, digit_count); });
+}
+
+int aevum_engine_gold64_diagnostics(aevum_engine_handle handle, aevum_gold64_diagnostics* output) {
+  return invoke([&] { runtime(handle).gold64_diagnostics(output); });
+}
+int aevum_engine_gold64_quotient_diagnostics(
+    aevum_engine_handle handle, aevum_gold64_quotient_diagnostics* output) {
+  return invoke([&] { runtime(handle).gold64_quotient_diagnostics(output); });
+}
+int aevum_engine_gold64_get_estimates(
+    aevum_engine_handle handle, float* estimates, size_t count) {
+  return invoke([&] { runtime(handle).gold64_get_estimates(estimates, count); });
+}
+int aevum_engine_gold64_get_residues(
+    aevum_engine_handle handle, uint64_t* residues, size_t count) {
+  return invoke([&] { runtime(handle).gold64_get_residues(residues, count); });
+}
+int aevum_engine_gold64_get_residues31(
+    aevum_engine_handle handle, uint32_t* residues, size_t count) {
+  return invoke([&] { runtime(handle).gold64_get_residues31(residues, count); });
+}
+int aevum_engine_gold64_fp64_candidate_words(
+    aevum_engine_handle handle, uint32_t factor, uint32_t* words, size_t count) {
+  return invoke([&] { runtime(handle).gold64_fp64_candidate_words(factor, words, count); });
+}
+int aevum_engine_gold64_m31_candidate_words(
+    aevum_engine_handle handle, uint32_t factor, uint32_t subtract_two,
+    uint32_t* words, size_t count) {
+  return invoke([&] {
+    runtime(handle).gold64_m31_candidate_words(factor, subtract_two, words, count);
+  });
+}
+int aevum_engine_gold64_get_digits(aevum_engine_handle handle, size_t src, int64_t* output, size_t count) {
+  return invoke([&] { runtime(handle).gold64_get_digits(src, output, count); });
+}
+int aevum_engine_gold64_set_raw_digits(
+    aevum_engine_handle handle, size_t dst, const int64_t* input, size_t count) {
+  return invoke([&] { runtime(handle).gold64_set_raw_digits(dst, input, count); });
+}
+int aevum_engine_gold64_square_minus_two(aevum_engine_handle handle, size_t reg) {
+  return invoke([&] { runtime(handle).gold64_square_minus_two(reg); });
+}
 
 } // extern "C"
 
 extern "C" int aevum_engine_profile_report(aevum_engine_handle handle, int emit) {
   return invoke([&] { runtime(handle).profile_report(emit != 0); });
 }
+

@@ -1,6 +1,7 @@
 // Copyright (C) Mihai Preda and George Woltman.
 
 #include "Gpu.h"
+#include "Fp32Gold64Gpu.h"
 #include "StatsSlot.h"
 #include "AppleTailZero.h"
 #include "UseOptions.h"
@@ -273,6 +274,8 @@ u64 pfaPowMod(u64 a, u64 e, u64 p) {
 
 string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<KeyVal>& extraConf, u64 E, bool doLog,
                  bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul) {
+  if (fft.isGold64())
+    throw std::runtime_error("Gold64 requires the explicit Engine API validation backend; stock Gpu dispatch is disabled");
   map<string, string> config;
 
   // Highest priority is the requested "extra" conf
@@ -747,6 +750,79 @@ string formatSecsPerIter(float secsPerIter) {
 }
 
 } // namespace
+
+#ifndef CUDA_BACKEND
+aevum_gold64::Fp32Setup aevum_gold64::makeFp32Setup(const Args& args, Queue& queue, U32 exponent) {
+  Tables::requireGeometry(GpuPlane::words, exponent);
+  if (exponent > U64(33) * GpuPlane::words)
+    throw std::invalid_argument("FP32/Gold64 experiment supports digit widths up to 33 bits");
+  // Internal transform-only configuration: no borrowed Type2 capacity and no
+  // carry kernel. The existing optimized FP32 kernels accept WordSize=8.
+  FFTShape shape;
+  shape.fft_type = FFT32;
+  shape.width = 512; shape.middle = 8; shape.height = 512;
+  shape.bpw.fill(0);
+  FFTConfig fft(shape, 202, CARRY_64);
+  fft.WordSize = 8;
+
+  // Keep this new layout independent of a user's production tuning overrides.
+  Args clean = args;
+  clean.flags.clear();
+  clean.perFftConfig.clear();
+  const vector<KeyVal> conf{{"INPLACE", "0"}, {"PAD", "0"},
+                            {"TAIL_KERNELS", "2"}, {"TAIL_TRIGS32", "2"},
+                            {"WMUL", "1"}, {"FUSE_WEIGHT_BUTTERFLY", "0"}};
+  bool singleWide = false, singleKernel = true;
+  u32 inplace = 0, pad = 0, wmul = 1;
+  Fp32Setup out;
+  out.defines = clDefines(clean, queue.context->deviceId(), fft, conf, exponent, false,
+                          singleWide, singleKernel, inplace, pad, wmul);
+  out.defines += " -DFFT_FP64=0 -DFFT_FP32=1 -DNTT_GF31=0 -DNTT_GF61=0";
+  if (inplace || pad || singleWide || !singleKernel)
+    throw std::logic_error("FP32/Gold64 fixed schedule configuration mismatch");
+  out.weights = genWeights(fft, exponent, 512, 4096, 8, false).weightsIF;
+  TrigBufCache cache(queue.context);
+  out.height = cache.smallTrigCombo(&clean, fft, conf, 512, 8, 512, 8, false);
+  out.middle = cache.middleTrig(&clean, fft, 512, 8, 512);
+  out.width = cache.smallTrig(&clean, fft, conf, 512, 8, 8, 512, 8, false);
+  return out;
+}
+
+
+aevum_gold64::M31Setup aevum_gold64::makeM31Setup(const Args& args, Queue& queue, U32 exponent) {
+  Tables::requireGeometry(GpuPlane::words, exponent);
+  if (exponent > U64(33) * GpuPlane::words)
+    throw std::invalid_argument("M31/Gold64 experiment supports digit widths up to 33 bits");
+
+  FFTShape shape;
+  shape.fft_type = FFT31;
+  shape.width = 512; shape.middle = 8; shape.height = 512;
+  shape.bpw.fill(0);
+  FFTConfig fft(shape, 202, CARRY_64);
+  fft.WordSize = 8;
+
+  Args clean = args;
+  clean.flags.clear();
+  clean.perFftConfig.clear();
+  const vector<KeyVal> conf{{"INPLACE", "0"}, {"PAD", "0"},
+                            {"TAIL_KERNELS", "2"}, {"TAIL_TRIGS32", "2"},
+                            {"WMUL", "1"}, {"FUSE_WEIGHT_BUTTERFLY", "0"}};
+  bool singleWide = false, singleKernel = true;
+  u32 inplace = 0, pad = 0, wmul = 1;
+  M31Setup out;
+  out.defines = clDefines(clean, queue.context->deviceId(), fft, conf, exponent, false,
+                          singleWide, singleKernel, inplace, pad, wmul);
+  out.defines += " -DFFT_FP64=0 -DFFT_FP32=0 -DNTT_GF31=1 -DNTT_GF61=0";
+  if (inplace || pad || singleWide || !singleKernel)
+    throw std::logic_error("M31/Gold64 fixed schedule configuration mismatch");
+
+  TrigBufCache cache(queue.context);
+  out.height = cache.smallTrigCombo(&clean, fft, conf, 512, 8, 512, 8, false);
+  out.middle = cache.middleTrig(&clean, fft, 512, 8, 512);
+  out.width = cache.smallTrig(&clean, fft, conf, 512, 8, 8, 512, 8, false);
+  return out;
+}
+#endif
 
 // --------
 
@@ -2645,6 +2721,77 @@ void Gpu::regDebugSquareTrace(Buffer<Word>& io, u64* trace, size_t trace_count) 
   trace[11] = words.empty() ? 0 : static_cast<uint64_t>(words[0]);
 }
 
+void Gpu::regDebugSetType1RawDigits(Buffer<Word>& io, const i64* digits, size_t digit_count) {
+  if (fft.shape.fft_type != FFT3161 || !fft.NTT_GF31 || !fft.NTT_GF61 ||
+      fft.FFT_FP32 || fft.FFT_FP64)
+    throw std::runtime_error("Type1 raw-digit diagnostics require an FFT3161 GF31+GF61 plan");
+  if (!digits || digit_count != N)
+    throw std::runtime_error("Type1 raw-digit diagnostics require exactly N signed digits");
+  std::vector<Word> raw(digits, digits + digit_count);
+  writeIn(io, std::move(raw));
+}
+
+void Gpu::regDebugType1Precarry(Buffer<Word>& io, u64* limbs, size_t limb_count) {
+  if (fft.shape.fft_type != FFT3161 || !fft.NTT_GF31 || !fft.NTT_GF61 ||
+      fft.FFT_FP32 || fft.FFT_FP64)
+    throw std::runtime_error("Type1 pre-carry diagnostics require an FFT3161 GF31+GF61 plan");
+  if (!limbs || limb_count != size_t(2) * N)
+    throw std::runtime_error("Type1 pre-carry diagnostics require exactly 2*N uint64 limbs");
+
+  // Same non-mutating square path as regDebugSquareTrace, stopped before carry.
+  fftP(buf1, io);
+  fftMidIn(buf1);
+  replay();
+  tailSquare(buf1);
+  replay();
+  fftMidOut(buf1);
+  replay();
+  fftW(buf3, buf1);
+
+  Buffer<u64> exact(nullptr, &queue, size_t(2) * N);
+  Kernel debug("debugPrecarry3161", &compiler, nullptr, &queue,
+               "carry.cl", "debugPrecarry3161", hN / CARRY_LEN,
+               kernelDefines(KALL).c_str());
+  debug(exact, buf3);
+  exact.read(limbs, limb_count);
+}
+
+void Gpu::regDebugType1PrecarryWithM31(
+    Buffer<Word>& io, u64* limbs, size_t limb_count,
+    u32* residues31, size_t residue_count) {
+  if (fft.shape.fft_type != FFT3161 || !fft.NTT_GF31 || !fft.NTT_GF61 ||
+      fft.FFT_FP32 || fft.FFT_FP64)
+    throw std::runtime_error("Type1 pre-carry M31 diagnostics require an FFT3161 GF31+GF61 plan");
+  if (!limbs || limb_count != size_t(2) * N)
+    throw std::runtime_error("Type1 pre-carry M31 diagnostics require exactly 2*N uint64 limbs");
+  if (!residues31 || residue_count != N)
+    throw std::runtime_error("Type1 pre-carry M31 diagnostics require exactly N uint32 residues");
+
+  // Execute the square transform once, then export both the exact CRT oracle
+  // and its M31 residue from the same canonical fftW state.
+  fftP(buf1, io);
+  fftMidIn(buf1);
+  replay();
+  tailSquare(buf1);
+  replay();
+  fftMidOut(buf1);
+  replay();
+  fftW(buf3, buf1);
+
+  Buffer<u64> exact(nullptr, &queue, size_t(2) * N);
+  Buffer<u32> m31(nullptr, &queue, N);
+  Kernel debugExact("debugPrecarry3161", &compiler, nullptr, &queue,
+                    "carry.cl", "debugPrecarry3161", hN / CARRY_LEN,
+                    kernelDefines(KALL).c_str());
+  Kernel debugM31("debugPrecarry3161M31", &compiler, nullptr, &queue,
+                  "carry.cl", "debugPrecarry3161M31", hN / CARRY_LEN,
+                  kernelDefines(KALL).c_str());
+  debugExact(exact, buf3);
+  debugM31(m31, buf3);
+  exact.read(limbs, limb_count);
+  m31.read(residues31, residue_count);
+}
+
 void Gpu::regSync() { queue.finish(); }
 
 double Gpu::regPrpRoe(bool begin) {
@@ -4057,3 +4204,4 @@ void Gpu::regProfileReport(bool emit) {
   }
   profile.reset();
 }
+
