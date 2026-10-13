@@ -62,6 +62,7 @@ public:
   ~RegisterEngine() noexcept { try { queue.finish(); } catch (...) {} }
   void sync() { queue.finish(); }
   ReconstructionReport diagnostics() const { return reconstruction.diagnostics(); }
+  QuotientDiagnostics quotientDiagnostics() { return reconstruction.quotientDiagnostics(); }
 
   // Compact little-endian 32-bit words are the existing Engine API ABI.
   // Reuse its host bit packing only at explicit upload/readback boundaries.
