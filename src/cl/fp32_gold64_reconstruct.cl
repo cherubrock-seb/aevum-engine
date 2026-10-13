@@ -399,6 +399,7 @@ void gold64_carry_finish(__global const long * restrict block_carry,
                          __global uint * restrict block_status,
                          __global const uint * restrict prefix,
                          __global const uint * restrict group_prefix,
+                         __global const uint * restrict super_prefix,
                          __global const uint * restrict total_map,
                          __global long * restrict digit,
                          __global uint * restrict status, uint exponent) {
