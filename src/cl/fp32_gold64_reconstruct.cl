@@ -477,10 +477,7 @@ void gold64_register_coefficients(__global const long * lhs,
     const ulong2 y = gold64_wide_signed(rhs[j]);
     x = gold64_wide_add_checked(x, gold64_wide_add(~y, (ulong2)(1UL, 0UL)), &flags);
   } else if (operation == 3u && !j) x = gold64_wide_add_checked(x, gold64_wide_signed(-(long)value), &flags);
-  else if (operation == 4u) {
-    const ulong2 twice = gold64_wide_add_checked(x, x, &flags);
-    x = gold64_wide_add_checked(twice, gold64_wide_signed(lhs[j]), &flags);
-  } else if (operation > 4u) flags |= G64_UNSUPPORTED_OPERATION;
+  else if (operation > 3u) flags |= G64_UNSUPPORTED_OPERATION;
   candidate[j] = x;
   status[j] = flags;
 }
