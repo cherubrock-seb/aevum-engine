@@ -657,6 +657,63 @@ KERNEL(G_W) debugPrecarry3161(P(ulong2) out, CP(T2) in) {
 }
 
 
+// Validation-only companion to debugPrecarry3161.  Export the same exact
+// pre-carry coefficient modulo M31 in natural order, after applying the Type1
+// inverse NTT weight.  This allows independent Gold64*M31 CRT experiments
+// without changing production carry or register state.
+KERNEL(G_W) debugPrecarry3161M31(P(u32) out, CP(T2) in) {
+  u32 g  = get_group_id(0);
+  u32 me = get_local_id(0);
+  u32 gx = g % NW;
+  u32 gy = g / NW;
+  u32 H = BIG_HEIGHT;
+  u32 line = gy * CARRY_LEN;
+
+  CP(GF31) in31 = (CP(GF31)) (in + DISTGF31);
+
+  u32 word_index = (gx * G_W * H + me * H + line) * 2;
+
+  const u32 m31_log2_root_two = M31_LOG2_ROOT_TWO;
+  const u32 m31_bigword_weight_shift =
+      (NWORDS - EXP % NWORDS) * m31_log2_root_two % 31;
+  const u32 m31_bigword_weight_shift_minus1 =
+      (m31_bigword_weight_shift + 30) % 31;
+
+  union { uint2 a; u64 b; } m31_combo;
+  const u64 m31_combo_step =
+      make_u64(m31_bigword_weight_shift_minus1, FRAC_BPW_HI);
+  m31_combo.b =
+      comboFracBits(word_index) +
+      make_u64(word_index * m31_bigword_weight_shift_minus1, 0xFFFFFFFF);
+
+  const u32 log2_NWORDS =
+      (WIDTH == 256 ? 8 : WIDTH == 512 ? 9 : WIDTH == 1024 ? 10 : 12) +
+      (PFA_RADIX ? 0 :
+       (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 :
+        MIDDLE == 8 ? 3 : 4)) +
+      (SMALL_HEIGHT == 256 ? 8 : SMALL_HEIGHT == 512 ? 9 :
+       SMALL_HEIGHT == 1024 ? 10 : 12) + 1;
+  m31_combo.a[1] = (m31_combo.a[1] + log2_NWORDS + 1) % 31;
+
+  for (i32 i = 0; i < CARRY_LEN; ++i) {
+    u32 p = G_W * gx + WIDTH * (CARRY_LEN * gy + i) + me;
+
+    u32 m31_weight_shift0 = m31_combo.a[1];
+    m31_combo.b += m31_combo_step;
+    m31_combo.a[1] = adjust_m31_weight_shift(m31_combo.a[1]);
+    u32 m31_weight_shift1 = m31_combo.a[1];
+
+    GF31 u31 = SWAP_XY(in31[p]);
+    const u32 natural = word_index + 2u * i;
+    out[natural] = get_Z31(shr(u31.x, m31_weight_shift0));
+    out[natural + 1u] = get_Z31(shr(u31.y, m31_weight_shift1));
+
+    m31_combo.b += m31_combo_step;
+    m31_combo.a[1] = adjust_m31_weight_shift(m31_combo.a[1]);
+  }
+}
+
+
 /******************************************************************************/
 /*  Similar to above, but for a hybrid FFT based on FP32*GF(M31^2)*GF(M61^2)  */
 /******************************************************************************/
