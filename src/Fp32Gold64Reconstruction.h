@@ -4,6 +4,8 @@
 #pragma once
 #include "Fp32Gold64Gpu.h"
 #include <initializer_list>
+#include <chrono>
+#include <iostream>
 
 #ifndef CUDA_BACKEND
 namespace aevum_gold64 {
@@ -79,11 +81,37 @@ class ReconstructionExperiment {
     if ((factor != 1 && factor != 3) || (ll && factor != 1))
       throw std::invalid_argument("Gold64 reconstruction supports square/multiply, times 3, or square minus 2");
   }
+  double lastLiftUs = 0.0;
+  double lastCarryLocalUs = 0.0;
+  double lastCarryMapsUs = 0.0;
+  double lastScanBlocksUs = 0.0;
+  double lastScanGroupsUs = 0.0;
+  double lastCarryFinishUs = 0.0;
+  double lastStatusUs = 0.0;
+
+  template<class F>
+  double profileStage(F&& fn) {
+    convolution.profileFinish();
+    const auto t0 = std::chrono::steady_clock::now();
+    fn();
+    convolution.profileFinish();
+    return std::chrono::duration<double, std::micro>(
+        std::chrono::steady_clock::now() - t0).count();
+  }
+
   void emit(Buffer<WideCoefficient>& candidates, Buffer<U32>& status, U32 factor, bool ll) {
     // Exact supervised-validation reconstruction now uses two exact modular
     // convolution planes. FP32 estimates remain retained for diagnostics only.
-    liftM31Diagnostic(residues, residues31, candidates, status,
-                      cl_uint(factor), cl_uint(ll));
+    lastLiftUs = 0.0;
+    if (convolution.stageProfileEnabled()) {
+      lastLiftUs = profileStage([&] {
+        liftM31Diagnostic(residues, residues31, candidates, status,
+                          cl_uint(factor), cl_uint(ll));
+      });
+    } else {
+      liftM31Diagnostic(residues, residues31, candidates, status,
+                        cl_uint(factor), cl_uint(ll));
+    }
   }
 
 public:
@@ -277,15 +305,57 @@ public:
     requireSize(candidates); requireSize(digits); requireSize(status);
     requireDistinct({candidates.get(), digits.get(), status.get()});
     reportReady = false;
-    carryLocal(candidates, carryDigits, blockCarry, blockStatus, status, cl_uint(exponent));
-    carryMaps(carryDigits, blockCarry, blockStatus, maps, cl_uint(exponent));
-    scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
-    scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
-    carryFinish(carryDigits, blockCarry, blockStatus, prefix, groupPrefix, totalMap,
-                digits, status, cl_uint(exponent));
-    statusBlocks(blockStatus, partialReports);
-    statusFinish(partialReports, summary);
+    lastCarryLocalUs = lastCarryMapsUs = lastScanBlocksUs = lastScanGroupsUs = 0.0;
+    lastCarryFinishUs = lastStatusUs = 0.0;
+
+    if (convolution.stageProfileEnabled()) {
+      lastCarryLocalUs = profileStage([&] {
+        carryLocal(candidates, carryDigits, blockCarry, blockStatus, status, cl_uint(exponent));
+      });
+      lastCarryMapsUs = profileStage([&] {
+        carryMaps(carryDigits, blockCarry, blockStatus, maps, cl_uint(exponent));
+      });
+      lastScanBlocksUs = profileStage([&] {
+        scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
+      });
+      lastScanGroupsUs = profileStage([&] {
+        scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
+      });
+      lastCarryFinishUs = profileStage([&] {
+        carryFinish(carryDigits, blockCarry, blockStatus, prefix, groupPrefix, totalMap,
+                    digits, status, cl_uint(exponent));
+      });
+      lastStatusUs = profileStage([&] {
+        statusBlocks(blockStatus, partialReports);
+        statusFinish(partialReports, summary);
+      });
+    } else {
+      carryLocal(candidates, carryDigits, blockCarry, blockStatus, status, cl_uint(exponent));
+      carryMaps(carryDigits, blockCarry, blockStatus, maps, cl_uint(exponent));
+      scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
+      scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
+      carryFinish(carryDigits, blockCarry, blockStatus, prefix, groupPrefix, totalMap,
+                  digits, status, cl_uint(exponent));
+      statusBlocks(blockStatus, partialReports);
+      statusFinish(partialReports, summary);
+    }
     reportReady = true;
+
+    if (convolution.stageProfileEnabled()) {
+      std::cout
+          << "GOLD64_STAGE_PROFILE"
+          << " gold_us=" << convolution.goldStageUs()
+          << " m31_us=" << convolution.m31StageUs()
+          << " fp32_us=" << convolution.fp32StageUs()
+          << " lift_us=" << lastLiftUs
+          << " carry_local_us=" << lastCarryLocalUs
+          << " carry_maps_us=" << lastCarryMapsUs
+          << " scan_blocks_us=" << lastScanBlocksUs
+          << " scan_groups_us=" << lastScanGroupsUs
+          << " carry_finish_us=" << lastCarryFinishUs
+          << " status_us=" << lastStatusUs
+          << std::endl;
+    }
   }
   void squareNormalized(const Buffer<std::int64_t>& input,
                         Buffer<WideCoefficient>& candidates, Buffer<std::int64_t>& digits,
