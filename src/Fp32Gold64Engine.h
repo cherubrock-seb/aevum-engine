@@ -134,6 +134,13 @@ public:
   void setRawDigits(size_t dst, const std::int64_t* input, size_t count) {
     auto& out = registers.at(dst);
     if (!input || count != n) throw std::invalid_argument("Gold64 raw diagnostic requires 4194304 input digits");
+    // Exact CRT contract: N=2^22 and every accepted natural digit is bounded
+    // by 2^32 in magnitude, hence every cyclic convolution coefficient is
+    // bounded by 2^86.  Keep the diagnostic bypass inside the same contract.
+    constexpr std::int64_t digitLimit = std::int64_t(1) << 32;
+    for (size_t i = 0; i < count; ++i)
+      if (input[i] < -digitLimit || input[i] > digitLimit)
+        throw std::invalid_argument("Gold64 raw diagnostic digit exceeds exact CRT bound");
     reconstruction.invalidateDiagnostics();
     preparedIndex = noPrepared;
     std::vector<std::int64_t> raw(input, input + count);
