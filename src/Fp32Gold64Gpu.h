@@ -3,6 +3,8 @@
 #include "Gold64Gpu.h"
 #include "TrigBufCache.h"
 #include <cstdlib>
+#include <chrono>
+#include <iostream>
 
 #ifndef CUDA_BACKEND
 namespace aevum_gold64 {
@@ -172,12 +174,20 @@ class HybridConvolution {
   GpuPlane gold;
   std::unique_ptr<Fp32Plane> fp32;
   M31Plane m31;
+  Queue* queue;
   bool preparedReady = false;
   bool fp32Ready = false;
+  bool profileStages = false;
+  double lastGoldUs = 0.0;
+  double lastM31Us = 0.0;
+  double lastFp32Us = 0.0;
 
-  static bool enableFp32Diagnostics() {
-    const char* value = std::getenv("AEVUM_GOLD64_FP32_DIAGNOSTICS");
+  static bool envEnabled(const char* name) {
+    const char* value = std::getenv(name);
     return value && *value && *value != '0';
+  }
+  static bool enableFp32Diagnostics() {
+    return envEnabled("AEVUM_GOLD64_FP32_DIAGNOSTICS");
   }
   static U32 requireGeometry(U32 q) {
     Tables::requireGeometry(GpuPlane::words, q);
@@ -203,20 +213,46 @@ public:
       fp32(enableFp32Diagnostics()
                ? std::make_unique<Fp32Plane>(args, q, exponent)
                : nullptr),
-      m31(args, q, exponent) {}
+      m31(args, q, exponent), queue(&q),
+      profileStages(envEnabled("AEVUM_GOLD64_STAGE_PROFILE")) {}
 
   bool fp32DiagnosticsReady() const { return fp32Ready; }
   bool fp32DiagnosticsEnabled() const { return bool(fp32); }
+  bool stageProfileEnabled() const { return profileStages; }
+  void profileFinish() const { queue->finish(); }
+  double goldStageUs() const { return lastGoldUs; }
+  double m31StageUs() const { return lastM31Us; }
+  double fp32StageUs() const { return lastFp32Us; }
+
+  template<class F>
+  double profileStage(F&& fn) {
+    queue->finish();
+    const auto t0 = std::chrono::steady_clock::now();
+    fn();
+    queue->finish();
+    return std::chrono::duration<double, std::micro>(
+        std::chrono::steady_clock::now() - t0).count();
+  }
 
   void square(const Buffer<std::int64_t>& input, Buffer<U64>& residue,
               Buffer<U32>& residue31, Buffer<float>& estimate) {
     requireBuffers(input, residue, residue31, estimate);
     fp32Ready = false;
-    gold.squareResidues(input, residue);
-    m31.squareResidues(input, residue31);
-    if (fp32) {
-      fp32->squareCoefficients(input, estimate);
-      fp32Ready = true;
+    lastGoldUs = lastM31Us = lastFp32Us = 0.0;
+    if (profileStages) {
+      lastGoldUs = profileStage([&] { gold.squareResidues(input, residue); });
+      lastM31Us = profileStage([&] { m31.squareResidues(input, residue31); });
+      if (fp32) {
+        lastFp32Us = profileStage([&] { fp32->squareCoefficients(input, estimate); });
+        fp32Ready = true;
+      }
+    } else {
+      gold.squareResidues(input, residue);
+      m31.squareResidues(input, residue31);
+      if (fp32) {
+        fp32->squareCoefficients(input, estimate);
+        fp32Ready = true;
+      }
     }
   }
   void prepare(const Buffer<std::int64_t>& rhs) {
