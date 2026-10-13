@@ -80,7 +80,10 @@ class ReconstructionExperiment {
       throw std::invalid_argument("Gold64 reconstruction supports square/multiply, times 3, or square minus 2");
   }
   void emit(Buffer<WideCoefficient>& candidates, Buffer<U32>& status, U32 factor, bool ll) {
-    lift(residues, estimates, candidates, status, cl_uint(factor), cl_uint(ll));
+    // Exact supervised-validation reconstruction now uses two exact modular
+    // convolution planes. FP32 estimates remain retained for diagnostics only.
+    liftM31Diagnostic(residues, residues31, candidates, status,
+                      cl_uint(factor), cl_uint(ll));
   }
 
 public:
