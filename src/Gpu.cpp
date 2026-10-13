@@ -2653,6 +2653,16 @@ void Gpu::regDebugSquareTrace(Buffer<Word>& io, u64* trace, size_t trace_count) 
   trace[11] = words.empty() ? 0 : static_cast<uint64_t>(words[0]);
 }
 
+void Gpu::regDebugSetType1RawDigits(Buffer<Word>& io, const i64* digits, size_t digit_count) {
+  if (fft.shape.fft_type != FFT3161 || !fft.NTT_GF31 || !fft.NTT_GF61 ||
+      fft.FFT_FP32 || fft.FFT_FP64)
+    throw std::runtime_error("Type1 raw-digit diagnostics require an FFT3161 GF31+GF61 plan");
+  if (!digits || digit_count != N)
+    throw std::runtime_error("Type1 raw-digit diagnostics require exactly N signed digits");
+  std::vector<Word> raw(digits, digits + digit_count);
+  writeIn(io, std::move(raw));
+}
+
 void Gpu::regDebugType1Precarry(Buffer<Word>& io, u64* limbs, size_t limb_count) {
   if (fft.shape.fft_type != FFT3161 || !fft.NTT_GF31 || !fft.NTT_GF61 ||
       fft.FFT_FP32 || fft.FFT_FP64)
