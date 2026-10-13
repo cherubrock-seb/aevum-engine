@@ -100,6 +100,16 @@ public:
     if (!output || count != n) throw std::invalid_argument("Gold64 requires 4194304 output digits");
     registers.at(src).read(output, count);
   }
+  // Diagnostic-only: bypass compact-word normalization so an external exact
+  // oracle can feed the identical natural-order digit vector into Gold64.
+  void setRawDigits(size_t dst, const std::int64_t* input, size_t count) {
+    auto& out = registers.at(dst);
+    if (!input || count != n) throw std::invalid_argument("Gold64 raw diagnostic requires 4194304 input digits");
+    reconstruction.invalidateDiagnostics();
+    preparedIndex = noPrepared;
+    std::vector<std::int64_t> raw(input, input + count);
+    out.write(raw);
+  }
   void copy(size_t dst, size_t src) {
     auto& out = registers.at(dst);
     const auto& in = registers.at(src);
