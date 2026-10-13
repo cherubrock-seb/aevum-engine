@@ -204,8 +204,10 @@ int main(int argc, char** argv) {
     queue.finish();
     checkResidues(mulOracle, gold.read(), m61.read(), m31.read(), "HOSTILE_MUL");
 
-    // Full-length cyclic carry: d_j = 2^(w_j-1)-1. Then d+d with incoming
-    // cyclic carry +1 gives balanced digit -1 and outgoing carry +1 at every j.
+    // Full-length cyclic carry: d_j = 2^(w_j-1)-1. The zero-seeded
+    // segment pass leaves tail +1; therefore the cyclic correction delta is 0
+    // (encoded state 1), while the physical carry entering each segment is +1.
+    // The normalized digit is -1 at every j.
     std::vector<Digit> dense(Plan::words);
     for (U32 j = 0; j < Plan::words; ++j) {
       const U32 width = plan.digitWidth(j);
@@ -223,8 +225,8 @@ int main(int argc, char** argv) {
     std::cout << "LONG_CARRY_FLAGS=" << report.flags << "\n";
     std::cout << "LONG_CARRY_ERRORS=" << report.errorCount << "\n";
     std::cout << "LONG_CARRY_STATE=" << report.cyclicState << "\n";
-    require(report.flags == 0 && report.errorCount == 0 && report.cyclicState == 2,
-            "full-length cyclic +1 carry diagnostic mismatch");
+    require(report.flags == 0 && report.errorCount == 0 && report.cyclicState == 1,
+            "full-length cyclic carry correction-state mismatch");
 
     const auto normalized = denseOut.read();
     U64 badDense = 0;
