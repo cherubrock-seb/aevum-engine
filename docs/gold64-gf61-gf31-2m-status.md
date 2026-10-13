@@ -4,9 +4,8 @@
 - Base: `ce0b8b5ee3aa4d7c79d55858f5bb1fa783073610`.
 - Last confirmed implementation commit (E): `e8d7791126280daaa1755754b2cb6cafb7357504`.
 - Concurrent portable-scalar, Queue null-profile and API prefix corrections,
-  plus external smoke harnesses, were
-  preserved. This implementation session has not run that harness or reviewed
-  external execution evidence.
+  plus repository smoke/performance harnesses, were preserved and owner-led
+  validation has now been completed on gfx906 and RTX 3080.
 - A implemented in `src/Gold3Plan.h` and `src/cl/gold3_arith.cl`: shared
   128-bit digit ABI, signed 192-bit arithmetic, exact Garner CRT constants,
   three residue conversions, balanced splitting, root/geometry checks.
@@ -36,17 +35,20 @@
   add/subtract/equality, dedicated square-minus-two and checked commit.
   Normal PRP/LL, stock Gpu, native CUDA and Apple reject this backend.
   Production capacity stays zero; AUTO and existing selector policies unchanged.
-- Wide cyclic carry and Engine API: implemented, unvalidated.
-- Full owner-led compilation/differential GPU validation can begin.
+- Wide cyclic carry and Engine API: implemented and validated cross-vendor.
+- Owner-led exactness evidence: baseline three-plane square/prepared multiply,
+  public explicit-only Engine API, hostile signed multi-index weight/order,
+  wraparound, 64/65-bit transition, full-length cyclic carry, compact packing,
+  factors 1/3, LL -2 and prepared-cache invalidation all PASS on gfx906 and
+  RTX 3080, with zero residue/reconstruction diagnostics in the checked lanes.
 - E in source: GF31 reduced import uses 32-bit storage (8 MiB less scratch),
   final carry copies balanced remainders after the correction vanishes,
   and modular export canonically reduces even zero-shift redundant residues.
-- Remaining validation blockers: compilation on RTX 3080 and gfx906, exact
-  dense/sparse/hostile plane comparisons against an independent integer oracle,
-  Gold64 radix-32 ordering, signs/digit-zero/normalization, cyclic long carry,
-  64/65-bit compact packing, factors 1/3, LL -2, prepared-cache invalidation.
-  Source capacity proof does not certify device code or production readiness.
-- Next exact step: owner-led OpenCL compilation, then plane comparisons via
-  `aevum_engine_gold3_set_digits` / `aevum_engine_gold3_get_residues`; no source
-  implementation milestone is intentionally left as a stub.
-- Production blocked. No builds, tests, benchmarks, SSH or CI polling run here.
+- Targeted performance at p=136279841 shows Gold3 is not competitive:
+  gfx906 square 6.4785x production, dedicated LL 4.5078x production;
+  RTX 3080 square 2.7840x production, dedicated LL 2.5605x production.
+- Scientific disposition: retain this branch/PR as an explicit supervised exact
+  multi-modulus reference/oracle. Do not route normal PRP/LL, AUTO or PrMers
+  production selection to Gold3 from the present evidence.
+- Production promotion is intentionally blocked by measured performance, not
+  unresolved correctness in the validated lanes.
