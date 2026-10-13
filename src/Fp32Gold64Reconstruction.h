@@ -132,9 +132,16 @@ public:
     if (!reportReady) throw std::logic_error("Gold64 has no completed normalization diagnostics");
     return summary.read(1).front();
   }
+  void requireFp32Diagnostics() const {
+    if (!convolution.fp32DiagnosticsEnabled())
+      throw std::logic_error("Gold64 FP32 diagnostics require AEVUM_GOLD64_FP32_DIAGNOSTICS=1 before handle creation");
+    if (!convolution.fp32DiagnosticsReady())
+      throw std::logic_error("Gold64 FP32 diagnostics require a completed square or multiply operation");
+  }
   void getEstimates(float* output, size_t count) {
     if (!output || count != n)
       throw std::invalid_argument("Gold64 estimate diagnostics require 4194304 floats");
+    requireFp32Diagnostics();
     estimates.read(output, count);
   }
   void getResidues(U64* output, size_t count) {
@@ -150,6 +157,7 @@ public:
   QuotientDiagnostics quotientDiagnostics() {
     if (!reportReady)
       throw std::logic_error("Gold64 quotient diagnostics require a completed candidate operation");
+    requireFp32Diagnostics();
     quotientProbe(residues, estimates, quotientFlags);
     const auto flags = quotientFlags.read(n);
     QuotientDiagnostics out;
@@ -179,6 +187,7 @@ public:
     requireSize(candidates); requireSize(digits); requireSize(status);
     requireDistinct({candidates.get(), digits.get(), status.get()});
     requireOperation(factor, false);
+    requireFp32Diagnostics();
     liftFp64Diagnostic(residues, estimates, candidates, status, cl_uint(factor));
 
     // Reuse the exact cyclic carry pipeline but deliberately do NOT publish a
@@ -294,9 +303,8 @@ public:
     multiplyCandidates(lhs, candidates, status, factor);
     normalizeCandidates(candidates, digits, status);
   }
-  // The normal policy rejects BEFORE enqueuing arithmetic. The validation
-  // policy returns candidate digits plus diagnostics and still rejects every
-  // fatal flag anywhere in the ring. It never declares exactness.
+  // The exact CRT lane remains restricted to the explicit validation backend.
+  // FP32 estimate diagnostics are opt-in and never participate in correctness.
   ReconstructionReport squareChecked(const Buffer<std::int64_t>& input,
                         Buffer<WideCoefficient>& candidates, Buffer<std::int64_t>& digits,
                         Buffer<U32>& status, U32 factor = 1, bool subtractTwo = false,
