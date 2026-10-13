@@ -62,7 +62,7 @@ class ReconstructionExperiment {
   Buffer<U64> residues;
   Buffer<U32> residues31;
   Buffer<float> estimates;
-  Buffer<std::int64_t> carryDigits, blockCarry;
+  Buffer<std::int64_t> blockCarry;
   Buffer<U32> blockStatus, maps, prefix, groupMaps, groupPrefix, totalMap;
   Buffer<U32> quotientFlags;
   Buffer<ReconstructionReport> partialReports, summary;
@@ -146,7 +146,7 @@ public:
       compiler(args, queue.context, carryCompilerDefines(carryBlock)),
       residues(nullptr, &queue, n), residues31(nullptr, &queue, n),
       estimates(nullptr, &queue, n),
-      carryDigits(nullptr, &queue, n), blockCarry(nullptr, &queue, blocks),
+      blockCarry(nullptr, &queue, blocks),
       blockStatus(nullptr, &queue, blocks), maps(nullptr, &queue, blocks),
       prefix(nullptr, &queue, blocks), groupMaps(nullptr, &queue, groups),
       groupPrefix(nullptr, &queue, groups), totalMap(nullptr, &queue, 1),
@@ -255,12 +255,12 @@ public:
     // Reuse the exact cyclic carry pipeline but deliberately do NOT publish a
     // ReconstructionReport.  The last real operation's fail-stop diagnostics
     // remain intact, and no register is committed by this diagnostic lane.
-    carryLocal(candidates, carryDigits, blockCarry, blockStatus, status, cl_uint(exponent));
-    carryMaps(carryDigits, blockCarry, blockStatus, maps, cl_uint(exponent));
+    carryLocal(candidates, digits, blockCarry, blockStatus, status, cl_uint(exponent));
+    carryMaps(digits, blockCarry, blockStatus, maps, cl_uint(exponent));
     scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
     scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
-    carryFinish(carryDigits, blockCarry, blockStatus, prefix, groupPrefix, totalMap,
-                digits, status, cl_uint(exponent));
+    carryFinish(blockCarry, blockStatus, prefix, groupPrefix, totalMap,
+                 digits, status, cl_uint(exponent));
 
     // FractionalHint is expected to remain diagnostic here.  Reject only true
     // operational/range failures before exposing scratch output to the harness.
@@ -284,12 +284,12 @@ public:
     liftM31Diagnostic(residues, residues31, candidates, status,
                       cl_uint(factor), cl_uint(subtractTwo));
 
-    carryLocal(candidates, carryDigits, blockCarry, blockStatus, status, cl_uint(exponent));
-    carryMaps(carryDigits, blockCarry, blockStatus, maps, cl_uint(exponent));
+    carryLocal(candidates, digits, blockCarry, blockStatus, status, cl_uint(exponent));
+    carryMaps(digits, blockCarry, blockStatus, maps, cl_uint(exponent));
     scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
     scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
-    carryFinish(carryDigits, blockCarry, blockStatus, prefix, groupPrefix, totalMap,
-                digits, status, cl_uint(exponent));
+    carryFinish(blockCarry, blockStatus, prefix, groupPrefix, totalMap,
+                 digits, status, cl_uint(exponent));
 
     constexpr U32 operationalFatal =
         Nonfinite | QuotientRange | InvalidResidue | UnsupportedOperation |
@@ -344,10 +344,10 @@ public:
 
     if (convolution.stageProfileEnabled()) {
       lastCarryLocalUs = profileStage([&] {
-        carryLocal(candidates, carryDigits, blockCarry, blockStatus, status, cl_uint(exponent));
+        carryLocal(candidates, digits, blockCarry, blockStatus, status, cl_uint(exponent));
       });
       lastCarryMapsUs = profileStage([&] {
-        carryMaps(carryDigits, blockCarry, blockStatus, maps, cl_uint(exponent));
+        carryMaps(digits, blockCarry, blockStatus, maps, cl_uint(exponent));
       });
       lastScanBlocksUs = profileStage([&] {
         scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
@@ -356,20 +356,20 @@ public:
         scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
       });
       lastCarryFinishUs = profileStage([&] {
-        carryFinish(carryDigits, blockCarry, blockStatus, prefix, groupPrefix, totalMap,
-                    digits, status, cl_uint(exponent));
+        carryFinish(blockCarry, blockStatus, prefix, groupPrefix, totalMap,
+                 digits, status, cl_uint(exponent));
       });
       lastStatusUs = profileStage([&] {
         statusBlocks(blockStatus, partialReports);
         statusFinish(partialReports, summary);
       });
     } else {
-      carryLocal(candidates, carryDigits, blockCarry, blockStatus, status, cl_uint(exponent));
-      carryMaps(carryDigits, blockCarry, blockStatus, maps, cl_uint(exponent));
+      carryLocal(candidates, digits, blockCarry, blockStatus, status, cl_uint(exponent));
+      carryMaps(digits, blockCarry, blockStatus, maps, cl_uint(exponent));
       scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
       scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
-      carryFinish(carryDigits, blockCarry, blockStatus, prefix, groupPrefix, totalMap,
-                  digits, status, cl_uint(exponent));
+      carryFinish(blockCarry, blockStatus, prefix, groupPrefix, totalMap,
+                 digits, status, cl_uint(exponent));
       statusBlocks(blockStatus, partialReports);
       statusFinish(partialReports, summary);
     }
