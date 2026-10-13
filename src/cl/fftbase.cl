@@ -2500,13 +2500,33 @@ void OVERLOAD fft_RADIX(GF61 *u) {
 #endif
 }
 
+#ifndef AEVUM_GF61_UNIT_CUBE_V1
+#define AEVUM_GF61_UNIT_CUBE_V1 0
+#endif
+
+// S3: width-table twiddles are unit-norm roots. Specialize their cube,
+// not arbitrary data multiplication. Keep other arithmetic lanes isolated.
+#if AEVUM_GF61_UNIT_CUBE_V1 && TABMUL_CHAIN61 && DOING_WIDTH && \
+    FFT_TYPE == FFT3161 && (WIDTH == 512 || WIDTH == 1024) && \
+    (RADIX == 4 || RADIX == 8) && !PFA_RADIX && !CUDA_BACKEND && \
+    !AEVUM_GF61_LIMB32 && !defined(AEVUM_GF61_CMUL_ALT) && \
+    (AMDGPU || NVIDIAGPU) && __OPENCL_C_VERSION__ >= 200
+#define AEVUM_GF61_UNIT_CUBE_ACTIVE 1
+#else
+#define AEVUM_GF61_UNIT_CUBE_ACTIVE 0
+#endif
+
 void OVERLOAD chainMul4(GF61 *u, GF61 w) {
   u[1] = cmul(u[1], w);
 
   GF61 base = csq(w);
   u[2] = cmul(u[2], base);
 
+#if AEVUM_GF61_UNIT_CUBE_ACTIVE
+  base = ccubeTrig(base, w);
+#else
   base = cmul(base, w);                 //GWBUG - see FP64 version for possible optimization
+#endif
   u[3] = cmul(u[3], base);
 }
 
@@ -2516,7 +2536,11 @@ void OVERLOAD chainMul8(GF61 *u, GF61 w) {
   GF61 w2 = csq(w);
   u[2] = cmul(u[2], w2);
 
+#if AEVUM_GF61_UNIT_CUBE_ACTIVE
+  GF61 base = ccubeTrig(w2, w);
+#else
   GF61 base = cmul(w2, w);              //GWBUG - see FP64 version for many possible optimizations
+#endif
   for (int i = 3; i < 8; ++i) {
     u[i] = cmul(u[i], base);
     base = cmul(base, w);
