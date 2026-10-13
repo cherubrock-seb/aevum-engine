@@ -109,6 +109,19 @@ class M31Plane {
   Kernel transpose, premul, middleIn, tailSquare, middleOut, widthOut,
          widthOutExport, tailMul, exportResidues;
 
+  static bool fusedOutEnabled(Queue& q) {
+    if (const char* value = std::getenv("AEVUM_GOLD64_M31_FUSED_OUT"))
+      return *value && *value != '0';
+
+    cl_uint vendor = 0u;
+    const auto id = q.context->deviceId();
+    if (clGetDeviceInfo(id, CL_DEVICE_VENDOR_ID, sizeof(vendor), &vendor, nullptr) != CL_SUCCESS)
+      throw std::runtime_error("M31 fused-output selection could not query device vendor");
+    // RTX benefits from eliminating the final GF31 materialization/reload.
+    // gfx906 is neutral/slightly slower, so leave AMD on the established path.
+    return vendor == GpuPlane::nvidiaVendor;
+  }
+
   template<class T> static void requireSize(const Buffer<T>& x) {
     if (x.size != n) throw std::invalid_argument("M31/Gold64 requires 4194304 natural-order digits");
   }
@@ -133,10 +146,7 @@ public:
     : queue(&q), setup(makeM31Setup(args, q, exponent)),
       compiler(args, q.context, setup.defines),
       transposed(nullptr, &q, n), a(nullptr, &q, half), b(nullptr, &q, half),
-      fusedOut([] {
-        const char* value = std::getenv("AEVUM_GOLD64_M31_FUSED_OUT");
-        return value && *value && *value != '0';
-      }()),
+      fusedOut(fusedOutEnabled(q)),
       transpose("gold64_m31_import", &compiler, nullptr, &q,
                 "fp32_gold64_bridge.cl", "gold64_m31_import", half),
       premul("gold64_m31_fftP", &compiler, nullptr, &q, "fftp.cl", "fftP", half/8),
