@@ -645,8 +645,9 @@ KERNEL(G_W) debugPrecarry3161(P(ulong2) out, CP(T2) in) {
     i96 x0 = weightAndCarryOne(u31.x, u61.x, m31_weight_shift0, m61_weight_shift0, false, 0, &roundMax);
     i96 x1 = weightAndCarryOne(u31.y, u61.y, m31_weight_shift1, m61_weight_shift1, false, 0, &roundMax);
 
-    out[2 * p] = (ulong2)(i96_lo64(x0), (ulong)(long)(i32)i96_hi32(x0));
-    out[2 * p + 1] = (ulong2)(i96_lo64(x1), (ulong)(long)(i32)i96_hi32(x1));
+    const u32 natural = word_index + 2u * i;
+    out[natural] = (ulong2)(i96_lo64(x0), (ulong)(long)(i32)i96_hi32(x0));
+    out[natural + 1u] = (ulong2)(i96_lo64(x1), (ulong)(long)(i32)i96_hi32(x1));
 
     m31_combo.b += m31_combo_step;
     m31_combo.a[1] = adjust_m31_weight_shift(m31_combo.a[1]);
