@@ -55,12 +55,13 @@ class ReconstructionExperiment {
   HybridConvolution convolution;
   KernelCompiler compiler;
   Buffer<U64> residues;
+  Buffer<U32> residues31;
   Buffer<float> estimates;
   Buffer<std::int64_t> carryDigits, blockCarry;
   Buffer<U32> blockStatus, maps, prefix, groupMaps, groupPrefix, totalMap;
   Buffer<U32> quotientFlags;
   Buffer<ReconstructionReport> partialReports, summary;
-  Kernel lift, liftFp64Diagnostic, split, quotientProbe;
+  Kernel lift, liftFp64Diagnostic, liftM31Diagnostic, split, quotientProbe;
   Kernel carryLocal, carryMaps, scanBlocks, scanGroups, carryFinish;
   Kernel statusBlocks, statusFinish;
   bool reportReady = false;
@@ -86,7 +87,8 @@ public:
   ReconstructionExperiment(const Args& args, Queue& queue, U32 q)
     : exponent(q), convolution(args, queue, q),
       compiler(args, queue.context, "-DGOLD64_N=4194304"),
-      residues(nullptr, &queue, n), estimates(nullptr, &queue, n),
+      residues(nullptr, &queue, n), residues31(nullptr, &queue, n),
+      estimates(nullptr, &queue, n),
       carryDigits(nullptr, &queue, n), blockCarry(nullptr, &queue, blocks),
       blockStatus(nullptr, &queue, blocks), maps(nullptr, &queue, blocks),
       prefix(nullptr, &queue, blocks), groupMaps(nullptr, &queue, groups),
@@ -97,6 +99,8 @@ public:
            "fp32_gold64_reconstruct.cl", "gold64_lift_candidates", n),
       liftFp64Diagnostic("gold64_lift_candidates_fp64_diagnostic", &compiler, nullptr, &queue,
                          "fp32_gold64_reconstruct.cl", "gold64_lift_candidates_fp64_diagnostic", n),
+      liftM31Diagnostic("gold64_crt_m31_candidates", &compiler, nullptr, &queue,
+                        "fp32_gold64_reconstruct.cl", "gold64_crt_m31_candidates", n),
       split("gold64_split_candidates", &compiler, nullptr, &queue,
             "fp32_gold64_reconstruct.cl", "gold64_split_candidates", n),
       quotientProbe("gold64_quotient_diagnostics", &compiler, nullptr, &queue,
@@ -134,6 +138,11 @@ public:
     if (!output || count != n)
       throw std::invalid_argument("Gold64 residue diagnostics require 4194304 uint64 values");
     residues.read(output, count);
+  }
+  void getResidues31(U32* output, size_t count) {
+    if (!output || count != n)
+      throw std::invalid_argument("Gold64 M31 residue diagnostics require 4194304 uint32 values");
+    residues31.read(output, count);
   }
   QuotientDiagnostics quotientDiagnostics() {
     if (!reportReady)
@@ -190,6 +199,33 @@ public:
         throw std::runtime_error("Gold64 FP64 diagnostic lift encountered operational failure");
   }
 
+
+  void m31DiagnosticNormalized(Buffer<WideCoefficient>& candidates,
+                               Buffer<std::int64_t>& digits,
+                               Buffer<U32>& status, U32 factor,
+                               bool subtractTwo = false) {
+    requireSize(candidates); requireSize(digits); requireSize(status);
+    requireDistinct({candidates.get(), digits.get(), status.get()});
+    requireOperation(factor, subtractTwo);
+    liftM31Diagnostic(residues, residues31, candidates, status,
+                      cl_uint(factor), cl_uint(subtractTwo));
+
+    carryLocal(candidates, carryDigits, blockCarry, blockStatus, status, cl_uint(exponent));
+    carryMaps(carryDigits, blockCarry, blockStatus, maps, cl_uint(exponent));
+    scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
+    scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
+    carryFinish(carryDigits, blockCarry, blockStatus, prefix, groupPrefix, totalMap,
+                digits, status, cl_uint(exponent));
+
+    constexpr U32 operationalFatal =
+        Nonfinite | QuotientRange | InvalidResidue | UnsupportedOperation |
+        CarryOverflow | CarryNonconvergence;
+    const auto flags = status.read(n);
+    for (U32 f : flags)
+      if (f & operationalFatal)
+        throw std::runtime_error("Gold64 M31 CRT diagnostic lift encountered operational failure");
+  }
+
   void squareCandidates(const Buffer<std::int64_t>& input,
                         Buffer<WideCoefficient>& candidates, Buffer<U32>& status,
                         U32 factor = 1, bool subtractTwo = false) {
@@ -197,7 +233,7 @@ public:
     requireDistinct({input.get(), candidates.get(), status.get()});
     requireOperation(factor, subtractTwo);
     reportReady = false;
-    convolution.square(input, residues, estimates);
+    convolution.square(input, residues, residues31, estimates);
     emit(candidates, status, factor, subtractTwo);
   }
   void prepare(const Buffer<std::int64_t>& rhs) { convolution.prepare(rhs); }
@@ -207,7 +243,7 @@ public:
     requireDistinct({lhs.get(), candidates.get(), status.get()});
     requireOperation(factor, false);
     reportReady = false;
-    convolution.multiply(lhs, residues, estimates);
+    convolution.multiply(lhs, residues, residues31, estimates);
     emit(candidates, status, factor, false);
   }
   // Only a per-coefficient split, not inter-digit propagation or a PRP step.
