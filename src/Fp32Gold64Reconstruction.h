@@ -1,6 +1,6 @@
-// Diagnostic reconstruction on the actual two-plane transform output.
-// A nonzero UnprovenPrecision flag is unconditional: no correctness inference
-// may be made from a near-integer quotient or from this API completing.
+// Exact Gold64*M31 reconstruction plus retained FP32 diagnostics.
+// The legacy FP32 lift remains explicitly UnprovenPrecision; the active CRT
+// lane is proven only under the fixed N=2^22, |digit|<=2^32 input contract.
 #pragma once
 #include "Fp32Gold64Gpu.h"
 #include <initializer_list>
@@ -14,8 +14,8 @@ enum ReconstructionStatus : U32 {
   InvalidResidue = 16, UnsupportedOperation = 32, CarryOverflow = 64,
   CarryNonconvergence = 128
 };
-// Geometry/format checks are not precision certificates. No caller-supplied
-// tolerance or near-integer quotient can clear UnprovenPrecision.
+// UnprovenPrecision is reserved for legacy estimate-based diagnostic paths.
+// No caller-supplied tolerance or near-integer FP hint can clear it.
 enum class PrecisionPolicy { RequireProven, SupervisedValidation };
 struct ReconstructionReport {
   U32 flags, firstFatalBlock, fatalBlocks, unprovenBlocks;
@@ -32,7 +32,7 @@ struct ReconstructionReport {
       throw std::runtime_error("Gold64 reconstruction rejected: flags=" + std::to_string(flags) +
                                ", first fatal carry block=" + std::to_string(firstFatalBlock));
     if (policy == PrecisionPolicy::RequireProven && !proven())
-      throw std::runtime_error("Gold64 UnprovenPrecision: no certified FP32 reconstruction bound; PRP/LL acceptance disabled");
+      throw std::runtime_error("Gold64 UnprovenPrecision: requested path is not covered by the exact CRT contract");
   }
 };
 static_assert(sizeof(ReconstructionReport) == 16, "OpenCL uint4 diagnostic ABI");
@@ -125,7 +125,7 @@ public:
 
   static void requireExecution(PrecisionPolicy policy) {
     if (policy != PrecisionPolicy::SupervisedValidation)
-      throw std::runtime_error("Gold64 UnprovenPrecision: only explicit supervised validation is supported");
+      throw std::runtime_error("Gold64 exact CRT is still restricted to explicit supervised validation");
   }
   void invalidateDiagnostics() { reportReady = false; }
   ReconstructionReport diagnostics() const {
