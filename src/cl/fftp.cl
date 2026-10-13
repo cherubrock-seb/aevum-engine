@@ -94,6 +94,9 @@ KERNEL(G_W) fftP(P(GF31) out, CP(Word2) in, TrigGF31 smallTrig) {
 
   // Weight is 2^[ceil(qj / n) - qj/n] where j is the word index, q is the Mersenne exponent, and n is the number of words.
   const u32 log2_root_two = M31_LOG2_ROOT_TWO;
+  // Exact integer bpw has unity IBDWT input weights.  The FRAC_BPW
+  // all-ones sentinel must not create a carry into the M31 shift.
+  const bool integer_bpw = (EXP % NWORDS) == 0;
   const u32 bigword_weight_shift = (NWORDS - EXP % NWORDS) * log2_root_two % 31;
   const u32 bigword_weight_shift_minus1 = (bigword_weight_shift + 30) % 31;
 
@@ -112,10 +115,10 @@ KERNEL(G_W) fftP(P(GF31) out, CP(Word2) in, TrigGF31 smallTrig) {
   for (u32 i = 0; i < NW; ++i) {
     u32 p = G_W * i + me;
     // Generate the second weight shift
-    u32 weight_shift0 = weight_shift;
+    u32 weight_shift0 = integer_bpw ? 0u : weight_shift;
     combo_counter += combo_step;
     if (weight_shift > 31) weight_shift -= 31;
-    u32 weight_shift1 = weight_shift;
+    u32 weight_shift1 = integer_bpw ? 0u : weight_shift;
     // Convert and weight inputs
     u[i] = U2(shl(make_Z31(in[p].x), weight_shift0), shl(make_Z31(in[p].y), weight_shift1));      // Form a GF31 from each pair of input words
     // Generate weight shifts and frac_bits for next pair

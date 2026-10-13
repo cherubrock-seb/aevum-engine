@@ -109,13 +109,14 @@ KERNEL(G_W) gold64_m31_fftW_unweight(P(u32) out, CP(T2) in, Trig smallTrig) {
       (SMALL_HEIGHT == 256 ? 8 : SMALL_HEIGHT == 512 ? 9 :
        SMALL_HEIGHT == 1024 ? 10 : 12) + 1;
   combo.a[1] = (combo.a[1] + log2_NWORDS + 1) % 31;
+  const u32 integer_bpw_shift = (log2_NWORDS + 1) % 31;
 
 #pragma unroll
   for (u32 i = 0; i < NW; ++i) {
-    const u32 shift0 = combo.a[1];
+    const u32 shift0 = (EXP % NWORDS == 0) ? integer_bpw_shift : combo.a[1];
     combo.b += combo_step;
     combo.a[1] = adjust_m31_weight_shift(combo.a[1]);
-    const u32 shift1 = combo.a[1];
+    const u32 shift1 = (EXP % NWORDS == 0) ? integer_bpw_shift : combo.a[1];
 
     const GF31 v = SWAP_XY(u[i]);
     out[word_index] = get_Z31(shr(v.x, shift0));
@@ -159,13 +160,14 @@ KERNEL(G_W) gold64_m31_unweight(CP(GF31) in, P(u32) out) {
       (SMALL_HEIGHT == 256 ? 8 : SMALL_HEIGHT == 512 ? 9 :
        SMALL_HEIGHT == 1024 ? 10 : 12) + 1;
   combo.a[1] = (combo.a[1] + log2_NWORDS + 1) % 31;
+  const u32 integer_bpw_shift = (log2_NWORDS + 1) % 31;
 
   for (i32 i = 0; i < CARRY_LEN; ++i) {
     const u32 p = G_W * gx + WIDTH * (CARRY_LEN * gy + i) + me;
-    const u32 shift0 = combo.a[1];
+    const u32 shift0 = (EXP % NWORDS == 0) ? integer_bpw_shift : combo.a[1];
     combo.b += combo_step;
     combo.a[1] = adjust_m31_weight_shift(combo.a[1]);
-    const u32 shift1 = combo.a[1];
+    const u32 shift1 = (EXP % NWORDS == 0) ? integer_bpw_shift : combo.a[1];
 
     const GF31 u = SWAP_XY(in[p]);
     const u32 natural = word_index + 2u * i;
