@@ -486,6 +486,7 @@ public:
   void regSubU32(Buffer<Word>& dst, u32 value);
   bool regEqual(Buffer<Word>& lhs, Buffer<Word>& rhs);
   void regDebugSquareTrace(Buffer<Word>& io, u64* trace, size_t trace_count);
+  void regDebugSetType1RawDigits(Buffer<Word>& io, const i64* digits, size_t digit_count);
   void regDebugType1Precarry(Buffer<Word>& io, u64* limbs, size_t limb_count);
 
   void clear(bool isPRP);
