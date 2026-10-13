@@ -2,8 +2,9 @@
 
 - Branch: `exp/gold64-gf61-gf31-exact-2m`, independent of PR #22.
 - Base: `ce0b8b5ee3aa4d7c79d55858f5bb1fa783073610`.
-- Last confirmed implementation commit (D): `b05ddac13ce7cfd9885fb20c264709533ab71568`.
-- Concurrent portable-scalar corrections and the external smoke harness were
+- Last confirmed implementation commit (E): `e8d7791126280daaa1755754b2cb6cafb7357504`.
+- Concurrent portable-scalar, Queue null-profile and API prefix corrections,
+  plus external smoke harnesses, were
   preserved. This implementation session has not run that harness or reviewed
   external execution evidence.
 - A implemented in `src/Gold3Plan.h` and `src/cl/gold3_arith.cl`: shared
