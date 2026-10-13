@@ -80,7 +80,11 @@ void gold64_crt_m31_candidates(__global const ulong * restrict residue,
   const uint j = (uint)get_global_id(0);
   const ulong r = residue[j];
   const uint r31 = residue31[j];
-  uint flags = G64_UNPROVEN_PRECISION;
+  // Exactness proof under the enforced input contract:
+  // N=2^22, |digit|<=2^32 => |coefficient|<=2^86.
+  // GOLD64_P>2^63 and M31>2^30 => GOLD64_P*M31/2>2^92.
+  // Therefore the signed CRT representative is unique with >6 bits margin.
+  uint flags = 0u;
 
   if (r >= GOLD64_P || r31 >= GOLD64_M31_P) flags |= G64_INVALID_RESIDUE;
   if ((factor != 1u && factor != 3u) || subtract_two > 1u || (subtract_two && factor != 1u))
@@ -471,7 +475,9 @@ void gold64_register_coefficients(__global const long * lhs,
                                   uint operation, uint value) {
   const uint j = (uint)get_global_id(0);
   ulong2 x = gold64_wide_signed(lhs[j]);
-  uint flags = G64_UNPROVEN_PRECISION;
+  // Inputs are normalized signed digits inside the same <=2^32 contract.
+  // Linear add/subtract is exact integer arithmetic followed by exact carry.
+  uint flags = 0u;
   if (operation == 1u) x = gold64_wide_add_checked(x, gold64_wide_signed(rhs[j]), &flags);
   else if (operation == 2u) {
     const ulong2 y = gold64_wide_signed(rhs[j]);
