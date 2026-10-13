@@ -60,7 +60,7 @@ class ReconstructionExperiment {
   Buffer<U32> blockStatus, maps, prefix, groupMaps, groupPrefix, totalMap;
   Buffer<U32> quotientFlags;
   Buffer<ReconstructionReport> partialReports, summary;
-  Kernel lift, split, quotientProbe;
+  Kernel lift, liftFp64Diagnostic, split, quotientProbe;
   Kernel carryLocal, carryMaps, scanBlocks, scanGroups, carryFinish;
   Kernel statusBlocks, statusFinish;
   bool reportReady = false;
@@ -95,6 +95,8 @@ public:
       partialReports(nullptr, &queue, groups), summary(nullptr, &queue, 1),
       lift("gold64_lift_candidates", &compiler, nullptr, &queue,
            "fp32_gold64_reconstruct.cl", "gold64_lift_candidates", n),
+      liftFp64Diagnostic("gold64_lift_candidates_fp64_diagnostic", &compiler, nullptr, &queue,
+                         "fp32_gold64_reconstruct.cl", "gold64_lift_candidates_fp64_diagnostic", n),
       split("gold64_split_candidates", &compiler, nullptr, &queue,
             "fp32_gold64_reconstruct.cl", "gold64_split_candidates", n),
       quotientProbe("gold64_quotient_diagnostics", &compiler, nullptr, &queue,
@@ -147,6 +149,35 @@ public:
       if (f & 8u) ++out.fp64Range;
     }
     return out;
+  }
+
+  void fp64DiagnosticNormalized(Buffer<WideCoefficient>& candidates,
+                               Buffer<std::int64_t>& digits,
+                               Buffer<U32>& status, U32 factor) {
+    requireSize(candidates); requireSize(digits); requireSize(status);
+    requireDistinct({candidates.get(), digits.get(), status.get()});
+    requireOperation(factor, false);
+    liftFp64Diagnostic(residues, estimates, candidates, status, cl_uint(factor));
+
+    // Reuse the exact cyclic carry pipeline but deliberately do NOT publish a
+    // ReconstructionReport.  The last real operation's fail-stop diagnostics
+    // remain intact, and no register is committed by this diagnostic lane.
+    carryLocal(candidates, carryDigits, blockCarry, blockStatus, status, cl_uint(exponent));
+    carryMaps(carryDigits, blockCarry, blockStatus, maps, cl_uint(exponent));
+    scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
+    scanGroups(groupMaps, groupPrefix, totalMap, cl_uint(groups));
+    carryFinish(carryDigits, blockCarry, blockStatus, prefix, groupPrefix, totalMap,
+                digits, status, cl_uint(exponent));
+
+    // FractionalHint is expected to remain diagnostic here.  Reject only true
+    // operational/range failures before exposing scratch output to the harness.
+    constexpr U32 operationalFatal =
+        Nonfinite | QuotientRange | InvalidResidue | UnsupportedOperation |
+        CarryOverflow | CarryNonconvergence;
+    const auto flags = status.read(n);
+    for (U32 f : flags)
+      if (f & operationalFatal)
+        throw std::runtime_error("Gold64 FP64 diagnostic lift encountered operational failure");
   }
 
   void squareCandidates(const Buffer<std::int64_t>& input,
