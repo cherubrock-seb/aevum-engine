@@ -664,6 +664,27 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
   }
   if (fft.shape.fft_type == FFT3261) {
     auto use = parse("INPLACE=1,TAIL_TRIGS=0");
+    const std::string type2_device_name = openclDeviceName(shared.context->deviceId());
+    const std::string type2_device_vendor = openclVendorId(shared.context->deviceId());
+
+    // R243: replace the stock middle-out base-twiddle reconstruction
+    // (two trig loads plus one GF61 cmul) with one direct table load on
+    // Radeon VII / gfx906 Type2 PRP. Eight counterbalanced 10k runs at
+    // M136279841 were word-exact; kfftMidOutGF61 improved 3.37% and total
+    // engine time improved 0.47%, with both long B-O-O-B blocks positive.
+    const bool gfx906_type2_prp_middle_base_table2 =
+        !shared.args->uses("AEVUM_GF61_MIDDLE_BASE_TABLE") &&
+        type2_device_vendor == "4098" &&
+        type2_device_name.rfind("gfx906", 0) == 0 &&
+        exponent >= 130000000u &&
+        exponent <= 137000003u &&
+        !fft.isPfa() &&
+        fft.shape.fft_type == FFT3261 &&
+        fft.spec() == "2:512:8:512:202";
+
+    if (gfx906_type2_prp_middle_base_table2)
+      use.emplace_back("AEVUM_GF61_MIDDLE_BASE_TABLE", "2");
+
     report("type2-prp-auto", normalize(use));
     return use;
   }
