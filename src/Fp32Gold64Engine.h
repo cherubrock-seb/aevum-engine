@@ -63,6 +63,7 @@ public:
   void sync() { queue.finish(); }
   ReconstructionReport diagnostics() const { return reconstruction.diagnostics(); }
   void getEstimates(float* output, size_t count) { reconstruction.getEstimates(output, count); }
+  void getResidues(U64* output, size_t count) { reconstruction.getResidues(output, count); }
   QuotientDiagnostics quotientDiagnostics() { return reconstruction.quotientDiagnostics(); }
   Words fp64DiagnosticWords(U32 factor) {
     requireFactor(factor);
