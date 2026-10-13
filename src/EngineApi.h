@@ -113,6 +113,13 @@ AEVUM_ENGINE_API int aevum_engine_equal(aevum_engine_handle handle, size_t lhs, 
 AEVUM_ENGINE_API int aevum_engine_debug_square_trace(
     aevum_engine_handle handle, size_t src, uint64_t* trace, size_t trace_count);
 
+// Diagnostic only: for an explicit Type1 FFT3161 handle, execute the square
+// transform through fftW but before carry and return N signed exact CRT
+// coefficients as N pairs of two's-complement uint64 limbs (lo64, hi64).
+// The source register is preserved; limb_count must equal 2*transform_size.
+AEVUM_ENGINE_API int aevum_engine_debug_type1_precarry(
+    aevum_engine_handle handle, size_t src, uint64_t* limbs, size_t limb_count);
+
 // Available only on the explicit Gold64 validation handle. Success of a
 // register operation means a candidate was produced, NOT mathematical proof.
 // Every report retains UNPROVEN_PRECISION. first_fatal_block is UINT32_MAX
@@ -147,6 +154,11 @@ typedef struct aevum_gold64_quotient_diagnostics {
 } aevum_gold64_quotient_diagnostics;
 AEVUM_ENGINE_API int aevum_engine_gold64_quotient_diagnostics(
     aevum_engine_handle handle, aevum_gold64_quotient_diagnostics* report);
+
+// Diagnostic only: read the retained FP32 uncarried coefficient estimates from
+// the most recent Gold64 square/multiply attempt. Count must be 4194304.
+AEVUM_ENGINE_API int aevum_engine_gold64_get_estimates(
+    aevum_engine_handle handle, float* estimates, size_t count);
 
 // Diagnostic only: normalize a scratch candidate using FP64 quotient arithmetic
 // over the same retained FP32 estimate/residue from the most recent square or

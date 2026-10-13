@@ -2653,6 +2653,31 @@ void Gpu::regDebugSquareTrace(Buffer<Word>& io, u64* trace, size_t trace_count) 
   trace[11] = words.empty() ? 0 : static_cast<uint64_t>(words[0]);
 }
 
+void Gpu::regDebugType1Precarry(Buffer<Word>& io, u64* limbs, size_t limb_count) {
+  if (fft.shape.fft_type != FFT3161 || !fft.NTT_GF31 || !fft.NTT_GF61 ||
+      fft.FFT_FP32 || fft.FFT_FP64)
+    throw std::runtime_error("Type1 pre-carry diagnostics require an FFT3161 GF31+GF61 plan");
+  if (!limbs || limb_count != size_t(2) * N)
+    throw std::runtime_error("Type1 pre-carry diagnostics require exactly 2*N uint64 limbs");
+
+  // Same non-mutating square path as regDebugSquareTrace, stopped before carry.
+  fftP(buf1, io);
+  fftMidIn(buf1);
+  replay();
+  tailSquare(buf1);
+  replay();
+  fftMidOut(buf1);
+  replay();
+  fftW(buf3, buf1);
+
+  Buffer<u64> exact(nullptr, &queue, size_t(2) * N);
+  Kernel debug("debugPrecarry3161", &compiler, nullptr, &queue,
+               "carry.cl", "debugPrecarry3161", hN / CARRY_LEN,
+               kernelDefines(KALL).c_str());
+  debug(exact, buf3);
+  exact.read(limbs, limb_count);
+}
+
 void Gpu::regSync() { queue.finish(); }
 
 double Gpu::regPrpRoe(bool begin) {

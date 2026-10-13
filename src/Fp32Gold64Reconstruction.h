@@ -125,6 +125,11 @@ public:
     if (!reportReady) throw std::logic_error("Gold64 has no completed normalization diagnostics");
     return summary.read(1).front();
   }
+  void getEstimates(float* output, size_t count) {
+    if (!output || count != n)
+      throw std::invalid_argument("Gold64 estimate diagnostics require 4194304 floats");
+    estimates.read(output, count);
+  }
   QuotientDiagnostics quotientDiagnostics() {
     if (!reportReady)
       throw std::logic_error("Gold64 quotient diagnostics require a completed candidate operation");

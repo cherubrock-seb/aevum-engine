@@ -62,6 +62,7 @@ public:
   ~RegisterEngine() noexcept { try { queue.finish(); } catch (...) {} }
   void sync() { queue.finish(); }
   ReconstructionReport diagnostics() const { return reconstruction.diagnostics(); }
+  void getEstimates(float* output, size_t count) { reconstruction.getEstimates(output, count); }
   QuotientDiagnostics quotientDiagnostics() { return reconstruction.quotientDiagnostics(); }
   Words fp64DiagnosticWords(U32 factor) {
     requireFactor(factor);

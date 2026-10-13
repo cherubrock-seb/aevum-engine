@@ -2032,6 +2032,14 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     gpu_->regCopy(small_factor_scratch_[0], reg(src));
     gpu_->regDebugSquareTrace(small_factor_scratch_[0], trace, trace_count);
   }
+  void debug_type1_precarry(size_t src, uint64_t* limbs, size_t limb_count) {
+    check_reg(src);
+#ifndef CUDA_BACKEND
+    if (gold64_) throw std::runtime_error("Type1 pre-carry diagnostics require a production FFT3161 handle");
+#endif
+    flush_pending_square();
+    gpu_->regDebugType1Precarry(reg(src), limbs, limb_count);
+  }
 
   void gold64_diagnostics(aevum_gold64_diagnostics* output) const {
     if (!output) throw std::invalid_argument("null Gold64 diagnostics output");
@@ -2043,6 +2051,12 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     }
 #endif
     throw std::runtime_error("Gold64 diagnostics require a Gold64 validation handle");
+  }
+  void gold64_get_estimates(float* output, size_t count) {
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->getEstimates(output, count); return; }
+#endif
+    throw std::runtime_error("Gold64 estimate diagnostics require a Gold64 validation handle");
   }
   void gold64_quotient_diagnostics(aevum_gold64_quotient_diagnostics* output) {
     if (!output) throw std::invalid_argument("null Gold64 quotient diagnostics output");
@@ -2376,6 +2390,10 @@ int aevum_engine_equal(aevum_engine_handle handle, size_t lhs, size_t rhs, int* 
 int aevum_engine_debug_square_trace(aevum_engine_handle handle, size_t src, uint64_t* trace, size_t trace_count) {
   return invoke([&] { runtime(handle).debug_square_trace(src, trace, trace_count); });
 }
+int aevum_engine_debug_type1_precarry(
+    aevum_engine_handle handle, size_t src, uint64_t* limbs, size_t limb_count) {
+  return invoke([&] { runtime(handle).debug_type1_precarry(src, limbs, limb_count); });
+}
 
 int aevum_engine_gold64_diagnostics(aevum_engine_handle handle, aevum_gold64_diagnostics* output) {
   return invoke([&] { runtime(handle).gold64_diagnostics(output); });
@@ -2383,6 +2401,10 @@ int aevum_engine_gold64_diagnostics(aevum_engine_handle handle, aevum_gold64_dia
 int aevum_engine_gold64_quotient_diagnostics(
     aevum_engine_handle handle, aevum_gold64_quotient_diagnostics* output) {
   return invoke([&] { runtime(handle).gold64_quotient_diagnostics(output); });
+}
+int aevum_engine_gold64_get_estimates(
+    aevum_engine_handle handle, float* estimates, size_t count) {
+  return invoke([&] { runtime(handle).gold64_get_estimates(estimates, count); });
 }
 int aevum_engine_gold64_fp64_candidate_words(
     aevum_engine_handle handle, uint32_t factor, uint32_t* words, size_t count) {
