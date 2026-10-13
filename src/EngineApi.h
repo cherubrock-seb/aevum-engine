@@ -148,6 +148,12 @@ typedef struct aevum_gold64_quotient_diagnostics {
 AEVUM_ENGINE_API int aevum_engine_gold64_quotient_diagnostics(
     aevum_engine_handle handle, aevum_gold64_quotient_diagnostics* report);
 
+// Diagnostic only: normalize a scratch candidate using FP64 quotient arithmetic
+// over the same retained FP32 estimate/residue from the most recent square or
+// multiply. The live register and published fail-stop diagnostics are unchanged.
+AEVUM_ENGINE_API int aevum_engine_gold64_fp64_candidate_words(
+    aevum_engine_handle handle, uint32_t factor, uint32_t* words, size_t count);
+
 AEVUM_ENGINE_API int aevum_engine_gold64_get_digits(
     aevum_engine_handle handle, size_t src, int64_t* digits, size_t count);
 AEVUM_ENGINE_API int aevum_engine_gold64_square_minus_two(
