@@ -274,6 +274,9 @@ u64 pfaPowMod(u64 a, u64 e, u64 p) {
 
 string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<KeyVal>& extraConf, u64 E, bool doLog,
                  bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul) {
+  if (fft.isGold3()) {
+    throw std::runtime_error("Gold3 requires the dedicated supervised Engine API backend");
+  }
   map<string, string> config;
 
   // Highest priority is the requested "extra" conf
@@ -785,6 +788,9 @@ aevum_gold3::ModularSetup aevum_gold3::makeModularSetup(
 // --------
 
 unique_ptr<Gpu> Gpu::make(u64 E, GpuCommon shared, FFTConfig fftConfig, const vector<KeyVal>& extraConf, bool logFftSize) {
+  if (fftConfig.isGold3()) {
+    throw std::runtime_error("Gold3 cannot run through ordinary Gpu/PRP/LL dispatch");
+  }
   return make_unique<Gpu>(shared, fftConfig, E, extraConf, logFftSize);
 }
 

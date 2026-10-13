@@ -22,7 +22,7 @@ string numberK(u64 n);
 
 using KeyVal = std::pair<std::string, std::string>;
 
-enum FFT_TYPES {FFT64=0, FFT3161=1, FFT3261=2, FFT61=3, FFT323161=4, FFT3231=50, FFT6431=51, FFT31=52, FFT32=53};
+enum FFT_TYPES {FFT64=0, FFT3161=1, FFT3261=2, FFT61=3, FFT323161=4, FFT3231=50, FFT6431=51, FFT31=52, FFT32=53, FFTGOLD3=55};
 
 // Device-scoped policy for the gpuowl 6cf0dc 1K radix-8 path.
 //
@@ -109,6 +109,8 @@ public:
   bool FFT_FP32;
   bool NTT_GF31;
   bool NTT_GF61;
+  bool NTT_GOLD64 = false;
+  bool isGold3() const { return shape.fft_type == FFTGOLD3; }
   // bool NTT_NCW;	// Nick Craig-Wood prime not supported (yet?)
 
   // Size (in bytes) of integer data passed to FFTs/NTTs on the GPU
@@ -141,3 +143,4 @@ public:
   FFTConfig promoteKnownUnsafeOrdinaryPrp(
       const Args& args, u64 exponent) const;
 };
+

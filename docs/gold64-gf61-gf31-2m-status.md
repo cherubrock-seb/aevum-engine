@@ -2,7 +2,7 @@
 
 - Branch: `exp/gold64-gf61-gf31-exact-2m`, independent of PR #22.
 - Base: `ce0b8b5ee3aa4d7c79d55858f5bb1fa783073610`.
-- Last confirmed implementation commit (B): `dfdef34f28ddb47d8225958c768622267747fe12`.
+- Last confirmed implementation commit (C): `9d1babbc59ec3ec6988201f77859bc4d116f4bd5`.
 - A implemented in `src/Gold3Plan.h` and `src/cl/gold3_arith.cl`: shared
   128-bit digit ABI, signed 192-bit arithmetic, exact Garner CRT constants,
   three residue conversions, balanced splitting, root/geometry checks.
@@ -24,8 +24,16 @@
   256-digit segments, wide tails below 2^91, three-state correction maps,
   two-level prefix, deterministic cyclic fixed point and exit checks.
   Five bounded carry launches; no serial full-length sweep or convergence loop.
-- Wide cyclic carry: implemented, unvalidated. Engine API: not yet.
-- Next: `Gold3Engine.h` register ownership and 65-bit compact bit packing,
-  then explicit-only `FFTConfig` / `EngineApi` integration.
-- Transform-level GPU validation can begin; full Engine API validation cannot.
+- D in source: `Gold3Engine.h`, `FFTConfig.h/.cpp`, `EngineApi.h/.cpp`,
+  `Gpu.cpp` guards. Explicit `gold3-validation:512:4:512:202` / type 55;
+  create_ex also requires `AEVUM_WORKLOAD_GOLD3_VALIDATION` (101).
+  Compact upload/readback, raw 128-bit digit diagnostics, three residue
+  diagnostics, register lifecycle, square, factor 1/3, prepared multiply,
+  add/subtract/equality, dedicated square-minus-two and checked commit.
+  Normal PRP/LL, stock Gpu, native CUDA and Apple reject this backend.
+  Production capacity stays zero; AUTO and existing selector policies unchanged.
+- Wide cyclic carry and Engine API: implemented, unvalidated.
+- Full owner-led compilation/differential GPU validation can begin.
+- Next source task: inspect integration and remove redundant scratch/launches
+  only where exactness and ownership remain clear (milestone E).
 - Production blocked. No builds, tests, benchmarks, SSH or CI polling run.

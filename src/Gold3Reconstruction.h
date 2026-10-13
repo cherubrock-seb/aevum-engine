@@ -27,9 +27,11 @@ class Reconstruction {
   Buffer<CarryMap> maps, prefixes, totals, groupPrefixes;
   Kernel crt, linear, segmentZero, segmentMaps, scanSegments, scanGroups, applyCarry;
   bool hasReport = false;
+  bool hasResidues = false;
 
   void begin() {
     hasReport = false;
+    hasResidues = false;
     status.write(std::vector<U32>{0, ~U32(0), 0, 1});
   }
   void normalize(Buffer<Digit>& out) {
@@ -61,7 +63,7 @@ public:
       scanSegments("gold3_scan_segments", &compiler, nullptr, &q, "gold3_reconstruct.cl", "gold3_scan_segments", segments),
       scanGroups("gold3_scan_groups", &compiler, nullptr, &q, "gold3_reconstruct.cl", "gold3_scan_groups", 256),
       applyCarry("gold3_apply_carry", &compiler, nullptr, &q, "gold3_reconstruct.cl", "gold3_apply_carry", segments) {}
-  void invalidateDiagnostics() { hasReport = false; }
+  void invalidateDiagnostics() { hasReport = false; hasResidues = false; }
   Report diagnostics() const {
     if (!hasReport) { throw std::logic_error("Gold3 has no completed normalization diagnostics"); }
     std::array<U32, 4> r{};
@@ -69,13 +71,14 @@ public:
     return {r[0], r[1], r[2], r[3]};
   }
   void prepare(const Buffer<Digit>& rhs) {
-    hasReport = false;
+    invalidateDiagnostics();
     convolution.prepare(rhs);
   }
   void square(const Buffer<Digit>& in, Buffer<Digit>& out, U32 factor, bool minusTwo = false) {
     requireFactor(factor, minusTwo);
     begin();
     convolution.square(in, gold, m61, m31);
+    hasResidues = true;
     crt(gold, m61, m31, coefficients, status, U32(factor), U32(minusTwo));
     normalize(out);
   }
@@ -83,6 +86,7 @@ public:
     requireFactor(factor);
     begin();
     convolution.multiply(in, gold, m61, m31);
+    hasResidues = true;
     crt(gold, m61, m31, coefficients, status, U32(factor), U32(0));
     normalize(out);
   }
@@ -97,6 +101,7 @@ public:
   }
   // Optional owner-led plane/alignment diagnostics after square or multiply.
   void getResidues(U64* g, U64* p, U32* s, size_t count) const {
+    if (!hasResidues) { throw std::logic_error("Gold3 has no completed three-plane operation"); }
     if (!g || !p || !s || count != n) { throw std::invalid_argument("Gold3 residue buffer size"); }
     gold.read(g, count); m61.read(p, count); m31.read(s, count);
   }
