@@ -309,7 +309,7 @@ void gold64_carry_local(__global const ulong2 * restrict candidate,
                         __global long * restrict local_digit,
                         __global long * restrict block_carry,
                         __global uint * restrict block_status,
-                        __global uint * restrict status, uint exponent) {
+                        __global const uint * restrict status, uint exponent) {
   const uint k = (uint)get_global_id(0);
   long carry = 0L;
   // Precision provenance belongs to the coefficient-producing path. Preserve
@@ -326,7 +326,6 @@ void gold64_carry_local(__global const ulong2 * restrict candidate,
       d = gold64_split_wide(x, bits, &carry, &flags);
     } else carry = 0L;
     local_digit[j] = d;
-    status[j] = flags;
   }
   block_carry[k] = carry;
   block_status[k] = flags;
@@ -436,8 +435,10 @@ void gold64_carry_finish(__global const long * restrict block_carry,
     incoming = gold64_wide_signed(carry);
   }
   if (carry != (long)gold64_map_value(through, fixed)) flags |= G64_CARRY_NONCONVERGENCE;
-  // Propagate a block's late error to every digit it owns. Blocks are disjoint.
-  for (uint i = 0; i < G64_CARRY_BLOCK; ++i) status[k * G64_CARRY_BLOCK + i] |= flags;
+  // Exact successful blocks already retain their producer status. Avoid an
+  // N-word status |= 0 pass; only newly accumulated block flags need propagation.
+  if (flags)
+    for (uint i = 0; i < G64_CARRY_BLOCK; ++i) status[k * G64_CARRY_BLOCK + i] |= flags;
   block_status[k] = flags;
 }
 
