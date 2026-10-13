@@ -2084,6 +2084,12 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
 #endif
     throw std::runtime_error("Gold64 residue diagnostics require a Gold64 validation handle");
   }
+  void gold64_get_residues31(uint32_t* output, size_t count) {
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->getResidues31(output, count); return; }
+#endif
+    throw std::runtime_error("Gold64 M31 residue diagnostics require a Gold64 validation handle");
+  }
   void gold64_quotient_diagnostics(aevum_gold64_quotient_diagnostics* output) {
     if (!output) throw std::invalid_argument("null Gold64 quotient diagnostics output");
 #ifndef CUDA_BACKEND
@@ -2111,6 +2117,23 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     }
 #endif
     throw std::runtime_error("Gold64 FP64 diagnostic requires a Gold64 validation handle");
+  }
+  void gold64_m31_candidate_words(
+      uint32_t factor, uint32_t subtract_two, uint32_t* output, size_t count) {
+    if (!output || count != word_count_)
+      throw std::invalid_argument("invalid Gold64 M31 diagnostic output buffer");
+#ifndef CUDA_BACKEND
+    if (gold64_) {
+      if (subtract_two > 1)
+        throw std::invalid_argument("Gold64 M31 subtract_two must be 0 or 1");
+      const auto words = gold64_->m31DiagnosticWords(factor, subtract_two != 0);
+      if (words.size() != count)
+        throw std::logic_error("Gold64 M31 diagnostic compact word count mismatch");
+      std::copy(words.begin(), words.end(), output);
+      return;
+    }
+#endif
+    throw std::runtime_error("Gold64 M31 diagnostic requires a Gold64 validation handle");
   }
   void gold64_get_digits(size_t src, int64_t* output, size_t count) {
     check_reg(src);
@@ -2456,9 +2479,20 @@ int aevum_engine_gold64_get_residues(
     aevum_engine_handle handle, uint64_t* residues, size_t count) {
   return invoke([&] { runtime(handle).gold64_get_residues(residues, count); });
 }
+int aevum_engine_gold64_get_residues31(
+    aevum_engine_handle handle, uint32_t* residues, size_t count) {
+  return invoke([&] { runtime(handle).gold64_get_residues31(residues, count); });
+}
 int aevum_engine_gold64_fp64_candidate_words(
     aevum_engine_handle handle, uint32_t factor, uint32_t* words, size_t count) {
   return invoke([&] { runtime(handle).gold64_fp64_candidate_words(factor, words, count); });
+}
+int aevum_engine_gold64_m31_candidate_words(
+    aevum_engine_handle handle, uint32_t factor, uint32_t subtract_two,
+    uint32_t* words, size_t count) {
+  return invoke([&] {
+    runtime(handle).gold64_m31_candidate_words(factor, subtract_two, words, count);
+  });
 }
 int aevum_engine_gold64_get_digits(aevum_engine_handle handle, size_t src, int64_t* output, size_t count) {
   return invoke([&] { runtime(handle).gold64_get_digits(src, output, count); });
