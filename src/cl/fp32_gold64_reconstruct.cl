@@ -287,7 +287,9 @@ void gold64_split_candidates(__global const ulong2 * restrict candidate,
 // closes the cycle, including negative wrap into digit zero. No iteration or
 // probabilistic stopping criterion is used. Multiple fixed points are valid
 // redundant balanced encodings of the same residue; prefer the zero state.
-#define G64_CARRY_BLOCK 64u
+#ifndef G64_CARRY_BLOCK
+#define G64_CARRY_BLOCK 256u
+#endif
 #define G64_CARRY_BLOCKS (GOLD64_N / G64_CARRY_BLOCK)
 #define G64_MAP_IDENTITY 36u
 static inline int gold64_map_value(uint map, int input) {
