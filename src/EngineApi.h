@@ -120,6 +120,11 @@ AEVUM_ENGINE_API int aevum_engine_debug_square_trace(
 AEVUM_ENGINE_API int aevum_engine_debug_type1_precarry(
     aevum_engine_handle handle, size_t src, uint64_t* limbs, size_t limb_count);
 
+// Diagnostic only: overwrite an explicit Type1 FFT3161 register with exactly
+// transform_size signed natural-order digits, bypassing compact-word expansion.
+AEVUM_ENGINE_API int aevum_engine_debug_type1_set_raw_digits(
+    aevum_engine_handle handle, size_t dst, const int64_t* digits, size_t digit_count);
+
 // Available only on the explicit Gold64 validation handle. Success of a
 // register operation means a candidate was produced, NOT mathematical proof.
 // Every report retains UNPROVEN_PRECISION. first_fatal_block is UINT32_MAX
