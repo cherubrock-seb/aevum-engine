@@ -68,7 +68,7 @@ class ReconstructionExperiment {
   Buffer<U32> quotientFlags;
   Buffer<ReconstructionReport> partialReports, superReports, summary;
   Kernel lift, liftFp64Diagnostic, liftM31Diagnostic, split, quotientProbe;
-  Kernel carryLocal, carryMaps, scanBlocks, scanGroups, scanSupers, carryFinish;
+  Kernel statusSeed, carryLocal, carryMaps, scanBlocks, scanGroups, scanSupers, carryFinish;
   Kernel statusBlocks, statusReduce, statusFinish;
   bool reportReady = false;
 
@@ -174,6 +174,8 @@ public:
             "fp32_gold64_reconstruct.cl", "gold64_split_candidates", n),
       quotientProbe("gold64_quotient_diagnostics", &compiler, nullptr, &queue,
                     "fp32_gold64_reconstruct.cl", "gold64_quotient_diagnostics", n),
+      statusSeed("gold64_status_seed", &compiler, nullptr, &queue,
+                 "fp32_gold64_reconstruct.cl", "gold64_status_seed", n),
       carryLocal("gold64_carry_local", &compiler, nullptr, &queue,
                  "fp32_gold64_reconstruct.cl", "gold64_carry_local", blocks),
       carryMaps("gold64_carry_maps", &compiler, nullptr, &queue,
@@ -274,7 +276,8 @@ public:
     // Reuse the exact cyclic carry pipeline but deliberately do NOT publish a
     // ReconstructionReport.  The last real operation's fail-stop diagnostics
     // remain intact, and no register is committed by this diagnostic lane.
-    carryLocal(candidates, digits, blockCarry, blockStatus, status, cl_uint(exponent));
+    statusSeed(status, blockStatus);
+    carryLocal(candidates, digits, blockCarry, blockStatus, cl_uint(exponent));
     carryMaps(digits, blockCarry, blockStatus, maps, cl_uint(exponent));
     scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
     if (groups <= 256u) {
@@ -308,7 +311,8 @@ public:
     liftM31Diagnostic(residues, residues31, candidates, status,
                       cl_uint(factor), cl_uint(subtractTwo));
 
-    carryLocal(candidates, digits, blockCarry, blockStatus, status, cl_uint(exponent));
+    statusSeed(status, blockStatus);
+    carryLocal(candidates, digits, blockCarry, blockStatus, cl_uint(exponent));
     carryMaps(digits, blockCarry, blockStatus, maps, cl_uint(exponent));
     scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
     if (groups <= 256u) {
@@ -373,7 +377,8 @@ public:
 
     if (convolution.stageProfileEnabled()) {
       lastCarryLocalUs = profileStage([&] {
-        carryLocal(candidates, digits, blockCarry, blockStatus, status, cl_uint(exponent));
+        statusSeed(status, blockStatus);
+    carryLocal(candidates, digits, blockCarry, blockStatus, cl_uint(exponent));
       });
       lastCarryMapsUs = profileStage([&] {
         carryMaps(digits, blockCarry, blockStatus, maps, cl_uint(exponent));
@@ -403,7 +408,8 @@ public:
         }
       });
     } else {
-      carryLocal(candidates, digits, blockCarry, blockStatus, status, cl_uint(exponent));
+      statusSeed(status, blockStatus);
+    carryLocal(candidates, digits, blockCarry, blockStatus, cl_uint(exponent));
       carryMaps(digits, blockCarry, blockStatus, maps, cl_uint(exponent));
       scanBlocks(maps, prefix, groupMaps, cl_uint(blocks));
       if (groups <= 256u) {
