@@ -105,8 +105,9 @@ class M31Plane {
   Buffer<double> a, b; // GF31 data occupies one double per complex pair.
   std::unique_ptr<Buffer<double>> prepared;
   bool preparedReady = false;
+  bool fusedOut = false;
   Kernel transpose, premul, middleIn, tailSquare, middleOut, widthOut,
-         tailMul, exportResidues;
+         widthOutExport, tailMul, exportResidues;
 
   template<class T> static void requireSize(const Buffer<T>& x) {
     if (x.size != n) throw std::invalid_argument("M31/Gold64 requires 4194304 natural-order digits");
@@ -119,8 +120,12 @@ class M31Plane {
   }
   void end(Buffer<U32>& residues) {
     middleOut(a, b, setup.middle);
-    widthOut(b, a, setup.width);
-    exportResidues(b, residues);
+    if (fusedOut) {
+      widthOutExport(residues, a, setup.width);
+    } else {
+      widthOut(b, a, setup.width);
+      exportResidues(b, residues);
+    }
   }
 
 public:
@@ -128,6 +133,10 @@ public:
     : queue(&q), setup(makeM31Setup(args, q, exponent)),
       compiler(args, q.context, setup.defines),
       transposed(nullptr, &q, n), a(nullptr, &q, half), b(nullptr, &q, half),
+      fusedOut([] {
+        const char* value = std::getenv("AEVUM_GOLD64_M31_FUSED_OUT");
+        return value && *value && *value != '0';
+      }()),
       transpose("gold64_m31_import", &compiler, nullptr, &q,
                 "fp32_gold64_bridge.cl", "gold64_m31_import", half),
       premul("gold64_m31_fftP", &compiler, nullptr, &q, "fftp.cl", "fftP", half/8),
@@ -139,6 +148,8 @@ public:
                 "fftmiddleout.cl", "fftMiddleOutGF31", half/8),
       widthOut("gold64_m31_fftW", &compiler, nullptr, &q,
                "fftw.cl", "fftWGF31", half/8),
+      widthOutExport("gold64_m31_fftW_unweight", &compiler, nullptr, &q,
+                     "fp32_gold64_bridge.cl", "gold64_m31_fftW_unweight", half/8),
       tailMul("gold64_m31_tailMul", &compiler, nullptr, &q,
               "tailmul.cl", "tailMulGF31", half/16),
       exportResidues("gold64_m31_unweight", &compiler, nullptr, &q,
