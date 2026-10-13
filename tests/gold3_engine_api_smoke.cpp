@@ -104,6 +104,7 @@ int main(int argc, char** argv) {
     require_small_value(h, 0, 12);
     std::cout << "API_SQUARE_FACTOR3_2_TO_12=PASS\n";
 
+    require_call(aevum_engine_set_u32(h, 0, 4), "reset 4 for square_minus_two");
     require_call(aevum_engine_gold3_square_minus_two(h, 0), "square_minus_two");
     require_small_value(h, 0, 14);
     std::cout << "API_SQUARE_MINUS_TWO_4_TO_14=PASS\n";
