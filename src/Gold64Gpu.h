@@ -12,6 +12,7 @@ namespace aevum_gold64 {
 class GpuPlane {
 public:
   static constexpr U32 words = 4194304;
+  static constexpr U32 nvidiaVendor = 0x10deu;
 
 private:
   Queue* queue;
@@ -25,9 +26,17 @@ private:
   Kernel weight, unweight, forward0, forward0Weighted, forward, squareTail, prepareTail,
          multiplyTail, backward, backward0, backward0Unweighted;
 
-  static bool fusedEdgeEnabled() {
-    const char* value = std::getenv("AEVUM_GOLD64_FUSED_EDGE");
-    return value && *value && *value != '0';
+  static bool fusedEdgeEnabled(Queue& q) {
+    if (const char* value = std::getenv("AEVUM_GOLD64_FUSED_EDGE"))
+      return *value && *value != '0';
+
+    cl_uint vendor = 0u;
+    const auto id = q.context->deviceId();
+    if (clGetDeviceInfo(id, CL_DEVICE_VENDOR_ID, sizeof(vendor), &vendor, nullptr) != CL_SUCCESS)
+      throw std::runtime_error("Gold64 fused-edge selection could not query device vendor");
+    // RTX benefits materially from folding weight/unweight into the first/last
+    // NTT edge. gfx906 is neutral/slightly slower, so leave AMD unfused.
+    return vendor == nvidiaVendor;
   }
 
   static Tables makeTables(Queue& q, U32 exponent) {
@@ -48,7 +57,7 @@ private:
     : queue(&q), compiler(args, q.context, "-DGOLD64_N=4194304"),
       roots(q.context, std::move(tables.roots)),
       weights(q.context, std::move(tables.weights)), work(nullptr, &q, words),
-      fusedEdge(fusedEdgeEnabled()),
+      fusedEdge(fusedEdgeEnabled(q)),
       weight("gold64_weight", &compiler, nullptr, &q, "gold64_transform.cl", "gold64_weight", words/4),
       unweight("gold64_unweight", &compiler, nullptr, &q, "gold64_transform.cl", "gold64_unweight", words/4),
       forward0("gold64_forward64_0", &compiler, nullptr, &q, "gold64_transform.cl", "gold64_forward64_0", words/8),
