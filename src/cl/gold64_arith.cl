@@ -61,4 +61,3 @@ static inline ulong2 gold64_muli2(ulong2 a) {
   return (ulong2)(gold64_muli(a.x), gold64_muli(a.y));
 }
 #endif
-

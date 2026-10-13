@@ -4091,4 +4091,3 @@ void Gpu::regProfileReport(bool emit) {
   }
   profile.reset();
 }
-

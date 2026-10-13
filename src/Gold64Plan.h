@@ -151,4 +151,3 @@ private:
   }
 };
 } // namespace aevum_gold64
-

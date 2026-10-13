@@ -27,4 +27,3 @@ Adapted from cherubrock-seb/PrMers:
   include/marin/ibdwt.h (roots, IBDWT weight definition and layout)
 Only the attributed Marin-derived portions are covered by this notice;
 the Aevum repository license continues to apply to Aevum integration code.
-
