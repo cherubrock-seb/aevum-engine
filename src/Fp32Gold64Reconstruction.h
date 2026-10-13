@@ -52,11 +52,11 @@ struct QuotientDiagnostics {
 
 class ReconstructionExperiment {
   static constexpr U32 n = GpuPlane::words;
-  static constexpr U32 carryBlock = 64;
-  static constexpr U32 blocks = n / carryBlock, groups = blocks / 256;
-  static_assert(blocks % 256 == 0 && groups <= 256,
-                "Gold64 carry scan requires an exact two-level 256-way decomposition");
+  static constexpr U32 amdVendor = 0x1002u;
   const U32 exponent;
+  const U32 carryBlock;
+  const U32 blocks;
+  const U32 groups;
   HybridConvolution convolution;
   KernelCompiler compiler;
   Buffer<U64> residues;
@@ -70,6 +70,20 @@ class ReconstructionExperiment {
   Kernel carryLocal, carryMaps, scanBlocks, scanGroups, carryFinish;
   Kernel statusBlocks, statusFinish;
   bool reportReady = false;
+
+  static U32 chooseCarryBlock(Queue& queue) {
+    cl_uint vendor = 0u;
+    const auto id = queue.context->deviceId();
+    if (clGetDeviceInfo(id, CL_DEVICE_VENDOR_ID, sizeof(vendor), &vendor, nullptr) != CL_SUCCESS)
+      throw std::runtime_error("Gold64 carry block selection could not query device vendor");
+    // gfx906 benefits strongly from four times more carry-level parallelism;
+    // NVIDIA benefits from the longer serial block and lower block overhead.
+    return vendor == amdVendor ? 64u : 256u;
+  }
+  static std::string carryCompilerDefines(U32 carryBlock) {
+    return std::string("-DGOLD64_N=4194304 -DG64_CARRY_BLOCK=") +
+           std::to_string(carryBlock);
+  }
 
   template<class T> static void requireSize(const Buffer<T>& x) {
     if (x.size != n) throw std::invalid_argument("Gold64 reconstruction buffer size mismatch");
@@ -119,8 +133,10 @@ class ReconstructionExperiment {
 
 public:
   ReconstructionExperiment(const Args& args, Queue& queue, U32 q)
-    : exponent(q), convolution(args, queue, q),
-      compiler(args, queue.context, "-DGOLD64_N=4194304"),
+    : exponent(q), carryBlock(chooseCarryBlock(queue)),
+      blocks(n / carryBlock), groups(blocks / 256u),
+      convolution(args, queue, q),
+      compiler(args, queue.context, carryCompilerDefines(carryBlock)),
       residues(nullptr, &queue, n), residues31(nullptr, &queue, n),
       estimates(nullptr, &queue, n),
       carryDigits(nullptr, &queue, n), blockCarry(nullptr, &queue, blocks),
@@ -153,11 +169,13 @@ public:
                    "fp32_gold64_reconstruct.cl", "gold64_status_blocks", blocks),
       statusFinish("gold64_status_finish", &compiler, nullptr, &queue,
                    "fp32_gold64_reconstruct.cl", "gold64_status_finish", 256) {
+    if (!carryBlock || n % carryBlock || blocks % 256u || !groups || groups > 256u)
+      throw std::logic_error("Gold64 carry block selection is incompatible with the two-level scan");
     // The three-state carry map assumes the incoming signed-64 correction is
     // negligible versus a block radix. Keep at least 256 exponent bits per
-    // 64-digit block, matching the proof used by the original 256-digit lane.
+    // selected block on every device.
     if (U64(q) * carryBlock < U64(256) * n)
-      throw std::invalid_argument("Gold64 64-digit carry blocks require at least 256 exponent bits per block");
+      throw std::invalid_argument("Gold64 carry blocks require at least 256 exponent bits per block");
   }
 
   static void requireExecution(PrecisionPolicy policy) {
