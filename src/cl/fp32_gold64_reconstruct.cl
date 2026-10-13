@@ -97,8 +97,8 @@ void gold64_crt_m31_candidates(__global const ulong * restrict residue,
 
   ulong2 x = gold64_lift_signed(r, (int)k);
   const ulong2 modulus = gold64_lift_signed(0UL, (int)GOLD64_M31_P);
-  const ulong2 half = gold64_wide_unsigned_shr1(modulus);
-  if (gold64_wide_unsigned_gt(x, half)) x = gold64_wide_sub(x, modulus);
+  const ulong2 halfModulus = gold64_wide_unsigned_shr1(modulus);
+  if (gold64_wide_unsigned_gt(x, halfModulus)) x = gold64_wide_sub(x, modulus);
 
   if (factor == 3u) x = gold64_wide_add(gold64_wide_add(x, x), x);
   if (subtract_two && j == 0u) x = gold64_wide_add(x, gold64_wide_signed(-2L));
