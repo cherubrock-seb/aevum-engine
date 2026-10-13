@@ -2688,6 +2688,42 @@ void Gpu::regDebugType1Precarry(Buffer<Word>& io, u64* limbs, size_t limb_count)
   exact.read(limbs, limb_count);
 }
 
+void Gpu::regDebugType1PrecarryWithM31(
+    Buffer<Word>& io, u64* limbs, size_t limb_count,
+    u32* residues31, size_t residue_count) {
+  if (fft.shape.fft_type != FFT3161 || !fft.NTT_GF31 || !fft.NTT_GF61 ||
+      fft.FFT_FP32 || fft.FFT_FP64)
+    throw std::runtime_error("Type1 pre-carry M31 diagnostics require an FFT3161 GF31+GF61 plan");
+  if (!limbs || limb_count != size_t(2) * N)
+    throw std::runtime_error("Type1 pre-carry M31 diagnostics require exactly 2*N uint64 limbs");
+  if (!residues31 || residue_count != N)
+    throw std::runtime_error("Type1 pre-carry M31 diagnostics require exactly N uint32 residues");
+
+  // Execute the square transform once, then export both the exact CRT oracle
+  // and its M31 residue from the same canonical fftW state.
+  fftP(buf1, io);
+  fftMidIn(buf1);
+  replay();
+  tailSquare(buf1);
+  replay();
+  fftMidOut(buf1);
+  replay();
+  fftW(buf3, buf1);
+
+  Buffer<u64> exact(nullptr, &queue, size_t(2) * N);
+  Buffer<u32> m31(nullptr, &queue, N);
+  Kernel debugExact("debugPrecarry3161", &compiler, nullptr, &queue,
+                    "carry.cl", "debugPrecarry3161", hN / CARRY_LEN,
+                    kernelDefines(KALL).c_str());
+  Kernel debugM31("debugPrecarry3161M31", &compiler, nullptr, &queue,
+                  "carry.cl", "debugPrecarry3161M31", hN / CARRY_LEN,
+                  kernelDefines(KALL).c_str());
+  debugExact(exact, buf3);
+  debugM31(m31, buf3);
+  exact.read(limbs, limb_count);
+  m31.read(residues31, residue_count);
+}
+
 void Gpu::regSync() { queue.finish(); }
 
 double Gpu::regPrpRoe(bool begin) {
