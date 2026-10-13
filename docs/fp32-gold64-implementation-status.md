@@ -81,10 +81,14 @@
   zero exactly; hostile chains still traverse the complete segment. No measured
   speedup is claimed. Register import/linear dispatch clears stale diagnostics
   before starting, including compiler/enqueue failure paths.
-- Next exact step: owner-led OpenCL compilation and differential validation
-  through create_ex at q=136279841, including upload/readback, hostile cyclic
-  carry, square/factor-3/minus-two, prepared RHS invalidation and exact residues.
-  Establish a combined FP32 error certificate before considering PRP/LL enablement.
+- Next exact step: a diagnostic-only quotient decomposition is now exposed by
+  `aevum_engine_gold64_quotient_diagnostics`. It recomputes quotient selection
+  in FP64 from the same FP32 estimate and exact Gold64 residue, reporting FP32
+  fractional hints, FP64 fractional hints and rounded-quotient disagreements.
+  It does not alter lift/carry/commit behavior and cannot clear UnprovenPrecision.
+  Run it first on the preserved checkerboard failures and exact controls to
+  distinguish quotient-stage rounding from upstream FP32 transform error, then
+  use that evidence to choose selective correction or a stronger arithmetic lane.
 - Risks: arithmetic/codegen and root/weight agreement require validation;
   geometry legality is not a hybrid coefficient/carry capacity bound.
 - Missing: certified quotient bound and all compilation/device validation.
