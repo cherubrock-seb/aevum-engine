@@ -173,6 +173,12 @@ AEVUM_ENGINE_API int aevum_engine_gold64_fp64_candidate_words(
 
 AEVUM_ENGINE_API int aevum_engine_gold64_get_digits(
     aevum_engine_handle handle, size_t src, int64_t* digits, size_t count);
+
+// Diagnostic only: set exactly 4194304 natural-order signed digits without
+// compact-word normalization. Available only on the Gold64 validation handle.
+AEVUM_ENGINE_API int aevum_engine_gold64_set_raw_digits(
+    aevum_engine_handle handle, size_t dst, const int64_t* digits, size_t count);
+
 AEVUM_ENGINE_API int aevum_engine_gold64_square_minus_two(
     aevum_engine_handle handle, size_t reg);
 
