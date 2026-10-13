@@ -63,6 +63,11 @@ public:
   void sync() { queue.finish(); }
   ReconstructionReport diagnostics() const { return reconstruction.diagnostics(); }
   QuotientDiagnostics quotientDiagnostics() { return reconstruction.quotientDiagnostics(); }
+  Words fp64DiagnosticWords(U32 factor) {
+    requireFactor(factor);
+    reconstruction.fp64DiagnosticNormalized(candidates, result, status, factor);
+    return compactBits(result.read(), exponent);
+  }
 
   // Compact little-endian 32-bit words are the existing Engine API ABI.
   // Reuse its host bit packing only at explicit upload/readback boundaries.
