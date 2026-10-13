@@ -2058,6 +2058,12 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
 #endif
     throw std::runtime_error("Gold64 estimate diagnostics require a Gold64 validation handle");
   }
+  void gold64_get_residues(uint64_t* output, size_t count) {
+#ifndef CUDA_BACKEND
+    if (gold64_) { gold64_->getResidues(output, count); return; }
+#endif
+    throw std::runtime_error("Gold64 residue diagnostics require a Gold64 validation handle");
+  }
   void gold64_quotient_diagnostics(aevum_gold64_quotient_diagnostics* output) {
     if (!output) throw std::invalid_argument("null Gold64 quotient diagnostics output");
 #ifndef CUDA_BACKEND
@@ -2405,6 +2411,10 @@ int aevum_engine_gold64_quotient_diagnostics(
 int aevum_engine_gold64_get_estimates(
     aevum_engine_handle handle, float* estimates, size_t count) {
   return invoke([&] { runtime(handle).gold64_get_estimates(estimates, count); });
+}
+int aevum_engine_gold64_get_residues(
+    aevum_engine_handle handle, uint64_t* residues, size_t count) {
+  return invoke([&] { runtime(handle).gold64_get_residues(residues, count); });
 }
 int aevum_engine_gold64_fp64_candidate_words(
     aevum_engine_handle handle, uint32_t factor, uint32_t* words, size_t count) {
