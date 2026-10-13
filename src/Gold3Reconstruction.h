@@ -76,14 +76,14 @@ public:
     requireFactor(factor, minusTwo);
     begin();
     convolution.square(in, gold, m61, m31);
-    crt(gold, m61, m31, coefficients, status, cl_uint(factor), cl_uint(minusTwo));
+    crt(gold, m61, m31, coefficients, status, U32(factor), U32(minusTwo));
     normalize(out);
   }
   void multiply(const Buffer<Digit>& in, Buffer<Digit>& out, U32 factor) {
     requireFactor(factor);
     begin();
     convolution.multiply(in, gold, m61, m31);
-    crt(gold, m61, m31, coefficients, status, cl_uint(factor), cl_uint(0));
+    crt(gold, m61, m31, coefficients, status, U32(factor), U32(0));
     normalize(out);
   }
   void linearOperation(const Buffer<Digit>& lhs, const Buffer<Digit>& rhs,
@@ -92,7 +92,7 @@ public:
       throw std::invalid_argument("Gold3 linear operation/buffer size");
     }
     begin();
-    linear(lhs, rhs, coefficients, status, cl_uint(operation), cl_uint(value));
+    linear(lhs, rhs, coefficients, status, U32(operation), U32(value));
     normalize(out);
   }
   // Optional owner-led plane/alignment diagnostics after square or multiply.
