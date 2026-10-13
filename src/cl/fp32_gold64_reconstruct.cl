@@ -102,6 +102,48 @@ void gold64_lift_candidates(__global const ulong * restrict residue,
   status[j] = flags;
 }
 
+// Diagnostic-only quotient comparison.  This does NOT alter reconstruction.
+// It recomputes the quotient in FP64 from the SAME FP32 estimate and exact
+// Gold64 residue, separating quotient-stage rounding from upstream FP32 error.
+// Bit 0: current FP32 fractional hint; bit 1: FP64 fractional hint;
+// bit 2: rounded quotient disagreement; bit 3: FP64 quotient out of FP32-safe range.
+#define G64_QDIAG_FP32_FRACTIONAL 1u
+#define G64_QDIAG_FP64_FRACTIONAL 2u
+#define G64_QDIAG_QUOTIENT_MISMATCH 4u
+#define G64_QDIAG_FP64_RANGE 8u
+
+__kernel __attribute__((reqd_work_group_size(256,1,1)))
+void gold64_quotient_diagnostics(__global const ulong * restrict residue,
+                                 __global const float * restrict estimate,
+                                 __global uint * restrict output) {
+  const uint j = (uint)get_global_id(0);
+  const ulong r = residue[j];
+  const float a = estimate[j];
+
+  float hint32 = fma(a, 0x1p-64f, -convert_float(r) * 0x1p-64f);
+  hint32 = fma(hint32, 0x1p-32f, hint32);
+  const float rounded32 = rint(hint32);
+
+  // Form r/2^64 from exact 32-bit halves before the subtraction.  Converting
+  // the FP32 estimate to double is exact; this intentionally cannot recover
+  // error already present in the FP32 transform output.
+  const double rscaled =
+      fma(convert_double((uint)(r >> 32)), 0x1p-32,
+          convert_double((uint)r) * 0x1p-64);
+  double hint64 = fma(convert_double(a), 0x1p-64, -rscaled);
+  hint64 = fma(hint64, 0x1p-32, hint64);
+  const double rounded64 = rint(hint64);
+
+  uint flags = 0u;
+  if (fabs(hint32 - rounded32) > 0.125f) flags |= G64_QDIAG_FP32_FRACTIONAL;
+  if (fabs(hint64 - rounded64) > 0.125) flags |= G64_QDIAG_FP64_FRACTIONAL;
+  if (fabs(rounded64) >= 0x1p23) flags |= G64_QDIAG_FP64_RANGE;
+  if (fabs(rounded32) < 0x1p23f && fabs(rounded64) < 0x1p23 &&
+      convert_int(rounded32) != convert_int(rounded64))
+    flags |= G64_QDIAG_QUOTIENT_MISMATCH;
+  output[j] = flags;
+}
+
 // Inspect wide carry boundaries without claiming a normalized Mersenne result.
 // All outputs retain UNPROVEN_PRECISION; the host exposes no PRP/LL entry point.
 __kernel __attribute__((reqd_work_group_size(256,1,1)))
