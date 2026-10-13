@@ -112,6 +112,14 @@ void gold64_lift_candidates(__global const ulong * restrict residue,
 #define G64_QDIAG_QUOTIENT_MISMATCH 4u
 #define G64_QDIAG_FP64_RANGE 8u
 
+static inline double gold64_fp64_quotient_hint(ulong r, float a) {
+  const double rscaled =
+      fma(convert_double((uint)(r >> 32)), 0x1p-32,
+          convert_double((uint)r) * 0x1p-64);
+  double hint = fma(convert_double(a), 0x1p-64, -rscaled);
+  return fma(hint, 0x1p-32, hint);
+}
+
 __kernel __attribute__((reqd_work_group_size(256,1,1)))
 void gold64_quotient_diagnostics(__global const ulong * restrict residue,
                                  __global const float * restrict estimate,
@@ -124,14 +132,9 @@ void gold64_quotient_diagnostics(__global const ulong * restrict residue,
   hint32 = fma(hint32, 0x1p-32f, hint32);
   const float rounded32 = rint(hint32);
 
-  // Form r/2^64 from exact 32-bit halves before the subtraction.  Converting
-  // the FP32 estimate to double is exact; this intentionally cannot recover
-  // error already present in the FP32 transform output.
-  const double rscaled =
-      fma(convert_double((uint)(r >> 32)), 0x1p-32,
-          convert_double((uint)r) * 0x1p-64);
-  double hint64 = fma(convert_double(a), 0x1p-64, -rscaled);
-  hint64 = fma(hint64, 0x1p-32, hint64);
+  // Converting the FP32 estimate to double is exact; this intentionally cannot
+  // recover error already present in the FP32 transform output.
+  const double hint64 = gold64_fp64_quotient_hint(r, a);
   const double rounded64 = rint(hint64);
 
   uint flags = 0u;
@@ -142,6 +145,44 @@ void gold64_quotient_diagnostics(__global const ulong * restrict residue,
       convert_int(rounded32) != convert_int(rounded64))
     flags |= G64_QDIAG_QUOTIENT_MISMATCH;
   output[j] = flags;
+}
+
+// Diagnostic-only alternative lift.  It uses the FP64 quotient arithmetic above
+// but the SAME FP32 transform estimate.  It never feeds the normal reconstruction
+// or register commit path; callers may normalize its scratch candidate solely to
+// determine whether quotient-stage rounding explains a known mismatch.
+__kernel __attribute__((reqd_work_group_size(256,1,1)))
+void gold64_lift_candidates_fp64_diagnostic(
+    __global const ulong * restrict residue,
+    __global const float * restrict estimate,
+    __global ulong2 * restrict candidate,
+    __global uint * restrict status,
+    uint factor) {
+  const uint j = (uint)get_global_id(0);
+  const ulong r = residue[j];
+  const float a = estimate[j];
+  uint flags = G64_UNPROVEN_PRECISION;
+
+  if ((as_uint(a) & 0x7f800000U) == 0x7f800000U) flags |= G64_NONFINITE;
+  if (r >= GOLD64_P) flags |= G64_INVALID_RESIDUE;
+  if (factor != 1u && factor != 3u) flags |= G64_UNSUPPORTED_OPERATION;
+
+  const double hint = gold64_fp64_quotient_hint(r, a);
+  const double rounded = rint(hint);
+  if (!isfinite(hint)) flags |= G64_NONFINITE;
+  if (fabs(rounded) >= 0x1p23) flags |= G64_QUOTIENT_RANGE;
+  if (fabs(hint - rounded) > 0.125) flags |= G64_FRACTIONAL_HINT;
+
+  if (flags & G64_FATAL) {
+    candidate[j] = (ulong2)(0UL, 0UL);
+    status[j] = flags;
+    return;
+  }
+
+  ulong2 x = gold64_lift_signed(r, convert_int(rounded));
+  if (factor == 3u) x = gold64_wide_add(gold64_wide_add(x, x), x);
+  candidate[j] = x;
+  status[j] = flags;
 }
 
 // Inspect wide carry boundaries without claiming a normalized Mersenne result.
