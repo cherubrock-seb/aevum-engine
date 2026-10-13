@@ -72,7 +72,7 @@ class ReconstructionExperiment {
   Kernel statusBlocks, statusReduce, statusFinish;
   bool reportReady = false;
 
-  static U32 chooseCarryBlock(Queue& queue) {
+  static U32 chooseCarryBlock(Queue& queue, U32 exponent) {
     if (const char* overrideValue = std::getenv("AEVUM_GOLD64_CARRY_BLOCK")) {
       char* end = nullptr;
       const unsigned long parsed = std::strtoul(overrideValue, &end, 10);
@@ -86,9 +86,15 @@ class ReconstructionExperiment {
     const auto id = queue.context->deviceId();
     if (clGetDeviceInfo(id, CL_DEVICE_VENDOR_ID, sizeof(vendor), &vendor, nullptr) != CL_SUCCESS)
       throw std::runtime_error("Gold64 carry block selection could not query device vendor");
-    // gfx906 benefits strongly from four times more carry-level parallelism;
-    // NVIDIA benefits from the longer serial block and lower block overhead.
-    return vendor == amdVendor ? 64u : 256u;
+    if (vendor != amdVendor) return 256u;
+
+    // gfx906 benefits from the shortest segment that still satisfies the exact
+    // three-state map proof: exponent * block >= 256*N bits per segment.
+    // Keep the choice power-of-two so every supported decomposition remains
+    // compatible with the hierarchical 256-way scans.
+    for (U32 block : {8u, 16u, 32u, 64u, 128u, 256u})
+      if (U64(exponent) * block >= U64(256) * n) return block;
+    return 256u;
   }
   static std::string carryCompilerDefines(U32 carryBlock) {
     return std::string("-DGOLD64_N=4194304 -DG64_CARRY_BLOCK=") +
@@ -143,7 +149,7 @@ class ReconstructionExperiment {
 
 public:
   ReconstructionExperiment(const Args& args, Queue& queue, U32 q)
-    : exponent(q), carryBlock(chooseCarryBlock(queue)),
+    : exponent(q), carryBlock(chooseCarryBlock(queue, q)),
       blocks(n / carryBlock), groups(blocks / 256u),
       superGroups((groups + 255u) / 256u),
       convolution(args, queue, q),
