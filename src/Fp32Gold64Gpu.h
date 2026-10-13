@@ -2,6 +2,7 @@
 #pragma once
 #include "Gold64Gpu.h"
 #include "TrigBufCache.h"
+#include <cstdlib>
 
 #ifndef CUDA_BACKEND
 namespace aevum_gold64 {
@@ -169,9 +170,15 @@ public:
 // Preparing an RHS and changing it updates both planes together.
 class HybridConvolution {
   GpuPlane gold;
-  Fp32Plane fp32;
+  std::unique_ptr<Fp32Plane> fp32;
   M31Plane m31;
   bool preparedReady = false;
+  bool fp32Ready = false;
+
+  static bool enableFp32Diagnostics() {
+    const char* value = std::getenv("AEVUM_GOLD64_FP32_DIAGNOSTICS");
+    return value && *value && *value != '0';
+  }
   static U32 requireGeometry(U32 q) {
     Tables::requireGeometry(GpuPlane::words, q);
     // Numeric input format for this experiment, NOT a proven FP32 error bound.
@@ -184,37 +191,53 @@ class HybridConvolution {
                              const Buffer<float>& estimate) {
     if (input.size != GpuPlane::words || residue.size != GpuPlane::words ||
         residue31.size != GpuPlane::words || estimate.size != GpuPlane::words)
-      throw std::invalid_argument("FP32/M31/Gold64 coefficient buffer size mismatch");
+      throw std::invalid_argument("M31/Gold64 coefficient buffer size mismatch");
     if (input.get() == residue.get() || input.get() == residue31.get() ||
         input.get() == estimate.get() || residue.get() == residue31.get() ||
         residue.get() == estimate.get() || residue31.get() == estimate.get())
-      throw std::invalid_argument("FP32/M31/Gold64 inputs and plane outputs must not alias");
+      throw std::invalid_argument("M31/Gold64 inputs and plane outputs must not alias");
   }
 public:
   HybridConvolution(const Args& args, Queue& q, U32 exponent)
-    : gold(args, q, requireGeometry(exponent)), fp32(args, q, exponent),
+    : gold(args, q, requireGeometry(exponent)),
+      fp32(enableFp32Diagnostics()
+               ? std::make_unique<Fp32Plane>(args, q, exponent)
+               : nullptr),
       m31(args, q, exponent) {}
+
+  bool fp32DiagnosticsReady() const { return fp32Ready; }
+  bool fp32DiagnosticsEnabled() const { return bool(fp32); }
+
   void square(const Buffer<std::int64_t>& input, Buffer<U64>& residue,
               Buffer<U32>& residue31, Buffer<float>& estimate) {
     requireBuffers(input, residue, residue31, estimate);
+    fp32Ready = false;
     gold.squareResidues(input, residue);
     m31.squareResidues(input, residue31);
-    fp32.squareCoefficients(input, estimate);
+    if (fp32) {
+      fp32->squareCoefficients(input, estimate);
+      fp32Ready = true;
+    }
   }
   void prepare(const Buffer<std::int64_t>& rhs) {
     preparedReady = false;
+    fp32Ready = false;
     gold.prepare(rhs);
     m31.prepare(rhs);
-    fp32.prepare(rhs);
+    if (fp32) fp32->prepare(rhs);
     preparedReady = true;
   }
   void multiply(const Buffer<std::int64_t>& lhs, Buffer<U64>& residue,
                 Buffer<U32>& residue31, Buffer<float>& estimate) {
     requireBuffers(lhs, residue, residue31, estimate);
-    if (!preparedReady) throw std::logic_error("FP32/M31/Gold64 multiply requires all prepared planes");
+    if (!preparedReady) throw std::logic_error("M31/Gold64 multiply requires all prepared exact planes");
+    fp32Ready = false;
     gold.multiplyResidues(lhs, residue);
     m31.multiplyResidues(lhs, residue31);
-    fp32.multiplyCoefficients(lhs, estimate);
+    if (fp32) {
+      fp32->multiplyCoefficients(lhs, estimate);
+      fp32Ready = true;
+    }
   }
 };
 } // namespace aevum_gold64
