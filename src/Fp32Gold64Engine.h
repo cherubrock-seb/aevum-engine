@@ -18,6 +18,7 @@ class RegisterEngine {
   Buffer<WideCoefficient> candidates;
   Buffer<U32> status;
   Buffer<std::int64_t> result;
+  Buffer<std::int64_t> smallFactorScratch;
   Kernel coefficients;
   std::vector<Buffer<std::int64_t>> registers;
   size_t preparedIndex = noPrepared;
@@ -44,13 +45,32 @@ class RegisterEngine {
                  cl_uint(operation), cl_uint(value));
     normalize(dst);
   }
-  void scale3(size_t dst) { linear(dst, dst, 4); }
+  void scale3(size_t dst) {
+    // Match Runtime::multiply_small(3): normalize the doubled scratch first,
+    // then add it to the original normalized register. This keeps each carry
+    // input inside the already-validated linear-operation envelope.
+    auto& original = registers.at(dst);
+    smallFactorScratch << original;
+
+    reconstruction.invalidateDiagnostics();
+    coefficients(smallFactorScratch, smallFactorScratch, candidates, status,
+                 cl_uint(1), cl_uint(0));
+    reconstruction.normalizeCandidates(candidates, result, status);
+    diagnostics().requireUsable(PrecisionPolicy::SupervisedValidation);
+    smallFactorScratch << result;
+
+    reconstruction.invalidateDiagnostics();
+    coefficients(original, smallFactorScratch, candidates, status,
+                 cl_uint(1), cl_uint(0));
+    normalize(dst);
+  }
 
 public:
   RegisterEngine(const Args& args, const Context& context, U32 q, size_t count)
     : exponent(q), queue(context, args.profile), reconstruction(args, queue, q),
       compiler(args, &context, "-DGOLD64_N=4194304"),
       candidates(nullptr, &queue, n), status(nullptr, &queue, n), result(nullptr, &queue, n),
+      smallFactorScratch(nullptr, &queue, n),
       coefficients("gold64_register_coefficients", &compiler, nullptr, &queue,
                    "fp32_gold64_reconstruct.cl", "gold64_register_coefficients", n) {
     if (!count) throw std::invalid_argument("Gold64 requires at least one register");
