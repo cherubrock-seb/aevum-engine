@@ -52,7 +52,10 @@ struct QuotientDiagnostics {
 
 class ReconstructionExperiment {
   static constexpr U32 n = GpuPlane::words;
-  static constexpr U32 blocks = n / 256, groups = blocks / 256;
+  static constexpr U32 carryBlock = 64;
+  static constexpr U32 blocks = n / carryBlock, groups = blocks / 256;
+  static_assert(blocks % 256 == 0 && groups <= 256,
+                "Gold64 carry scan requires an exact two-level 256-way decomposition");
   const U32 exponent;
   HybridConvolution convolution;
   KernelCompiler compiler;
@@ -149,7 +152,13 @@ public:
       statusBlocks("gold64_status_blocks", &compiler, nullptr, &queue,
                    "fp32_gold64_reconstruct.cl", "gold64_status_blocks", blocks),
       statusFinish("gold64_status_finish", &compiler, nullptr, &queue,
-                   "fp32_gold64_reconstruct.cl", "gold64_status_finish", 256) {}
+                   "fp32_gold64_reconstruct.cl", "gold64_status_finish", 256) {
+    // The three-state carry map assumes the incoming signed-64 correction is
+    // negligible versus a block radix. Keep at least 256 exponent bits per
+    // 64-digit block, matching the proof used by the original 256-digit lane.
+    if (U64(q) * carryBlock < U64(256) * n)
+      throw std::invalid_argument("Gold64 64-digit carry blocks require at least 256 exponent bits per block");
+  }
 
   static void requireExecution(PrecisionPolicy policy) {
     if (policy != PrecisionPolicy::SupervisedValidation)
