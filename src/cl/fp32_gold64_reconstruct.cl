@@ -34,6 +34,23 @@ static inline uint gold64_digit_width(uint j, uint exponent) {
   return (uint)(((qj + exponent + GOLD64_N - 1) >> 22) -
                  ((qj + GOLD64_N - 1) >> 22));
 }
+// Sequential form of the same ceil-difference geometry.  For
+// exponent = base*N + remainder, digit widths are base or base+1.
+// A block pays one 64-bit multiply to initialize phase; each following
+// width needs only a 32-bit add/compare.
+static inline uint gold64_width_phase_init(uint j, uint exponent) {
+  const uint mask = GOLD64_N - 1u;
+  const uint remainder = exponent & mask;
+  return (uint)(((ulong)remainder * j + mask) & mask);
+}
+static inline uint gold64_width_next(__private uint *phase, uint exponent) {
+  const uint mask = GOLD64_N - 1u;
+  const uint remainder = exponent & mask;
+  const uint sum = *phase + remainder;
+  const uint extra = (uint)(sum >= GOLD64_N);
+  *phase = sum & mask;
+  return (exponent >> 22) + extra;
+}
 static inline ulong2 gold64_lift_signed(ulong r, int quotient) {
   const long q = (long)quotient;
   // q*p = q*2^64 - q*(2^32-1). One 64-bit product, no 128-bit multiply.
@@ -315,10 +332,12 @@ void gold64_carry_local(__global const ulong2 * restrict candidate,
   // Precision provenance belongs to the coefficient-producing path. Preserve
   // per-digit status instead of forcing every exact carry to be unproven.
   uint flags = 0u;
+  const uint start = k * G64_CARRY_BLOCK;
+  uint widthPhase = gold64_width_phase_init(start, exponent);
   for (uint i = 0; i < G64_CARRY_BLOCK; ++i) {
-    const uint j = k * G64_CARRY_BLOCK + i;
+    const uint j = start + i;
     flags |= status[j];
-    const uint bits = gold64_digit_width(j, exponent);
+    const uint bits = gold64_width_next(&widthPhase, exponent);
     if (!bits || bits > 33u) flags |= G64_UNSUPPORTED_OPERATION;
     long d = 0L;
     if (!(flags & G64_FATAL)) {
@@ -344,9 +363,11 @@ void gold64_carry_maps(__global const long * restrict local_digit,
   long carry[3] = {0L, 0L, 0L};
   for (uint s = 0; s < 3u; ++s)
     incoming[s] = gold64_wide_add(gold64_wide_signed(base), gold64_wide_signed((long)s - 1L));
+  const uint start = k * G64_CARRY_BLOCK;
+  uint widthPhase = gold64_width_phase_init(start, exponent);
   for (uint i = 0; i < G64_CARRY_BLOCK; ++i) {
-    const uint j = k * G64_CARRY_BLOCK + i;
-    const uint bits = gold64_digit_width(j, exponent);
+    const uint j = start + i;
+    const uint bits = gold64_width_next(&widthPhase, exponent);
     if (!bits || bits > 33u) { flags |= G64_UNSUPPORTED_OPERATION; break; }
     // Load each digit/width once for all three exact carry trajectories.
     const ulong2 d = gold64_wide_signed(local_digit[j]);
@@ -419,9 +440,11 @@ void gold64_carry_finish(__global const long * restrict local_digit,
   const long base = block_carry[(k + G64_CARRY_BLOCKS - 1u) % G64_CARRY_BLOCKS];
   ulong2 incoming = gold64_wide_add(gold64_wide_signed(base), gold64_wide_signed((long)delta));
   long carry = 0L;
+  const uint start = k * G64_CARRY_BLOCK;
+  uint widthPhase = gold64_width_phase_init(start, exponent);
   for (uint i = 0; i < G64_CARRY_BLOCK; ++i) {
-    const uint j = k * G64_CARRY_BLOCK + i;
-    const uint bits = gold64_digit_width(j, exponent);
+    const uint j = start + i;
+    const uint bits = gold64_width_next(&widthPhase, exponent);
     long d = 0L;
     if (bits && bits <= 33u && !(flags & G64_FATAL)) {
       const ulong2 x = gold64_wide_add(incoming, gold64_wide_signed(local_digit[j]));
