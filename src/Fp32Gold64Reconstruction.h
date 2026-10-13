@@ -37,6 +37,17 @@ struct ReconstructionReport {
 };
 static_assert(sizeof(ReconstructionReport) == 16, "OpenCL uint4 diagnostic ABI");
 
+struct QuotientDiagnostics {
+  U32 coefficients = 0;
+  U32 fp32Fractional = 0;
+  U32 fp64Fractional = 0;
+  U32 quotientDisagreements = 0;
+  U32 fp64Range = 0;
+  U32 firstDisagreement = ~U32(0);
+  U32 firstFp32Fractional = ~U32(0);
+  U32 firstFp64Fractional = ~U32(0);
+};
+
 class ReconstructionExperiment {
   static constexpr U32 n = GpuPlane::words;
   static constexpr U32 blocks = n / 256, groups = blocks / 256;
@@ -47,8 +58,9 @@ class ReconstructionExperiment {
   Buffer<float> estimates;
   Buffer<std::int64_t> carryDigits, blockCarry;
   Buffer<U32> blockStatus, maps, prefix, groupMaps, groupPrefix, totalMap;
+  Buffer<U32> quotientFlags;
   Buffer<ReconstructionReport> partialReports, summary;
-  Kernel lift, split;
+  Kernel lift, split, quotientProbe;
   Kernel carryLocal, carryMaps, scanBlocks, scanGroups, carryFinish;
   Kernel statusBlocks, statusFinish;
   bool reportReady = false;
@@ -79,11 +91,14 @@ public:
       blockStatus(nullptr, &queue, blocks), maps(nullptr, &queue, blocks),
       prefix(nullptr, &queue, blocks), groupMaps(nullptr, &queue, groups),
       groupPrefix(nullptr, &queue, groups), totalMap(nullptr, &queue, 1),
+      quotientFlags(nullptr, &queue, n),
       partialReports(nullptr, &queue, groups), summary(nullptr, &queue, 1),
       lift("gold64_lift_candidates", &compiler, nullptr, &queue,
            "fp32_gold64_reconstruct.cl", "gold64_lift_candidates", n),
       split("gold64_split_candidates", &compiler, nullptr, &queue,
             "fp32_gold64_reconstruct.cl", "gold64_split_candidates", n),
+      quotientProbe("gold64_quotient_diagnostics", &compiler, nullptr, &queue,
+                    "fp32_gold64_reconstruct.cl", "gold64_quotient_diagnostics", n),
       carryLocal("gold64_carry_local", &compiler, nullptr, &queue,
                  "fp32_gold64_reconstruct.cl", "gold64_carry_local", blocks),
       carryMaps("gold64_carry_maps", &compiler, nullptr, &queue,
@@ -107,6 +122,31 @@ public:
   ReconstructionReport diagnostics() const {
     if (!reportReady) throw std::logic_error("Gold64 has no completed normalization diagnostics");
     return summary.read(1).front();
+  }
+  QuotientDiagnostics quotientDiagnostics() {
+    if (!reportReady)
+      throw std::logic_error("Gold64 quotient diagnostics require a completed candidate operation");
+    quotientProbe(residues, estimates, quotientFlags);
+    const auto flags = quotientFlags.read(n);
+    QuotientDiagnostics out;
+    out.coefficients = n;
+    for (U32 i = 0; i < n; ++i) {
+      const U32 f = flags[i];
+      if (f & 1u) {
+        ++out.fp32Fractional;
+        if (out.firstFp32Fractional == ~U32(0)) out.firstFp32Fractional = i;
+      }
+      if (f & 2u) {
+        ++out.fp64Fractional;
+        if (out.firstFp64Fractional == ~U32(0)) out.firstFp64Fractional = i;
+      }
+      if (f & 4u) {
+        ++out.quotientDisagreements;
+        if (out.firstDisagreement == ~U32(0)) out.firstDisagreement = i;
+      }
+      if (f & 8u) ++out.fp64Range;
+    }
+    return out;
   }
 
   void squareCandidates(const Buffer<std::int64_t>& input,
