@@ -456,10 +456,17 @@ void gold64_carry_finish(__global const long * restrict block_carry,
     }
     const uint bits = gold64_digit_width(j, exponent);
     long d = 0L;
-    if (bits && bits <= 33u && !(flags & G64_FATAL)) {
+    if (!bits || bits > 33u) {
+      flags |= G64_UNSUPPORTED_OPERATION;
+      carry = 0L;
+    } else if (!(flags & G64_FATAL)) {
       const ulong2 x = gold64_wide_add(incoming, gold64_wide_signed(digit[j]));
       d = gold64_split_wide(x, bits, &carry, &flags);
-    } else { flags |= G64_UNSUPPORTED_OPERATION; carry = 0L; }
+    } else {
+      // Preserve the producer's fatal provenance. A pre-existing fatal flag
+      // suppresses carry correction, but is not itself an unsupported width.
+      carry = 0L;
+    }
     digit[j] = d;
     incoming = gold64_wide_signed(carry);
   }
