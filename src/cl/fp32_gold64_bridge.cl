@@ -1,15 +1,16 @@
-// Aevum FP32 -> natural-order Gold64 coefficient bridge.
-// Reuses the inverse-weight formulas in carry.cl without rounding or carry.
+// Aevum FP32/GF31 -> natural-order Gold64 coefficient bridge.
 #include "base.cl"
 #include "fftwidth.cl"
 #include "weight.cl"
 
-#if FFT_TYPE != FFT32 || !FFT_FP32 || NTT_GF31 || NTT_GF61 || WordSize != 8
-#error FP32 Gold64 bridge requires the FP32-only transform with 64-bit input digits
-#endif
 #if WIDTH != 512 || SMALL_HEIGHT != 512 || MIDDLE != 8 || NW != 8 || NH != 8
-#error FP32 Gold64 bridge currently requires 512:8:512 geometry
+#error Gold64 companion bridge currently requires 512:8:512 geometry
 #endif
+#if WordSize != 8
+#error Gold64 companion bridge requires 64-bit input digits
+#endif
+
+#if FFT_TYPE == FFT32 && FFT_FP32 && !NTT_GF31 && !NTT_GF61
 
 // 16x16 import uses 4352 bytes of LDS instead of the stock 64x64 long tile.
 // Read and write whole signed pairs so every input bit reaches both planes.
@@ -28,7 +29,6 @@ KERNEL(256) gold64_fp32_import(P(Word2) out, CP(Word2) in) {
 // j=2*(column*BIG_HEIGHT+row), j+1. fftW leaves the components swapped.
 // fftMiddleOut already applies 1/(2*NWORDS); inverse weights undo the
 // two input factors 2^-24. Do NOT divide by N or N/2 again here.
-// A padded tile fuses weight removal and transpose, coalescing both sides.
 KERNEL(256) gold64_fp32_unweight(CP(F2) in, P(F2) out, BigTabFP32 THREAD_WEIGHTS) {
   local F2 tile[16][17];
   const u32 lid = get_local_id(0), group = get_group_id(0);
@@ -38,9 +38,6 @@ KERNEL(256) gold64_fp32_unweight(CP(F2) in, P(F2) out, BigTabFP32 THREAD_WEIGHTS
   const u32 col = colBase + tx, row = rowBase + ty;
   const u32 me = col % G_W, gx = col / G_W;
   const u32 word = 2 * (col * BIG_HEIGHT + row);
-  // carry.cl's hybrid combo_counter adds a low 0xffffffff to comboFracBits,
-  // so its low limb is fracBits(word)-1, not fracBits(word). Match that
-  // double bias, including digit zero, where a wrong comparison doubles w0.
   const u32 frac = fracBits(word) - 1u;
   const u32 stepFrac = weightStepFracBits(gx);
   const u32 baseFrac = fracBits(me * BIG_HEIGHT * 2) + stepFrac;
@@ -53,3 +50,70 @@ KERNEL(256) gold64_fp32_unweight(CP(F2) in, P(F2) out, BigTabFP32 THREAD_WEIGHTS
   barrier(CLK_LOCAL_MEM_FENCE);
   out[(colBase + ty) * BIG_HEIGHT + rowBase + tx] = tile[tx][ty];
 }
+
+#elif FFT_TYPE == FFT31 && !FFT_FP32 && NTT_GF31 && !NTT_GF61
+
+KERNEL(256) gold64_m31_import(P(Word2) out, CP(Word2) in) {
+  local Word2 tile[16][17];
+  const u32 lid = get_local_id(0), group = get_group_id(0);
+  const u32 tx = lid & 15, ty = lid >> 4;
+  const u32 rowBase = (group % (BIG_HEIGHT/16)) * 16;
+  const u32 colBase = (group / (BIG_HEIGHT/16)) * 16;
+  tile[ty][tx] = in[(colBase + ty) * BIG_HEIGHT + rowBase + tx];
+  barrier(CLK_LOCAL_MEM_FENCE);
+  out[(rowBase + ty) * WIDTH + colBase + tx] = tile[tx][ty];
+}
+
+// Export the standalone GF31 fftW state as natural-order coefficient residues.
+// This is the same inverse NTT weight logic as debugPrecarry3161M31.
+KERNEL(G_W) gold64_m31_unweight(CP(GF31) in, P(u32) out) {
+  const u32 g = get_group_id(0);
+  const u32 me = get_local_id(0);
+  const u32 gx = g % NW;
+  const u32 gy = g / NW;
+  const u32 H = BIG_HEIGHT;
+  const u32 line = gy * CARRY_LEN;
+  u32 word_index = (gx * G_W * H + me * H + line) * 2;
+
+  const u32 log2_root_two = M31_LOG2_ROOT_TWO;
+  const u32 bigword_weight_shift =
+      (NWORDS - EXP % NWORDS) * log2_root_two % 31;
+  const u32 bigword_weight_shift_minus1 =
+      (bigword_weight_shift + 30) % 31;
+
+  union { uint2 a; u64 b; } combo;
+  const u64 combo_step =
+      make_u64(bigword_weight_shift_minus1, FRAC_BPW_HI);
+  combo.b =
+      comboFracBits(word_index) +
+      make_u64(word_index * bigword_weight_shift_minus1, 0xFFFFFFFF);
+
+  const u32 log2_NWORDS =
+      (WIDTH == 256 ? 8 : WIDTH == 512 ? 9 : WIDTH == 1024 ? 10 : 12) +
+      (PFA_RADIX ? 0 :
+       (MIDDLE == 1 ? 0 : MIDDLE == 2 ? 1 : MIDDLE == 4 ? 2 :
+        MIDDLE == 8 ? 3 : 4)) +
+      (SMALL_HEIGHT == 256 ? 8 : SMALL_HEIGHT == 512 ? 9 :
+       SMALL_HEIGHT == 1024 ? 10 : 12) + 1;
+  combo.a[1] = (combo.a[1] + log2_NWORDS + 1) % 31;
+
+  for (i32 i = 0; i < CARRY_LEN; ++i) {
+    const u32 p = G_W * gx + WIDTH * (CARRY_LEN * gy + i) + me;
+    const u32 shift0 = combo.a[1];
+    combo.b += combo_step;
+    combo.a[1] = adjust_m31_weight_shift(combo.a[1]);
+    const u32 shift1 = combo.a[1];
+
+    const GF31 u = SWAP_XY(in[p]);
+    const u32 natural = word_index + 2u * i;
+    out[natural] = get_Z31(shr(u.x, shift0));
+    out[natural + 1u] = get_Z31(shr(u.y, shift1));
+
+    combo.b += combo_step;
+    combo.a[1] = adjust_m31_weight_shift(combo.a[1]);
+  }
+}
+
+#else
+#error Gold64 companion bridge requires either FP32-only or GF31-only fixed transform
+#endif
