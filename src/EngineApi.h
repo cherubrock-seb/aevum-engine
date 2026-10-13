@@ -120,6 +120,14 @@ AEVUM_ENGINE_API int aevum_engine_debug_square_trace(
 AEVUM_ENGINE_API int aevum_engine_debug_type1_precarry(
     aevum_engine_handle handle, size_t src, uint64_t* limbs, size_t limb_count);
 
+// Diagnostic only: execute the Type1 square transform once and export both the
+// exact CRT pre-carry coefficient and the same coefficient modulo M31.
+// limb_count must equal 2*transform_size; residue_count must equal transform_size.
+AEVUM_ENGINE_API int aevum_engine_debug_type1_precarry_with_m31(
+    aevum_engine_handle handle, size_t src,
+    uint64_t* limbs, size_t limb_count,
+    uint32_t* residues31, size_t residue_count);
+
 // Diagnostic only: overwrite an explicit Type1 FFT3161 register with exactly
 // transform_size signed natural-order digits, bypassing compact-word expansion.
 AEVUM_ENGINE_API int aevum_engine_debug_type1_set_raw_digits(
