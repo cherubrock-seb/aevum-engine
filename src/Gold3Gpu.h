@@ -31,10 +31,12 @@ class GoldPlane {
   static aevum_gold64::Tables tables(Queue& q, U32 exponent) {
     Plan plan(exponent);
     std::size_t group = 0;
-    cl_ulong local = 0;
+    U64 local = 0;
+    constexpr cl_device_info maxWorkGroupSizeInfo = 0x1004;
+    constexpr cl_device_info localMemSizeInfo = 0x1023;
     auto id = q.context->deviceId();
-    if (clGetDeviceInfo(id, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(group), &group, nullptr) != CL_SUCCESS ||
-        clGetDeviceInfo(id, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(local), &local, nullptr) != CL_SUCCESS ||
+    if (clGetDeviceInfo(id, maxWorkGroupSizeInfo, sizeof(group), &group, nullptr) != CL_SUCCESS ||
+        clGetDeviceInfo(id, localMemSizeInfo, sizeof(local), &local, nullptr) != CL_SUCCESS ||
         group < 256 || local < 16384) {
       throw std::runtime_error("Gold3 requires 256 work-items and 16 KiB local memory");
     }
@@ -55,27 +57,27 @@ class GoldPlane {
       backward0("gold3_gold_out", &compiler, nullptr, &q, "gold64_transform.cl", "gold64_backward64_0_unweighted", n/8) {}
   void begin(const Buffer<Digit>& in, Buffer<U64>& dst) {
     if (in.size != n || dst.size != n) { throw std::invalid_argument("Gold3 Gold64 buffer size"); }
-    forward0(in, dst, roots, weights, cl_ulong(0));
-    forward(dst, roots, cl_ulong(0), cl_uint(512), cl_uint(9));
+    forward0(in, dst, roots, weights, U64(0));
+    forward(dst, roots, U64(0), U32(512), U32(9));
   }
   void end(Buffer<U64>& out) {
     if (out.size != n) { throw std::invalid_argument("Gold3 Gold64 output size"); }
-    backward(work, roots, cl_ulong(0), cl_uint(512), cl_uint(9));
-    backward0(work, roots, out, weights, cl_ulong(0));
+    backward(work, roots, U64(0), U32(512), U32(9));
+    backward0(work, roots, out, weights, U64(0));
   }
 public:
   GoldPlane(const Args& args, Queue& q, U32 exponent) : GoldPlane(args, q, tables(q, exponent)) {}
   void square(const Buffer<Digit>& in, Buffer<U64>& out) {
-    begin(in, work); squareTail(work, roots, cl_ulong(0)); end(out);
+    begin(in, work); squareTail(work, roots, U64(0)); end(out);
   }
   void prepare(const Buffer<Digit>& in) {
     ready = false;
     if (!prepared) { prepared = std::make_unique<Buffer<U64>>(nullptr, queue, n); }
-    begin(in, *prepared); prepareTail(*prepared, roots, cl_ulong(0)); ready = true;
+    begin(in, *prepared); prepareTail(*prepared, roots, U64(0)); ready = true;
   }
   void multiply(const Buffer<Digit>& in, Buffer<U64>& out) {
     if (!ready) { throw std::logic_error("Gold3 Gold64 RHS is not prepared"); }
-    begin(in, work); multiplyTail(work, roots, cl_ulong(0), *prepared, cl_ulong(0)); end(out);
+    begin(in, work); multiplyTail(work, roots, U64(0), *prepared, U64(0)); end(out);
   }
 };
 
