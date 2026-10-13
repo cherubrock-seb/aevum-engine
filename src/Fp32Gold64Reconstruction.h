@@ -130,6 +130,11 @@ public:
       throw std::invalid_argument("Gold64 estimate diagnostics require 4194304 floats");
     estimates.read(output, count);
   }
+  void getResidues(U64* output, size_t count) {
+    if (!output || count != n)
+      throw std::invalid_argument("Gold64 residue diagnostics require 4194304 uint64 values");
+    residues.read(output, count);
+  }
   QuotientDiagnostics quotientDiagnostics() {
     if (!reportReady)
       throw std::logic_error("Gold64 quotient diagnostics require a completed candidate operation");
