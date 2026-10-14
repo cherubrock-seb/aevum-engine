@@ -287,6 +287,26 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
     config.insert(it->second.begin(), it->second.end());
   }
 
+  // Validate experimental selections before turning values into preprocessor tokens.
+  // Unknown identifiers would otherwise become zero in an OpenCL #if expression.
+  for (const char* key : {"AEVUM_PFA7_CONV3", "AEVUM_PFA7_NUSS8"}) {
+    if (const char* value = std::getenv(key)) {
+      const auto it = config.find(key);
+      if (it != config.end() && it->second != value)
+        throw std::runtime_error(string("conflicting ") + key + " selections");
+      config[key] = value;
+    }
+    if (const auto it = config.find(key); it != config.end()) {
+      if (it->second != "0" && it->second != "1")
+        throw std::runtime_error(string(key) + " must be 0 or 1");
+      if (it->second == "1" && (!fft.isPfa() || fft.pfa_radix != 7))
+        throw std::runtime_error(string(key) + " requires a PFA7 plan");
+    }
+  }
+  if (config.count("AEVUM_PFA7_CONV3") && config.at("AEVUM_PFA7_CONV3") == "1" &&
+      config.count("AEVUM_PFA7_NUSS8") && config.at("AEVUM_PFA7_NUSS8") == "1")
+    throw std::runtime_error("select only one PFA7 factorization");
+
   if (const char* value = std::getenv("AEVUM_PFA_FUSED_INVERSE")) {
     const auto it = config.find("AEVUM_PFA_FUSED_INVERSE");
     if (it != config.end() && it->second != value)
