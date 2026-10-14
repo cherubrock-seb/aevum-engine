@@ -439,3 +439,13 @@ test-gf61-limb32-cmul: $(GF61_LIMB32_CMUL_TEST)
 $(GF61_LIMB32_CMUL_TEST): tests/gf61_limb32_cmul_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gf61_limb32_cmul_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+
+ENGINE_EQUAL_GPU_TEST := build-tests/aevum-engine-equal-canonical-gpu-test
+
+.PHONY: test-engine-equal-gpu
+test-engine-equal-gpu: engine-lib $(ENGINE_EQUAL_GPU_TEST)
+	$(ENGINE_EQUAL_GPU_TEST) $(ENGINE_LIB) $${AEVUM_TEST_DEVICE:-0} . "$${AEVUM_TEST_FFT:-}"
+
+$(ENGINE_EQUAL_GPU_TEST): tests/engine_equal_canonical_gpu_test.cpp src/EngineApi.h
+	@mkdir -p $(dir $@)
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) $< $(DL_LIBS) -o $@

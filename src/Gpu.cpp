@@ -2741,7 +2741,20 @@ void Gpu::regSetU32(Buffer<Word>& dst, u32 value) {
 
 void Gpu::regSubU32(Buffer<Word>& dst, u32 value) { regSubValue(dst, value); }
 
-bool Gpu::regEqual(Buffer<Word>& lhs, Buffer<Word>& rhs) { return isEqual(lhs, rhs); }
+bool Gpu::regEqual(Buffer<Word>& lhs, Buffer<Word>& rhs) {
+  // Identical digit arrays always hold the same value, so a GPU match is final.
+  if (isEqual(lhs, rhs)) return true;
+
+  // The balanced-digit form is not unique: regAdd/regSub/regSubValue/regSetU32
+  // (and the small-factor multiply built on them) leave digits outside their
+  // carried range, and 0 and 2^E-1 are the same residue.  A digit mismatch is
+  // therefore confirmed on the canonical compact words before reporting it.
+  Words a = regRead(lhs);
+  Words b = regRead(rhs);
+  auto isZero = [](const Words& w) { return std::all_of(w.begin(), w.end(), [](u32 x) { return x == 0; }); };
+  if (a.empty() || b.empty()) return isZero(a) && isZero(b);  // empty means all-zero
+  return a == b;
+}
 
 void Gpu::regSquare(Buffer<Word>& io, u32 factor) {
   if (factor != 1) throw std::runtime_error("regSquare factor must be handled by EngineApi");
