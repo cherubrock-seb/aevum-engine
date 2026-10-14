@@ -439,3 +439,15 @@ test-gf61-limb32-cmul: $(GF61_LIMB32_CMUL_TEST)
 $(GF61_LIMB32_CMUL_TEST): tests/gf61_limb32_cmul_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gf61_limb32_cmul_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+
+# GF61 csqq/csqaq: non-recursive large-count fallback
+GF61_CSQ_COUNTS_TEST := build-tests/aevum-gf61-csq-counts-test
+.PHONY: test-gf61-csq-counts
+test-host: test-gf61-csq-counts
+test-gf61-csq-counts: $(GF61_CSQ_COUNTS_TEST)
+	python3 tests/gf61_csq_nonrecursive_source_test.py
+	$(GF61_CSQ_COUNTS_TEST)
+
+$(GF61_CSQ_COUNTS_TEST): tests/gf61_csq_counts_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gf61_csq_counts_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
