@@ -4,6 +4,7 @@
 #include "StatsSlot.h"
 #include "AppleTailZero.h"
 #include "UseOptions.h"
+#include "InPlaceDefault.h"
 #include "Proof.h"
 #include "TimeInfo.h"
 #include "Trig.h"
@@ -350,6 +351,10 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
   // fallback only when no explicit/tuned WMUL already exists.
   if (isNvidiaGpu(id) && fft.shape.width == 1024 && fft.shape.nW() == 4)
     config.try_emplace("WMUL", "1");
+
+  // nVidia defaults to the in-place layout (upstream GPUOwl/PRPLL default).
+  // Explicit -use/tune/per-FFT/engine values were inserted above and win.
+  applyDefaultInPlace(config, isNvidiaGpu(id), fft.isPfa());
 
  // Measured win on the ordinary paired M31/M61 1K:8:512 variant-202 geometry.
  // Keep 512-wide shapes unchanged; explicit -use/per-FFT values retain priority.

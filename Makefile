@@ -439,3 +439,13 @@ test-gf61-limb32-cmul: $(GF61_LIMB32_CMUL_TEST)
 $(GF61_LIMB32_CMUL_TEST): tests/gf61_limb32_cmul_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gf61_limb32_cmul_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+
+# nVidia INPLACE default (upstream GPUOwl/PRPLL parity)
+INPLACE_DEFAULT_TEST := build-tests/aevum-inplace-default-test
+.PHONY: test-inplace-default
+test-host: test-inplace-default
+test-inplace-default: $(INPLACE_DEFAULT_TEST)
+	$(INPLACE_DEFAULT_TEST) src/Gpu.cpp
+$(INPLACE_DEFAULT_TEST): tests/inplace_default_test.cpp src/InPlaceDefault.h src/Gpu.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/inplace_default_test.cpp -o $@

@@ -1,3 +1,13 @@
+## Unreleased NVIDIA in-place default
+
+- NVIDIA non-PFA plans now default to `INPLACE=1`, matching upstream
+  GPUOwl/PRPLL (gwoltman/gpuowl 1c96a99), whose `-tune` only times the
+  in-place layout on NVIDIA. This applies to both PrMers and standalone
+  Aevum. Explicit `-use`, `tune.txt`, per-FFT and engine-profile values
+  still win; AMD, Apple and PFA plans are unchanged.
+- NVIDIA autotune and PRP `-use` cache keys gain `inplace-default=1`, so
+  records measured against the old `INPLACE=0` baseline are re-measured.
+
 ## v0.3.99 NVIDIA 1K policy, scoped LDS padding and cumulative correctness fixes
 
 - NVIDIA 1K automatic plans now default to radix-8 when no explicit
