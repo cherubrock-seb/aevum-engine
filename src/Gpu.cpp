@@ -1476,9 +1476,10 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
     throw "FFT size too large";
   }
 
-  useLongCarry = useLongCarry || (bitsPerWord < 10.0);
+  // carryFused is unstable at low bits per word; see FFTShape::longCarryBPW().
+  useLongCarry = useLongCarry || fft.shape.needsLongCarry(E);
 
-  if (useLongCarry) { log("Using long carry!\n"); }
+  if (useLongCarry) { log("Using long carry! (%.2f bpw, carryFused needs >= %.2f)\n", bitsPerWord, fft.shape.longCarryBPW()); }
 #if defined(__APPLE__)
   if (fft.shape.fft_type == FFT3161) {
     log("Apple OpenCL 1.2 compatibility: targeted fftP, GF61 middle-in, tail staging and fftW global ping-pong staging; middle LDS transposes retained (IN_WG=64, OUT_WG=64).\n");

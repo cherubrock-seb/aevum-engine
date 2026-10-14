@@ -81,6 +81,9 @@ public:
 
   float carry32BPW() const;
   bool needsLargeCarry(u64 E) const;
+  // Bits per word below which carryFused is unstable and the long carry (fftW + carryA + carryB) must be used.
+  double longCarryBPW() const;
+  bool needsLongCarry(u64 E) const;
   bool isFavoredShape() const;
 };
 
