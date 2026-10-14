@@ -37,10 +37,11 @@ static_assert(sizeof(ulong2) == 16, "trig entries are uploaded as raw 16-byte pa
 
 struct Shape { u32 width, smallH, middle; };
 
-// Elements to allocate for the transform data.  The in-place layout pads its rows and slabs (SIZEBLK/SIZEW/SIZEM in middle.cl), which adds
-// well under middle * (width + 64) elements to the width * middle * smallH of the separate-buffer layout.  The same random data fills the whole
-// buffer in every run, so the layout itself does not matter to the comparison.
-static size_t dataElems(const Shape& s) { return (size_t) s.width * s.middle * s.smallH + (size_t) s.middle * (s.width + 64) + 1024; }
+// Elements to allocate for the transform data.  The in-place layout pads its rows and slabs (SIZEBLK/SIZEW/SIZEM in middle.cl): the nVidia
+// layout (INPLACE=1) adds 32 elements per 16-row slab and 16 per middle row, i.e. middle * (2 * width + 16) on top of the width * middle * smallH
+// of the separate-buffer layout.  Allocate twice that, so a wider pad in the kernel cannot overflow the buffer.  The same random data fills the
+// whole buffer in every run, so the layout itself does not matter to the comparison.
+static size_t dataElems(const Shape& s) { return (size_t) s.width * s.middle * s.smallH + (size_t) s.middle * (4 * (size_t) s.width + 64) + 1024; }
 
 #ifndef CL_DEVICE_MAX_WORK_GROUP_SIZE
 #define CL_DEVICE_MAX_WORK_GROUP_SIZE 0x1004
