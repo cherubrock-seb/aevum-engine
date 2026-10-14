@@ -422,6 +422,16 @@ $(RADIX1K_POLICY_APPLE_TEST): tests/radix1k_policy_test.cpp src/FFTConfig.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -DAEVUM_FORCE_RADIX4_1K=1 -Isrc tests/radix1k_policy_test.cpp -o $@
 
+# The CUDA backend reports a sticky CUDA error from clGetEventInfo / clFinish (plain ints, no CUDA needed).
+CUDA_EVENT_STATUS_TEST := build-tests/aevum-cuda-event-status-test
+.PHONY: test-cuda-event-status
+test-host: test-cuda-event-status
+test-cuda-event-status: $(CUDA_EVENT_STATUS_TEST)
+	$(CUDA_EVENT_STATUS_TEST)
+$(CUDA_EVENT_STATUS_TEST): tests/cuda_event_status_test.cpp src/cuda/CudaEventStatus.h src/cuda/CudaErrorMap.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_event_status_test.cpp -o $@
+
 # PR136 cumulative semantic integration
 .PHONY: test-pr136-small-items
 test-host: test-pr136-small-items

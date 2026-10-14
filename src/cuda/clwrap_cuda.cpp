@@ -4,6 +4,7 @@
 
 #include "tinycuda.h"
 #include "cudawrap.h"  // For NvrtcProgram::preprocessOpenCL and compile
+#include "CudaErrorMap.h"
 
 #include <cstdio>
 #include <cstring>
@@ -20,6 +21,7 @@
 #ifdef __linux__
 #include <unistd.h>
 #endif
+#include "CudaEventStatus.h"
 
 using namespace std;
 
@@ -30,6 +32,21 @@ static unordered_set<cl_mem> g_allocatedBuffers;
 
 // Global CUDA context — set once by clCreateContext, used to ensure current before CUDA calls
 static CUcontext g_cudaContext = nullptr;
+
+// The OpenCL-style status for a CUDA driver result.  Only a result that means a lost, reset or faulted device or
+// context maps to the status that reads as a lost GPU; an out-of-memory maps to the allocation status and anything
+// else to a generic one (see CudaErrorMap.h).  The CUDA error itself is kept for the message.
+static thread_local char g_lastCuError[96];
+
+static int clStatusFromCu(CUresult r) {
+  if (r == CUDA_SUCCESS) { g_lastCuError[0] = 0; return CL_SUCCESS; }
+  const char* name = nullptr;
+  if (cuGetErrorName(r, &name) != CUDA_SUCCESS) name = nullptr;
+  snprintf(g_lastCuError, sizeof(g_lastCuError), "%s (%d)", name ? name : "CUDA error", (int) r);
+  return cuda_error_map::toClStatus((int) r);
+}
+
+const char* aevumCudaLastError() { return g_lastCuError[0] ? g_lastCuError : nullptr; }
 
 static void ensureContextCurrent() {
   if (g_cudaContext) {
@@ -826,8 +843,9 @@ int clFlush(cl_command_queue q) {
 }
 
 int clFinish(cl_command_queue q) {
-  if (q) cuStreamSynchronize(q->stream);
-  return CL_SUCCESS;
+  // A kernel that faulted leaves a sticky error that cuStreamSynchronize returns: report it here, where the work
+  // is waited for, rather than as the failure of whichever copy comes next.
+  return q ? clStatusFromCu(cuStreamSynchronize(q->stream)) : CL_SUCCESS;
 }
 
 // ---- Events ----
@@ -838,12 +856,14 @@ int clReleaseEvent(cl_event ev) {
 }
 
 int clWaitForEvents(unsigned n, const cl_event* events) {
+  int status = CL_SUCCESS;
   for (unsigned i = 0; i < n; i++) {
     if (events[i] && events[i]->end) {
-      cuEventSynchronize(events[i]->end);
+      int const st = clStatusFromCu(cuEventSynchronize(events[i]->end));
+      if (st != CL_SUCCESS && status == CL_SUCCESS) status = st;  // keep waiting for the rest, report the first error
     }
   }
-  return CL_SUCCESS;
+  return status;
 }
 
 int clGetEventInfo(cl_event ev, cl_event_info info, size_t size, void* value, size_t* sizeRet) {
@@ -851,8 +871,9 @@ int clGetEventInfo(cl_event ev, cl_event_info info, size_t size, void* value, si
   if (info == CL_EVENT_COMMAND_EXECUTION_STATUS) {
     int status = CL_COMPLETE;
     if (ev->end) {
-      CUresult r = cuEventQuery(ev->end);
-      if (r == CUDA_ERROR_NOT_READY) status = CL_RUNNING;
+      // NOT_READY is running; any other failure is the sticky error of a faulted context and is reported as the
+      // (negative) status of the command, not as complete.
+      status = cuda_error_map::eventStatusFromCu((int) cuEventQuery(ev->end));
     }
     if (sizeRet) *sizeRet = sizeof(int);
     if (value && size >= sizeof(int)) memcpy(value, &status, sizeof(int));
