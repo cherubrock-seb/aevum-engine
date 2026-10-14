@@ -805,6 +805,15 @@ void OVERLOAD write(u32 WG, u32 N, GF61 *u, global GF61 *out, u32 base) {
 #define FAST_BARRIER 0
 #endif
 
+// Force divergent threads in a warp to converge.  AMD GCN does not require this, all threads in a WAVEFRONT operate in lockstep.  Early CUDA versions did also.
+// The sync is needed in cases where one thread is setting a flag or state on behalf of all the threads in a WAVEFRONT.  For example, carryFused has thread 0 set
+// the carries-are-ready flag on behalf of all 32 threads in a warp.  A no-op everywhere but nVidia sm_60 and later.
+void sync(void) {
+#if HAS_PTX >= 600         // bar.warp.sync requires sm_60 support or higher
+  __asm("bar.warp.sync 0xffffffff;" : : );
+#endif
+}
+
 // Create a barrier across all threads.  Primarily used to coordinate access to local memory.
 // A local memory fence is optional.  This is a DANGEROUS practice!!
 // On Radeon VII and Radeon PRO VII barrier with no local memory fence works (in most cases -- see barFence routine) and is much faster.
