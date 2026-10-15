@@ -14,7 +14,12 @@ for token in (
     'exponent_ <= 158000003u',
     'fft.spec() == "1:512:8:512:202"',
     'pfa_use.emplace_back("REGCF3161", "2")',
+    'pfa_use.emplace_back("REGMO61", "-1")',
     'args_.uses("REGCF3161") || args_.uses("NOREG")',
+    'args_.uses("REGMO61") || args_.uses("NOREG")',
+    'explicit_cuda_midout61_registers',
+    'rtx3080_type1_regmo61_default',
+    'profile=REGMO61=-1 range=135000013..158000003',
     'AEVUM_CUDA_REG_PROFILE source=rtx3080-type1-auto',
 ):
     assert token in engine, token
@@ -26,4 +31,4 @@ assert 'AEVUM_REGISTER_PROFILES must be 0 or 1' in gpu
 assert 'std::getenv("AEVUM_REGISTER_PROFILES") : "1"' in use
 assert 'if (!enabled || std::strcmp(enabled, "1") != 0) return {};' not in gpu
 
-print("CUDA REGCF3161 automatic policy source test PASS")
+print("CUDA REGCF3161/REGMO61 automatic policy source test PASS")
