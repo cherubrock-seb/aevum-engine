@@ -680,6 +680,8 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
         use.emplace_back("AEVUM_GF61_CMUL_ALT", "0");
       if (!shared.args->uses("LOADS"))
         use.emplace_back("LOADS", "1");
+      if (!shared.args->uses("FAST_BARRIER"))
+        use.emplace_back("FAST_BARRIER", "1");
     }
 
     report("type2-prp-auto", normalize(use));
