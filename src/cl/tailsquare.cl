@@ -1808,6 +1808,10 @@ KERNEL(G_H * 2) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
 
   dependentLaunchWait();   // Previous kernel was fftMiddleInGF61 that launched dependents before writing GF61 data
 
+#if TAIL_TRIGS61 == 0
+  GF61 trig_prefetch = TOLOAD(&smallTrig61[SMALL_HEIGHT + line_u*G_H*2 + me]);
+#endif
+
   // Read lines u and v
   readTailFusedLine(in61, u, line, lowMe);
 
@@ -1830,7 +1834,7 @@ KERNEL(G_H * 2) tailSquareGF61(P(T2) out, CP(T2) in, Trig smallTrig AEVUM_PRP_TR
   // The trig values used here are pre-computed and stored after the fft_HEIGHT trig values.
   u32 height_trigs = SMALL_HEIGHT*1;
   // Read pre-computed trig values
-  GF61 trig = TOLOAD(&smallTrig61[height_trigs + line_u*G_H*2 + me]);
+  GF61 trig = trig_prefetch;
 #endif
 
 #if SINGLE_KERNEL
