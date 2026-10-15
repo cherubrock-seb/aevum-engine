@@ -1592,6 +1592,46 @@ if (!supported_aevum_type && !apple_diagnostic_plane)
 #endif
 
 #if defined(CUDA_BACKEND)
+// Validated RTX 3080 native-CUDA Type1 carryFused occupancy policy.
+// Register profiles are default-on in this layer; AEVUM_REGISTER_PROFILES=0
+// is the explicit kill switch. Explicit command-line/per-FFT REGCF3161 or
+// NOREG remain higher precedence. A register-only AEVUM_PRP_USE overlay is
+// merged later and can also replace this automatic value.
+const char* register_profiles_env = std::getenv("AEVUM_REGISTER_PROFILES");
+const bool register_profiles_enabled =
+    !register_profiles_env || std::strcmp(register_profiles_env, "0") != 0;
+bool explicit_cuda_carry_registers =
+    args_.uses("REGCF3161") || args_.uses("NOREG");
+if (const auto it = args_.perFftConfig.find(fft.shape.spec());
+    it != args_.perFftConfig.end()) {
+  for (const auto& [key, value] : it->second) {
+    (void)value;
+    if (key == "REGCF3161" || key == "NOREG") {
+      explicit_cuda_carry_registers = true;
+      break;
+    }
+  }
+}
+const bool rtx3080_type1_regcf3161_2 =
+    register_profiles_enabled &&
+    !explicit_cuda_carry_registers &&
+    workload_ == aevum_autotune::Workload::Prp &&
+    !fft.isPfa() &&
+    device_name == "NVIDIA GeForce RTX 3080" &&
+    getNvidiaComputeCapability(selected_device) == 806u &&
+    exponent_ >= 135000013u &&
+    exponent_ <= 158000003u &&
+    fft.spec() == "1:512:8:512:202";
+
+if (rtx3080_type1_regcf3161_2) {
+  pfa_use.emplace_back("REGCF3161", "2");
+  if (verbose) {
+    log("AEVUM_CUDA_REG_PROFILE source=rtx3080-type1-auto shape=%s "
+        "profile=REGCF3161=2 range=135000013..158000003\n",
+        fft.spec().c_str());
+  }
+}
+
 // Production integration of the measured RTX3080 high-range PRP policy.
 // MULTI_Q=0 remains scoped to the exact measured device/plan/range.
 // ZEROHACK_W is selected independently below by a cached exact mini-benchmark.
