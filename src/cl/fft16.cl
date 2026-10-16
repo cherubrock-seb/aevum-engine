@@ -247,6 +247,15 @@ void OVERLOAD fft16(GF31 *u) {
 #include "fft8.cl"
 
 void OVERLOAD fft16(GF61 *u) {
+#if AEVUM_GF61_RADIX16_ACTIVE && !defined(AEVUM_APPLE_OPENCL12)
+  for (u32 i = 0; i < 8; ++i) X2q(&u[i], &u[i + 8]);     // u[0..7] = 0..2+, u[8..15] = -1-..1+
+  fft8_16a(u);
+  fft8_16b(u + 8);
+  // Interleave: output 2k is fft8_16a's k, output 2k+1 is fft8_16b's k
+  GF61 t[16];
+  for (u32 k = 0; k < 8; ++k) { t[2 * k] = u[k]; t[2 * k + 1] = u[k + 8]; }
+  for (u32 k = 0; k < 16; ++k) { u[k] = t[k]; }
+#else
   const Z61 C1 = 22027337052962166ULL;
   const Z61 S1 = 1693317751237720973ULL;
 
@@ -275,6 +284,8 @@ void OVERLOAD fft16(GF61 *u) {
   SWAP(u[5], u[10]);
   SWAP(u[7], u[14]);
   SWAP(u[11], u[13]);
+
+#endif
 }
 
 #endif
