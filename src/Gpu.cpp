@@ -379,6 +379,7 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, const vector<
       log("AEVUM_CUDA_PFA7_GRAPHS=1: canonical PFA7 squares, fresh arguments for every graph node.\n");
   }
   config.erase("AEVUM_CUDA_PFA7_GRAPHS"); // Host-only: same kernels, cache identity and arithmetic.
+
   // PRPLL c233c11 supports odd-middle in-place transposes. Native PFA
   // retains canonical carry words: only the transform interior is in place;
   // fftW must still scatter into the distinct canonical buf3 allocation.
