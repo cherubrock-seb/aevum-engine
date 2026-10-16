@@ -123,6 +123,7 @@ private:
   u32 out_wg{128}, out_sizex{16};        // OUT_WG, OUT_SIZEX: the same for fftMiddleOut.
 
   bool cuda_graph_squares_{false};       // Resolved before compiler creation
+  bool cuda_pfa7_graphs_{false};          // Canonical PFA7 squares, independent opt-in
 
   Queue queue;
   vector<Queue> auxQueues;
