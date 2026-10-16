@@ -3,6 +3,18 @@
 #include "math.cl"
 #include "trig.cl"
 
+#ifndef AEVUM_GF61_MIDDLE_BATCH
+#define AEVUM_GF61_MIDDLE_BATCH 0
+#endif
+#if AEVUM_GF61_MIDDLE_BATCH != 0 && AEVUM_GF61_MIDDLE_BATCH != 1
+#error AEVUM_GF61_MIDDLE_BATCH must be 0 or 1
+#endif
+#if AEVUM_GF61_MIDDLE_BATCH && MIDDLE == 8 && INPLACE && !PFA_RADIX && !defined(AEVUM_APPLE_OPENCL12)
+#define AEVUM_GF61_MIDDLE_LDS_VALUES 1024
+#else
+#define AEVUM_GF61_MIDDLE_LDS_VALUES 256
+#endif
+
 #ifndef AEVUM_PFA_GF31_COSBASE
 #define AEVUM_PFA_GF31_COSBASE 0
 #endif
@@ -1535,6 +1547,24 @@ void OVERLOAD middleShuffle(local GF61 *lds, GF61 *u) {
   u32 me = get_local_id(0);
   u32 y = me / 16;
   u32 x = me % 16;
+#if AEVUM_GF61_MIDDLE_LDS_VALUES == 1024
+  // Four coefficient planes share one barrier. Alternate the two bijective
+  // address maps per batch: the next writes reuse this thread's previous
+  // read addresses, so no extra read-to-write workgroup barrier is required.
+  // 16 KiB LDS instead of 4 KiB; MIDDLE=8 needs two barriers instead of eight.
+  const u32 transposed = (x * 16 + y) ^ x;
+  const u32 linear = (y * 16 + x) ^ y;
+#pragma unroll
+  for (u32 batch = 0; batch < 2; ++batch) {
+    const u32 dst = batch == 0 ? transposed : linear;
+    const u32 src = batch == 0 ? linear : transposed;
+#pragma unroll
+    for (u32 k = 0; k < 4; ++k) lds[k * 256 + dst] = u[batch * 4 + k];
+    bar();
+#pragma unroll
+    for (u32 k = 0; k < 4; ++k) u[batch * 4 + k] = lds[k * 256 + src];
+  }
+#else
   for (int i = 0; i < MIDDLE; ++i) {
     lds[x * 16 + y ^ x] = u[i];         // Swizzling with XOR should reduce LDS bank conflicts, formerly "lds[x * 16 + y] = u[i];"
     bar();
@@ -1544,6 +1574,7 @@ void OVERLOAD middleShuffle(local GF61 *lds, GF61 *u) {
     bar();
     u[i] = lds[x * 16 + y ^ x];
   }
+#endif
 }
 
 #endif
