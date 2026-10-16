@@ -18,6 +18,7 @@ inline bool aevumUseKey(const std::string& key) {
   if (key == "AEVUM_GF61_BETTER_ONEPAIRSQ") return true;
   if (key == "AEVUM_ROE_SUBGROUP_REDUCE") return true;
   if (key == "AEVUM_CUDA_GRAPH_SQUARES") return true;
+  if (key == "AEVUM_GF61_PAIRED_LDS_W" || key == "AEVUM_GF61_PAIRED_LDS_H") return true;
   if (key == "AEVUM_EXPERIMENT_LEAN_CARRY128") return true;
   if (key == "AEVUM_PFA_FUSED_INVERSE") return true;
   if (key == "AEVUM_RADIX8_H256") return true;
