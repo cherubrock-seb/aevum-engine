@@ -14,6 +14,7 @@ inline bool aevumUseKey(const std::string& key) {
   if (key == "AEVUM_PFA7_INPLACE") return true;
   if (key == "AEVUM_PFA_GF31_COSBASE") return true;
   if (key == "AEVUM_PFA7_NUSS8") return true;
+  if (key == "AEVUM_FP32_PFA_COSBASE") return true;
   if (key == "AEVUM_GF61_MIDDLE_BASE_TABLE") return true;
   if (key == "AEVUM_GF61_BETTER_ONEPAIRSQ") return true;
   if (key == "AEVUM_ROE_SUBGROUP_REDUCE") return true;
