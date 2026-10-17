@@ -124,6 +124,7 @@ private:
 
   bool cuda_graph_squares_{false};       // Resolved before compiler creation
   bool cuda_reg_ptx_cache_{false};       // Apply register limits after neutral PTX caching
+  bool amd_middleout61_waves_{false};      // Per-kernel gfx906 middle-out occupancy request
 
   Queue queue;
   vector<Queue> auxQueues;
