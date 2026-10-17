@@ -321,6 +321,24 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
   if (doLog && config.count("AEVUM_RADIX8_H256") && config.at("AEVUM_RADIX8_H256") == "1")
     log("AEVUM_RADIX8_H256=1: plan=%s; NH=%u; height decomposition 4*8*8.\n", fft.spec().c_str(), heightRadix);
 
+  // Validate the current environment even when fft.shape was copied from an
+  // earlier selection. The shape itself retains the captured width radix.
+  (void)aevumExperimentalRadix8Width256();
+  if (fft.shape.experimentalRadix8Width256()) {
+#if defined(__APPLE__)
+    throw std::runtime_error("AEVUM_RADIX8_WIDTH256 is not enabled for Apple");
+#endif
+    if (!isNvidiaGpu(id) || fft.shape.width != 256 ||
+        fft.shape.fft_type != FFT3161 || fft.isPfa() ||
+        variant_W(fft.variant) == 0)
+      throw std::runtime_error(
+          "AEVUM_RADIX8_WIDTH256 requires NVIDIA non-PFA Type1 WIDTH256 with nonzero width variant");
+    if (doLog)
+      log("AEVUM_RADIX8_WIDTH256=1: plan=%s; NW=%u G_W=%u; NH=%u unchanged.\n",
+          fft.spec().c_str(), fft.shape.nW(),
+          fft.shape.width / fft.shape.nW(), heightRadix);
+  }
+
   // Isolate the PRPLL Type4 CRT/carry scheduling candidate from production AUTO.
   if (const char* value = std::getenv("AEVUM_EXPERIMENT_LEAN_CARRY128")) {
     const auto it = config.find("AEVUM_EXPERIMENT_LEAN_CARRY128");
