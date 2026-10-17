@@ -1201,7 +1201,7 @@ string Gpu::numCudaRegisters(enum WHICH_KERNEL which_kernel) {
   int override_regs = registerValue(use_override, 0);
   // If a specified override is small, use the count as a CUDA launch_bounds rather than a maximum register count
   const string hostMarkers =
-      (cuda_reg_ptx_cache_ ? "--aevum-reg-ptx=1 " : "") +
+      string(cuda_reg_ptx_cache_ ? "--aevum-reg-ptx=1 " : "") +
       (cuda_smem_spill_ ? "--aevum-smemspill=1 " : "");
   if (override_regs && (override_regs > 0 && override_regs <= 16))
     return hostMarkers + "-DCUDA_MIN_BLOCKS=" + to_string(override_regs) + " ";
