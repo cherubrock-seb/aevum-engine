@@ -192,6 +192,8 @@ cl_context getQueueContext(cl_command_queue q);
 // Before creating any kernel, JIT a private PTX copy with the named entry's
 // register limit. The program's cache PTX stays neutral.
 bool cudaLoadRegLimitedKernel(cl_program program, const char* kernelName, int maxRegs, int minBlocks);
+bool cudaLoadPtxKernelOptions(cl_program program, const char* kernelName,
+                              int maxRegs, int minBlocks, bool smemSpill);
 
 // Native one-stream square batching. No CUDA stream capture or frozen slots.
 void cudaGraphBatchBegin(cl_command_queue q);
