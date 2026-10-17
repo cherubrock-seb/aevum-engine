@@ -90,7 +90,7 @@ inline std::string aevumPtxWithSmemSpill(const std::string& ptx,
   }
   if (depth) throw std::runtime_error("unterminated PTX entry body");
 
-  const std::string bodyText = code.substr(body + 1, bodyEnd - body - 2);
+  const std::string bodyText = ptx.substr(body + 1, bodyEnd - body - 2);
   if (bodyText.find("enable_smem_spilling") != std::string::npos)
     return ptx;
 
