@@ -62,8 +62,6 @@ void fft9(T2 *u) {
   X2(u[3], u[6]);
   X2(u[2], u[7]);
   X2(u[1], u[8]);
-
-#endif
 }
 
 #endif
@@ -179,6 +177,8 @@ const float
   X2(u[3], u[6]);
   X2(u[2], u[7]);
   X2(u[1], u[8]);
+
+#endif
 }
 
 #endif
