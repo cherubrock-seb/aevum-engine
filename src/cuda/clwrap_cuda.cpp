@@ -5,6 +5,7 @@
 #include "tinycuda.h"
 #include "GraphBatch.h"
 #include "PtxRegisterCache.h"
+#include "SmemSpillPtx.h"
 #include "cudawrap.h"  // For NvrtcProgram::preprocessOpenCL and compile
 #include "CudaFill.h"
 #include "CudaErrorMap.h"
@@ -1179,27 +1180,45 @@ int clSetKernelArgSVMPointer(cl_kernel k, unsigned pos, const void* ptr) {
 
 // C++ linkage — must be outside the extern "C" block above.
 
-bool cudaLoadRegLimitedKernel(cl_program prog, const char* kernelName, int maxRegs, int minBlocks) {
+bool cudaLoadPtxKernelOptions(cl_program prog, const char* kernelName,
+                              int maxRegs, int minBlocks, bool smemSpill) {
   if (!prog || !prog->moduleLoaded || prog->kernelExported)
-    throw std::runtime_error("PTX register limit must precede kernel creation");
+    throw std::runtime_error("PTX kernel options must precede kernel creation");
+  if (!kernelName || (!maxRegs && !minBlocks && !smemSpill))
+    throw std::runtime_error("empty PTX kernel option request");
+
   ensureContextCurrent();
-  const string limited = aevumPtxWithRegisterLimit(prog->ptx, kernelName, maxRegs, minBlocks);
+  string candidate = prog->ptx;
+  if (maxRegs || minBlocks)
+    candidate = aevumPtxWithRegisterLimit(candidate, kernelName, maxRegs, minBlocks);
+  if (smemSpill)
+    candidate = aevumPtxWithSmemSpill(candidate, kernelName);
+
   CUmodule replacement{};
   char errors[8192] = {};
   CUjit_option options[] = {CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES, CU_JIT_ERROR_LOG_BUFFER};
   void* values[] = {(void*)(size_t)sizeof(errors), errors};
-  const CUresult result = cuModuleLoadDataEx(&replacement, limited.c_str(), 2, options, values);
+  const CUresult result = cuModuleLoadDataEx(&replacement, candidate.c_str(), 2, options, values);
   if (result != CUDA_SUCCESS) {
-    fprintf(stderr, "%s: PTX register-limit JIT failed (%d): %s\n", kernelName, int(result), errors);
-    return false; // Keep the original program intact; caller fails instead of running it.
+    fprintf(stderr, "%s: PTX kernel-option JIT failed (%d): %s\n",
+            kernelName, int(result), errors);
+    return false; // Explicit experiments never silently execute the OFF kernel.
   }
-  // No kernel has escaped from this freshly loaded program. Release the
-  // neutral module only after the replacement loaded successfully.
+
+  // One replacement composes register limits and shared-spill placement. A
+  // second module load from neutral PTX would otherwise discard the first
+  // transformation. Keep prog->ptx unchanged so saveBinary persists the
+  // frontend image shared by OFF and ON.
   cuModuleUnload(prog->module);
   prog->module = replacement;
-  // Do not replace prog->ptx: saveBinary must only persist the neutral image.
-  fprintf(stderr, "%s: PTX register limit active (maxnreg=%d, minnctapersm=%d)\n", kernelName, maxRegs, minBlocks);
+  fprintf(stderr,
+          "%s: PTX kernel options active (maxnreg=%d, minnctapersm=%d, smem_spill=%d)\n",
+          kernelName, maxRegs, minBlocks, smemSpill ? 1 : 0);
   return true;
+}
+
+bool cudaLoadRegLimitedKernel(cl_program prog, const char* kernelName, int maxRegs, int minBlocks) {
+  return cudaLoadPtxKernelOptions(prog, kernelName, maxRegs, minBlocks, false);
 }
 
 void cudaGraphBatchBegin(cl_command_queue q) {
