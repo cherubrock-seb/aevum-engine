@@ -8,6 +8,7 @@
 #include "OpenCLSourceBuilder.h"
 #ifdef CUDA_BACKEND
 #include "cuda/PtxRegisterCache.h"
+#include "cuda/SmemSpillPtx.h"
 #endif
 
 #include <cassert>
@@ -166,7 +167,8 @@ KernelHolder KernelCompiler::loadAux(const string& fileName, const string& kerne
   string compileArgs = args;
 #ifdef CUDA_BACKEND
   const auto regPtx = aevumTakePtxRegisterLimit(args);
-  compileArgs = regPtx.compileArgs;
+  const auto smemPtx = aevumTakeSmemSpillMarker(regPtx.compileArgs);
+  compileArgs = smemPtx.compileArgs;
 #endif
 
   Program program;
@@ -189,8 +191,10 @@ KernelHolder KernelCompiler::loadAux(const string& fileName, const string& kerne
   }
 
 #ifdef CUDA_BACKEND
-  if (regPtx.enabled && !cudaLoadRegLimitedKernel(program.get(), kernelName.c_str(), regPtx.maxRegs, regPtx.minBlocks))
-    throw std::runtime_error("Cannot apply PTX register limit to " + kernelName);
+  if ((regPtx.enabled || smemPtx.enabled) &&
+      !cudaLoadPtxKernelOptions(program.get(), kernelName.c_str(),
+                                regPtx.maxRegs, regPtx.minBlocks, smemPtx.enabled))
+    throw std::runtime_error("Cannot apply CUDA PTX kernel options to " + kernelName);
 #endif
 
   KernelHolder ret;
