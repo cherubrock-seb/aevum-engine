@@ -204,6 +204,26 @@ void OVERLOAD fft16(F2 *u) {
 
 #include "fft8.cl"
 
+#if AEVUM_GF31_MIDDLE16
+// Complete radix-16 transform: initial radix-2, specialized even/odd
+// radix-8 halves, then natural-order interleave.
+void OVERLOAD fft16(GF31 *u) {
+#pragma unroll
+  for (u32 i = 0; i < 8; ++i) X2(u[i], u[i + 8]);
+
+  fft8_16a(u);
+  fft8_16b(u + 8);
+
+  GF31 t[16];
+#pragma unroll
+  for (u32 k = 0; k < 8; ++k) {
+    t[2 * k] = u[k];
+    t[2 * k + 1] = u[k + 8];
+  }
+#pragma unroll
+  for (u32 k = 0; k < 16; ++k) u[k] = t[k];
+}
+#else
 void OVERLOAD fft16(GF31 *u) {
   const Z31 C1 = 1556715293;
   const Z31 S1 = 978592373;
@@ -234,6 +254,7 @@ void OVERLOAD fft16(GF31 *u) {
   SWAP(u[7], u[14]);
   SWAP(u[11], u[13]);
 }
+#endif
 
 #endif
 
