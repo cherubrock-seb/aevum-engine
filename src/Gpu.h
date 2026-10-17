@@ -124,6 +124,7 @@ private:
 
   bool cuda_graph_squares_{false};       // Resolved before compiler creation
   bool cuda_reg_ptx_cache_{false};       // Apply register limits after neutral PTX caching
+  bool cuda_smem_spill_{false};          // JIT shared spill only on resolved register-limited kernels
 
   Queue queue;
   vector<Queue> auxQueues;
