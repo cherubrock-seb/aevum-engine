@@ -275,6 +275,24 @@ typedef ulong2 GF61;        // A complex value using two Z61s.  For a GF(M61^2) 
 #error - unsupported FFT/NTT
 #endif
 
+#ifndef AEVUM_EXPERIMENT_WIDTH2K
+#define AEVUM_EXPERIMENT_WIDTH2K 0
+#endif
+#if AEVUM_EXPERIMENT_WIDTH2K != 0 && AEVUM_EXPERIMENT_WIDTH2K != 1
+#error AEVUM_EXPERIMENT_WIDTH2K must be 0 or 1
+#endif
+#if WIDTH == 2048
+#if !AEVUM_EXPERIMENT_WIDTH2K || (FFT_TYPE != FFT3161 && FFT_TYPE != FFT3261) || NW != 8
+#error width 2K requires its Type1/2 radix-8 experiment
+#endif
+#if FFT_VARIANT != 202 || WMUL != 1 || INPLACE != 0 || PAD != 0
+#error unsupported width 2K specialization
+#endif
+#if SHUFL_BYTES_W != 8 || LDSPAD_W != 1 || LDSSWIZ_W != 0
+#error width 2K requires the padded 8-byte LDS layout
+#endif
+#endif
+
 // Experimental PRPLL full-hybrid CRT/carry chain. Unset/0 preserves the stock path.
 #ifndef AEVUM_EXPERIMENT_LEAN_CARRY128
 #define AEVUM_EXPERIMENT_LEAN_CARRY128 0
