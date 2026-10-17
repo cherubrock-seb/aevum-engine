@@ -1454,6 +1454,8 @@ void OVERLOAD fft_MIDDLE(GF61 *u) {
   fft8(u);
 #elif MIDDLE == 16
   fft16(u);
+#elif (PFA_RADIX == 5 || PFA_RADIX == 15) && MIDDLE == PFA_RADIX
+  pfaForwardMiddle(u);
 #elif PFA_RADIX == 3 && MIDDLE == 3
   pfaForwardMiddle(u);
 #elif PFA_RADIX == 7 && MIDDLE == 7
