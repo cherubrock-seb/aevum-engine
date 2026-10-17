@@ -303,7 +303,8 @@ static u32 aevumHeightRadix(const Args& args, cl_device_id id, const FFTConfig& 
 
 string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRadix, const vector<KeyVal>& extraConf, u64 E, bool doLog,
                  bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul,
-                 bool &cuda_graph_squares, bool &cuda_reg_ptx_cache, u32 &in_wg, u32 &in_sizex, u32 &out_wg, u32 &out_sizex) {
+                 bool &cuda_graph_squares, bool &cuda_reg_ptx_cache, bool &cuda_smem_spill,
+                 u32 &in_wg, u32 &in_sizex, u32 &out_wg, u32 &out_sizex) {
   map<string, string> config;
 
   // Highest priority is the requested "extra" conf
@@ -398,6 +399,33 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
     if (doLog) log("AEVUM_CUDA_REG_PTX_CACHE=1: cache neutral PTX, apply each resolved register limit at load.\n");
   }
   config.erase("AEVUM_CUDA_REG_PTX_CACHE"); // The affected kernels carry a host-only marker below.
+
+  cuda_smem_spill = false;
+  if (const char* value = std::getenv("AEVUM_CUDA_SMEM_SPILL")) {
+    const auto it = config.find("AEVUM_CUDA_SMEM_SPILL");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_CUDA_SMEM_SPILL selections");
+    config["AEVUM_CUDA_SMEM_SPILL"] = value;
+  }
+  if (const auto it = config.find("AEVUM_CUDA_SMEM_SPILL"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_CUDA_SMEM_SPILL must be 0 or 1");
+    cuda_smem_spill = it->second == "1";
+  }
+  if (cuda_smem_spill) {
+#if defined(CUDA_BACKEND)
+    if (!isNvidiaGpu(id) || getNvidiaComputeCapability(id) < 705)
+      throw std::runtime_error("AEVUM_CUDA_SMEM_SPILL requires CUDA sm_75+");
+#else
+    throw std::runtime_error("AEVUM_CUDA_SMEM_SPILL requires the CUDA backend");
+#endif
+    if (args.value("NOREG", 0) || (config.count("NOREG") && config.at("NOREG") != "0"))
+      throw std::runtime_error("AEVUM_CUDA_SMEM_SPILL conflicts with NOREG");
+    if (doLog)
+      log("AEVUM_CUDA_SMEM_SPILL=1: JIT shared-memory spill placement on register-limited kernels.\n");
+  }
+  // Host/JIT-only. OFF and ON share the exact same frontend PTX cache entry.
+  config.erase("AEVUM_CUDA_SMEM_SPILL");
 
   // PRPLL c233c11 supports odd-middle in-place transposes. Native PFA
   // retains canonical carry words: only the transform interior is in place;
@@ -1172,14 +1200,17 @@ string Gpu::numCudaRegisters(enum WHICH_KERNEL which_kernel) {
   // Get the optional override register count
   int override_regs = registerValue(use_override, 0);
   // If a specified override is small, use the count as a CUDA launch_bounds rather than a maximum register count
-  const string ptxMarker = cuda_reg_ptx_cache_ ? "--aevum-reg-ptx=1 " : "";
-  if (override_regs && (override_regs > 0 && override_regs <= 16)) return ptxMarker + "-DCUDA_MIN_BLOCKS=" + to_string(override_regs) + " ";
+  const string hostMarkers =
+      (cuda_reg_ptx_cache_ ? "--aevum-reg-ptx=1 " : "") +
+      (cuda_smem_spill_ ? "--aevum-smemspill=1 " : "");
+  if (override_regs && (override_regs > 0 && override_regs <= 16))
+    return hostMarkers + "-DCUDA_MIN_BLOCKS=" + to_string(override_regs) + " ";
   // If specified, override the default maximum register count
   if (override_regs) regs = override_regs;
   // Sometimes the results using CUDA compiler's default launch_bounds without setting an explicit launch bounds or maxrrregcount can't be beat
   if (regs == -1) return string("");
   // Format an explicit register count setting
-  return ptxMarker + "--maxrregcount=" + to_string(regs) + " ";
+  return hostMarkers + "--maxrregcount=" + to_string(regs) + " ";
 #else
   return string("");
 #endif
@@ -1275,7 +1306,8 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   queue{*shared.context, args.profile},
   auxQueues{},    
   compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, nH, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul,
-                                          cuda_graph_squares_, cuda_reg_ptx_cache_, in_wg, in_sizex, out_wg, out_sizex)},
+                                          cuda_graph_squares_, cuda_reg_ptx_cache_, cuda_smem_spill_,
+                                          in_wg, in_sizex, out_wg, out_sizex)},
 
 #define K(name, ...) name(#name, &compiler, profile.make(#name), &queue, __VA_ARGS__)
 
