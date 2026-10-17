@@ -20,6 +20,7 @@ inline bool aevumUseKey(const std::string& key) {
   if (key == "AEVUM_CUDA_GRAPH_SQUARES") return true;
   if (key == "AEVUM_CUDA_REG_PTX_CACHE") return true;
   if (key == "AEVUM_EXPERIMENT_LEAN_CARRY128") return true;
+  if (key == "AEVUM_FP32_MIDDLE_STATIC_CHAIN") return true;
   if (key == "AEVUM_PFA_FUSED_INVERSE") return true;
   if (key == "AEVUM_RADIX8_H256") return true;
   if (key == "AEVUM_PFA7_SEPARATE_CARRYB") return true;
