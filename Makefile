@@ -572,3 +572,14 @@ test-strict-int: $(STRICT_INT_TEST)
 $(STRICT_INT_TEST): tests/strict_int_test.cpp src/StrictInt.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/strict_int_test.cpp -o $@
+
+# CUDA PTX shared-memory spill rewrite/composition (host-only; no CUDA SDK/GPU required).
+CUDA_SMEM_SPILL_PTX_TEST := build-tests/aevum-cuda-smem-spill-ptx-test
+.PHONY: test-cuda-smem-spill-ptx
+test-host: test-cuda-smem-spill-ptx
+test-cuda-smem-spill-ptx: $(CUDA_SMEM_SPILL_PTX_TEST)
+	$(CUDA_SMEM_SPILL_PTX_TEST)
+
+$(CUDA_SMEM_SPILL_PTX_TEST): tests/cuda_smem_spill_ptx_test.cpp src/cuda/SmemSpillPtx.h src/cuda/PtxRegisterCache.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_smem_spill_ptx_test.cpp -o $@
