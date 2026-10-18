@@ -343,6 +343,31 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
     }
   }
 
+  if (const char* value = std::getenv("AEVUM_EXPERIMENT_CARRY_SUB_X")) {
+    const auto it = config.find("AEVUM_EXPERIMENT_CARRY_SUB_X");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_EXPERIMENT_CARRY_SUB_X selections");
+    config["AEVUM_EXPERIMENT_CARRY_SUB_X"] = value;
+  }
+  if (const auto it = config.find("AEVUM_EXPERIMENT_CARRY_SUB_X"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_EXPERIMENT_CARRY_SUB_X must be 0 or 1");
+    if (it->second == "1") {
+      if (fft.shape.fft_type != FFT323161)
+        throw std::runtime_error("CARRY_SUB_X experiment requires full FP32+GF31+GF61 Type4");
+      const auto lean = config.find("AEVUM_EXPERIMENT_LEAN_CARRY128");
+      if (lean == config.end() || lean->second != "1")
+        throw std::runtime_error("CARRY_SUB_X experiment requires AEVUM_EXPERIMENT_LEAN_CARRY128=1");
+      const double carry64BPW = 50.2 - 0.5 * (log2(double(fft.shape.size())) - 23.0);
+      const double bpw = E / double(fft.shape.size());
+      if (bpw > carry64BPW - 0.42)
+        throw std::runtime_error("CARRY_SUB_X experiment exceeds validated carry bound");
+      if (doLog)
+        log("Experimental Type4 CARRY_SUB_X and exact second carry: bpw=%.4f limit=%.4f.\n",
+            bpw, carry64BPW - 0.42);
+    }
+  }
+
   cuda_graph_squares = false;
   if (const char* value = std::getenv("AEVUM_CUDA_GRAPH_SQUARES")) {
     const auto it = config.find("AEVUM_CUDA_GRAPH_SQUARES");
