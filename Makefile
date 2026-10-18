@@ -246,6 +246,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	python3 tests/cuda_engine_lib_makefile_source_test.py
 	python3 tests/cuda_context_lifecycle_source_test.py
 	python3 tests/middlein_gf61_cmul_source_test.py
+	python3 tests/subgroup_barrier_lockstep_test.py
 	python3 tests/asm_string_braces_test.py
 	python3 tests/pfa7_separate_carryb_source_test.py
 	python3 tests/pfa7_nuss8_model_test.py
