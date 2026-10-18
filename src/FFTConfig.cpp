@@ -149,10 +149,16 @@ FFTShape::FFTShape(enum FFT_TYPES t, const string& w, const string& m, const str
 
 FFTShape::FFTShape(enum FFT_TYPES t, u32 w, u32 m, u32 h) :
   fft_type{t}, width{w}, middle{m}, height{h} {
-  assert(w && m && h);
-
   // Un-initialized shape, don't set BPW
   if (w == 1 && m == 1 && h == 1) { return; }
+
+  // The limits FFTConfig applies to a full spec.  A shape can also come straight from -tune, -info or a size list
+  // (FFTShape::multiSpec), which skip those checks, and a too-small one (e.g. 128:2:128) drove middle to 0 in the
+  // fallback below, which then looped forever.  (This also covers a zero dimension, which was only asserted.)
+  if ((w != 256 && w != 512 && w != 1024 && w != 4096) || m < 1 || m > 16 || (h != 256 && h != 512 && h != 1024)) {
+    log("Invalid FFT shape %u:%u:%u (width 256/512/1K/4K, middle 1..16, height 256/512/1K)\n", w, m, h);
+    throw "Invalid FFT shape";
+  }
 
   // PFA replaces the power-of-two middle axis by a coprime odd
   // Good-Thomas axis.  Type 1 uses the paired GF31/GF61 arithmetic and
@@ -182,7 +188,7 @@ FFTShape::FFTShape(enum FFT_TYPES t, u32 w, u32 m, u32 h) :
       while (w >= 4*h) { w /= 2; h *= 2; }
       while (w < h || w < 256 || w == 2048) { w *= 2; h /= 2; }
       while (h < 256) { h *= 2; m /= 2; }
-      if (m == 1) m = 2;
+      if (m < 2) m = 2;
 
       // Make up some defaults (should only happen for experimental FFT types (t >= 52)
       if (w == orig_w && m == orig_m && h == orig_h) {
