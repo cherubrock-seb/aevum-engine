@@ -190,7 +190,7 @@ void OVERLOAD fft8(GF61 *u) {
 // Perform the last three levels of a radix-16 butterfly.  The initial radix-2 has already been performed and shufl'ed.
 // This is used by SIZE=1K, RADIX=8 fft.  There are two versions, one for the first eight radix-16 values and one for the second eight radix-16 values.
 // Two interleaved radix-4 transforms for the experimental 4*8*8 height.
-#if AEVUM_RADIX8_H256
+#if AEVUM_RADIX8_H256 || AEVUM_RADIX8_W256
 void OVERLOAD fft8_4(T2 *u) {
   fft4by(u, 0, 2, 8);
   fft4by(u, 1, 2, 8);
@@ -238,7 +238,7 @@ void OVERLOAD fft8_16b(T2 *u) {
 // Perform the last three levels of a radix-16 butterfly.  The initial radix-2 has already been performed and shufl'ed.
 // This is used by SIZE=1K, RADIX=8 fft.  There are two versions, one for the first eight radix-16 values and one for the second eight radix-16 values.
 // Two interleaved radix-4 transforms for the experimental 4*8*8 height.
-#if AEVUM_RADIX8_H256
+#if AEVUM_RADIX8_H256 || AEVUM_RADIX8_W256
 void OVERLOAD fft8_4(F2 *u) {
   fft4by(u, 0, 2, 8);
   fft4by(u, 1, 2, 8);
@@ -286,7 +286,7 @@ void OVERLOAD fft8_16b(F2 *u) {
 // Perform the last three levels of a radix-16 butterfly.  The initial radix-2 has already been performed and shufl'ed.
 // This is used by SIZE=1K, RADIX=8 fft.  There are two versions, one for the first eight radix-16 values and one for the second eight radix-16 values.
 // Two interleaved radix-4 transforms for the experimental 4*8*8 height.
-#if AEVUM_RADIX8_H256
+#if AEVUM_RADIX8_H256 || AEVUM_RADIX8_W256
 void OVERLOAD fft8_4(GF31 *u) {
   fft4by(u, 0, 2, 8);
   fft4by(u, 1, 2, 8);
@@ -348,7 +348,7 @@ void aevum_fft4Core16_GF61(GF61 *u) {
 }
 
 // Two interleaved radix-4 transforms for the experimental 4*8*8 height.
-#if AEVUM_RADIX8_H256
+#if AEVUM_RADIX8_H256 || AEVUM_RADIX8_W256
 void OVERLOAD fft8_4(GF61 *u) {
   fft4by(u, 0, 2, 8);
   fft4by(u, 1, 2, 8);
