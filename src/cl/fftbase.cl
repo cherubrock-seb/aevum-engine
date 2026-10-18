@@ -19,7 +19,7 @@
 // The first shuffle of 4*8*8 has radix 4 with eight values per lane.
 // Keep the existing LDS allocation and per-line offset. The mixed permutation
 // is dst = i/2 + (i%2)*128 + lane*4; reads use i*32 + lane.
-#if AEVUM_RADIX8_H256 && WG == 32 && RADIX == 8
+#if (AEVUM_RADIX8_H256 || AEVUM_RADIX8_W256) && WG == 32 && RADIX == 8
 #if FFT_FP64 || NTT_GF61
 void aevum_shuffle4_256_64(local T2 *lds2, T2 *u, u32 numWG, u32 me) {
   local char *group = (local char *)lds2;
