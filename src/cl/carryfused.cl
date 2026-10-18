@@ -46,13 +46,19 @@ void spin() {
 #define CarryShuttleAccess(me,i)        ((me) + (i) * G_W)                      // nVidia likes this unit stride better
 #endif
 
+// carryFused signals "carries ready" once per READY_LANES lanes of a G_W-wide line: once per wavefront, or once per line when a line
+// is narrower than a wavefront (G_W = 32 on a 64-lane AMD wavefront, e.g. a radix-8 width of 256).  With G_W < WAVEFRONT,
+// G_W / WAVEFRONT would be 0: every group would use flag 0 and carryFused would hang.  READY_PER_LINE flags per line.
+#define READY_LANES     (G_W < WAVEFRONT ? G_W : WAVEFRONT)
+#define READY_PER_LINE  (G_W / READY_LANES)
+
 // In place, the last workgroup (gr == H / WMUL) redoes group 0's lines and overwrites them.  Carries only pass from one group to the
 // next, so nothing orders that write after group 0's read of the same lines: the last group waits on group H / WMUL - 1 only, and every
 // group publishes its carries before waiting for its own.  If group 0 starts late it reads lines that are already overwritten and hands
 // bad carries to group 1.  So group 0 raises a flag once it has read its lines, and the last group waits for that flag (and clears it)
 // before writing.  The flag uses the first ready[] slot past those of the carry hand-off.  Both helpers are no-ops when INPLACE=0.
 #if INPLACE
-#define LINES_READ_FLAG (BIG_HEIGHT / WMUL * (G_W / WAVEFRONT))
+#define LINES_READ_FLAG (BIG_HEIGHT / WMUL * READY_PER_LINE)
 
 void signalLinesRead(P(u32) ready) {
   bar();     // every work-item of group 0 is done reading
@@ -264,8 +270,8 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     sync();   // all lanes finish CSSTORE before lane 0 publishes ready
-    if (lowMe % WAVEFRONT == 0) {
-      u32 pos = gr * (G_W / WAVEFRONT) + lowMe / WAVEFRONT;
+    if (lowMe % READY_LANES == 0) {
+      u32 pos = gr * READY_PER_LINE + lowMe / READY_LANES;
       AEVUM_READY_STORE(&ready[pos]);
     }
 #endif
@@ -323,14 +329,14 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
 #else
-    u32 pos = (gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT;
-    if (me % WAVEFRONT == 0) {
+    u32 pos = (gr - 1) * READY_PER_LINE + me / READY_LANES;
+    if (me % READY_LANES == 0) {
       do { spin(); } while(AEVUM_READY_LOAD(&ready[pos]) == 0);
     }
     sync();   // lane 0 observed ready; reconverge before any lane reads carries
     mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
-    if (me % WAVEFRONT == 0) ready[(gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT] = 0;
+    if (me % READY_LANES == 0) ready[(gr - 1) * READY_PER_LINE + me / READY_LANES] = 0;
 #endif
 #if HAS_ASM
     __asm("s_setprio 1");
@@ -517,8 +523,8 @@ KERNEL(G_W * WMUL) carryFused(P(F2) out, CP(F2) in, u32 posROE, P(i64) carryShut
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     sync();   // all lanes finish CSSTORE before lane 0 publishes ready
-    if (lowMe % WAVEFRONT == 0) { 
-      u32 pos = gr * (G_W / WAVEFRONT) + lowMe / WAVEFRONT;
+    if (lowMe % READY_LANES == 0) { 
+      u32 pos = gr * READY_PER_LINE + lowMe / READY_LANES;
       AEVUM_READY_STORE(&ready[pos]);
     }
 #endif
@@ -568,14 +574,14 @@ KERNEL(G_W * WMUL) carryFused(P(F2) out, CP(F2) in, u32 posROE, P(i64) carryShut
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
 #else
-    u32 pos = (gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT;
-    if (me % WAVEFRONT == 0) {
+    u32 pos = (gr - 1) * READY_PER_LINE + me / READY_LANES;
+    if (me % READY_LANES == 0) {
       do { spin(); } while(AEVUM_READY_LOAD(&ready[pos]) == 0);
     }
     sync();   // lane 0 observed ready; reconverge before any lane reads carries
     mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
-    if (me % WAVEFRONT == 0) ready[(gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT] = 0;
+    if (me % READY_LANES == 0) ready[(gr - 1) * READY_PER_LINE + me / READY_LANES] = 0;
 #endif
 #if HAS_ASM
     __asm("s_setprio 1");
@@ -764,8 +770,8 @@ KERNEL(G_W * WMUL) carryFused(P(GF31) out, CP(GF31) in, u32 posROE, P(i64) carry
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     sync();   // all lanes finish CSSTORE before lane 0 publishes ready
-    if (lowMe % WAVEFRONT == 0) { 
-      u32 pos = gr * (G_W / WAVEFRONT) + lowMe / WAVEFRONT;
+    if (lowMe % READY_LANES == 0) { 
+      u32 pos = gr * READY_PER_LINE + lowMe / READY_LANES;
       AEVUM_READY_STORE(&ready[pos]);
     }
 #endif
@@ -815,14 +821,14 @@ KERNEL(G_W * WMUL) carryFused(P(GF31) out, CP(GF31) in, u32 posROE, P(i64) carry
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
 #else
-    u32 pos = (gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT;
-    if (me % WAVEFRONT == 0) {
+    u32 pos = (gr - 1) * READY_PER_LINE + me / READY_LANES;
+    if (me % READY_LANES == 0) {
       do { spin(); } while(AEVUM_READY_LOAD(&ready[pos]) == 0);
     }
     sync();   // lane 0 observed ready; reconverge before any lane reads carries
     mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
-    if (me % WAVEFRONT == 0) ready[(gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT] = 0;
+    if (me % READY_LANES == 0) ready[(gr - 1) * READY_PER_LINE + me / READY_LANES] = 0;
 #endif
 #if HAS_ASM
     __asm("s_setprio 1");
@@ -1015,8 +1021,8 @@ KERNEL(G_W * WMUL) carryFused(P(GF61) out, CP(GF61) in, u32 posROE, P(i64) carry
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     sync();   // all lanes finish CSSTORE before lane 0 publishes ready
-    if (lowMe % WAVEFRONT == 0) { 
-      u32 pos = gr * (G_W / WAVEFRONT) + lowMe / WAVEFRONT;
+    if (lowMe % READY_LANES == 0) { 
+      u32 pos = gr * READY_PER_LINE + lowMe / READY_LANES;
       AEVUM_READY_STORE(&ready[pos]);
     }
 #endif
@@ -1066,14 +1072,14 @@ KERNEL(G_W * WMUL) carryFused(P(GF61) out, CP(GF61) in, u32 posROE, P(i64) carry
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
 #else
-    u32 pos = (gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT;
-    if (me % WAVEFRONT == 0) {
+    u32 pos = (gr - 1) * READY_PER_LINE + me / READY_LANES;
+    if (me % READY_LANES == 0) {
       do { spin(); } while(AEVUM_READY_LOAD(&ready[pos]) == 0);
     }
     sync();   // lane 0 observed ready; reconverge before any lane reads carries
     mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
-    if (me % WAVEFRONT == 0) ready[(gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT] = 0;
+    if (me % READY_LANES == 0) ready[(gr - 1) * READY_PER_LINE + me / READY_LANES] = 0;
 #endif
 #if HAS_ASM
     __asm("s_setprio 1");
@@ -1281,8 +1287,8 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     sync();   // all lanes finish CSSTORE before lane 0 publishes ready
-    if (lowMe % WAVEFRONT == 0) { 
-      u32 pos = gr * (G_W / WAVEFRONT) + lowMe / WAVEFRONT;
+    if (lowMe % READY_LANES == 0) { 
+      u32 pos = gr * READY_PER_LINE + lowMe / READY_LANES;
       AEVUM_READY_STORE(&ready[pos]);
     }
 #endif
@@ -1340,14 +1346,14 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
 #else
-    u32 pos = (gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT;
-    if (me % WAVEFRONT == 0) {
+    u32 pos = (gr - 1) * READY_PER_LINE + me / READY_LANES;
+    if (me % READY_LANES == 0) {
       do { spin(); } while(AEVUM_READY_LOAD(&ready[pos]) == 0);
     }
     sync();   // lane 0 observed ready; reconverge before any lane reads carries
     mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
-    if (me % WAVEFRONT == 0) ready[(gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT] = 0;
+    if (me % READY_LANES == 0) ready[(gr - 1) * READY_PER_LINE + me / READY_LANES] = 0;
 #endif
 #if HAS_ASM
     __asm("s_setprio 1");
@@ -1574,8 +1580,8 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     sync();   // all lanes finish CSSTORE before lane 0 publishes ready
-    if (lowMe % WAVEFRONT == 0) { 
-      u32 pos = gr * (G_W / WAVEFRONT) + lowMe / WAVEFRONT;
+    if (lowMe % READY_LANES == 0) { 
+      u32 pos = gr * READY_PER_LINE + lowMe / READY_LANES;
       AEVUM_READY_STORE(&ready[pos]);
     }
 #endif
@@ -1625,14 +1631,14 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
 #else
-    u32 pos = (gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT;
-    if (me % WAVEFRONT == 0) {
+    u32 pos = (gr - 1) * READY_PER_LINE + me / READY_LANES;
+    if (me % READY_LANES == 0) {
       do { spin(); } while(AEVUM_READY_LOAD(&ready[pos]) == 0);
     }
     sync();   // lane 0 observed ready; reconverge before any lane reads carries
     mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
-    if (me % WAVEFRONT == 0) ready[(gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT] = 0;
+    if (me % READY_LANES == 0) ready[(gr - 1) * READY_PER_LINE + me / READY_LANES] = 0;
 #endif
 #if HAS_ASM
     __asm("s_setprio 1");
@@ -1863,8 +1869,8 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     sync();   // all lanes finish CSSTORE before lane 0 publishes ready
-    if (lowMe % WAVEFRONT == 0) { 
-      u32 pos = gr * (G_W / WAVEFRONT) + lowMe / WAVEFRONT;
+    if (lowMe % READY_LANES == 0) { 
+      u32 pos = gr * READY_PER_LINE + lowMe / READY_LANES;
       AEVUM_READY_STORE(&ready[pos]);
     }
 #endif
@@ -1914,14 +1920,14 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
 #else
-    u32 pos = (gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT;
-    if (me % WAVEFRONT == 0) {
+    u32 pos = (gr - 1) * READY_PER_LINE + me / READY_LANES;
+    if (me % READY_LANES == 0) {
       do { spin(); } while(AEVUM_READY_LOAD(&ready[pos]) == 0);
     }
     sync();   // lane 0 observed ready; reconverge before any lane reads carries
     mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
-    if (me % WAVEFRONT == 0) ready[(gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT] = 0;
+    if (me % READY_LANES == 0) ready[(gr - 1) * READY_PER_LINE + me / READY_LANES] = 0;
 #endif
 #if HAS_ASM
     __asm("s_setprio 1");
@@ -2151,8 +2157,8 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     sync();   // all lanes finish CSSTORE before lane 0 publishes ready
-    if (lowMe % WAVEFRONT == 0) {
-      u32 pos = gr * (G_W / WAVEFRONT) + lowMe / WAVEFRONT;
+    if (lowMe % READY_LANES == 0) {
+      u32 pos = gr * READY_PER_LINE + lowMe / READY_LANES;
       AEVUM_READY_STORE(&ready[pos]);
     }
 #endif
@@ -2202,14 +2208,14 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
 #else
-    u32 pos = (gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT;
-    if (me % WAVEFRONT == 0) {
+    u32 pos = (gr - 1) * READY_PER_LINE + me / READY_LANES;
+    if (me % READY_LANES == 0) {
       do { spin(); } while(AEVUM_READY_LOAD(&ready[pos]) == 0);
     }
     sync();   // lane 0 observed ready; reconverge before any lane reads carries
     mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
-    if (me % WAVEFRONT == 0) ready[(gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT] = 0;
+    if (me % READY_LANES == 0) ready[(gr - 1) * READY_PER_LINE + me / READY_LANES] = 0;
 #endif
 #if HAS_ASM
     __asm("s_setprio 1");
@@ -2467,8 +2473,8 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
 #else
     write_mem_fence(CLK_GLOBAL_MEM_FENCE);
     sync();   // all lanes finish CSSTORE before lane 0 publishes ready
-    if (lowMe % WAVEFRONT == 0) { 
-      u32 pos = gr * (G_W / WAVEFRONT) + lowMe / WAVEFRONT;
+    if (lowMe % READY_LANES == 0) { 
+      u32 pos = gr * READY_PER_LINE + lowMe / READY_LANES;
       AEVUM_READY_STORE(&ready[pos]);
     }
 #endif
@@ -2518,14 +2524,14 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Clear carry ready flag for next iteration
     if (me == 0) ready[gr - 1] = 0;
 #else
-    u32 pos = (gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT;
-    if (me % WAVEFRONT == 0) {
+    u32 pos = (gr - 1) * READY_PER_LINE + me / READY_LANES;
+    if (me % READY_LANES == 0) {
       do { spin(); } while(AEVUM_READY_LOAD(&ready[pos]) == 0);
     }
     sync();   // lane 0 observed ready; reconverge before any lane reads carries
     mem_fence(CLK_GLOBAL_MEM_FENCE);
     // Clear carry ready flag for next iteration
-    if (me % WAVEFRONT == 0) ready[(gr - 1) * (G_W / WAVEFRONT) + me / WAVEFRONT] = 0;
+    if (me % READY_LANES == 0) ready[(gr - 1) * READY_PER_LINE + me / READY_LANES] = 0;
 #endif
 #if HAS_ASM
     __asm("s_setprio 1");
