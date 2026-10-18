@@ -270,6 +270,17 @@ $(FFT_VARIANT0_1K_TEST): tests/fft_variant0_1k_test.cpp src/clwrap.cpp src/Trig.
 test-fft-variant0-1k: $(FFT_VARIANT0_1K_TEST)
 	$(FFT_VARIANT0_1K_TEST)
 
+# Device test: FP64 radix-4 variant 2 width FFT (partial_tabMul4) against a reference DFT.
+FFT_RADIX4_VARIANT2_TEST := build-tests/aevum-fft-radix4-variant2-test
+.PHONY: test-fft-radix4-variant2
+test-host: test-fft-radix4-variant2
+test-fft-radix4-variant2: $(FFT_RADIX4_VARIANT2_TEST)
+	$(FFT_RADIX4_VARIANT2_TEST)
+
+$(FFT_RADIX4_VARIANT2_TEST): tests/fft_radix4_variant2_test.cpp src/TrigBufCache.cpp src/clwrap.cpp src/Trig.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc tests/fft_radix4_variant2_test.cpp src/TrigBufCache.cpp src/clwrap.cpp src/Trig.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) $(TEST_GC_LINK) -o $@
+
 $(WMUL_LIMIT_TEST): tests/wmul_limit_test.cpp src/WmulLimit.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/wmul_limit_test.cpp -o $@
