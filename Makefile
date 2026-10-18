@@ -578,3 +578,15 @@ $(STRICT_INT_TEST): tests/strict_int_test.cpp src/StrictInt.h
 test-host: test-carryfused-ready-sync
 test-carryfused-ready-sync:
 	python3 tests/carryfused_ready_sync_source_test.py
+
+# GF61 csqq/csqaq: non-recursive large-count fallback
+GF61_CSQ_COUNTS_TEST := build-tests/aevum-gf61-csq-counts-test
+.PHONY: test-gf61-csq-counts
+test-host: test-gf61-csq-counts
+test-gf61-csq-counts: $(GF61_CSQ_COUNTS_TEST)
+	python3 tests/gf61_csq_nonrecursive_source_test.py
+	$(GF61_CSQ_COUNTS_TEST)
+
+$(GF61_CSQ_COUNTS_TEST): tests/gf61_csq_counts_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gf61_csq_counts_kernel_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
