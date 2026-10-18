@@ -1907,7 +1907,8 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   bufStatsCarry.zero();
   bufTrue.write({1});
 
-  if (args.verbose) {
+  // Developer self-tests only: on AMD they build and run inline-asm timing kernels, which caused problems on some GPUs.
+  if (args.verbose >= Args::VERBOSE_SELFTEST) {
     selftestTrig();
   }
 
