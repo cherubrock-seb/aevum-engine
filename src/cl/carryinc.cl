@@ -282,7 +282,7 @@ Word2 OVERLOAD weightAndCarryPairSloppy(F2 uF2, GF31 u31, GF61 u61, F invWeight1
   i128 tmp1 = weightAndCarryOne(uF2.x, u31.x, u61.x, invWeight1, m31_invWeight1, m61_invWeight1, hasInCarry, inCarry, maxROE);
   Word a = carryStepUnsignedSloppy(tmp1, &midCarry, b1);
   i128 tmp2 = weightAndCarryOne(uF2.y, u31.y, u61.y, invWeight2, m31_invWeight2, m61_invWeight2, true, midCarry, maxROE);
-#if AEVUM_EXPERIMENT_CARRY_SUB_X
+#if AEVUM_EXPERIMENT_EXACT_SECOND_CARRY
   Word b = carryStep(tmp2, outCarry, b2);
 #else
   Word b = carryStepSignedSloppy(tmp2, outCarry, b2);
