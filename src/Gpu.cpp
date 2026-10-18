@@ -3160,6 +3160,7 @@ pair<RoeInfo, RoeInfo> Gpu::readROE() {
     mulRoePos.clear();
     return {roeStat(squareRoe), roeStat(mulRoe)};
   } else {
+    mulRoePos.clear();   // positions recorded while ROE sampling was off must not tag the next window's samples
     return {};
   }
 }
