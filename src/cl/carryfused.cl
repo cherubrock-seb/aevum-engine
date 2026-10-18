@@ -199,7 +199,7 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   weights = fancyMul(weights, CONST_THREAD_WEIGHTS[64 + line / 64]);
 #endif
 
-#if MUL3
+#if MUL3 && MUL3_CARRY64
   P(i64) carryShuttlePtr = (P(i64)) carryShuttle;
   i64 carry[NW+1];
 #else
@@ -923,7 +923,7 @@ KERNEL(G_W * WMUL) carryFused(P(GF61) out, CP(GF61) in, u32 posROE, P(i64) carry
 
   Word2 wu[NW];
 
-#if MUL3
+#if MUL3 && MUL3_CARRY64
   P(i64) carryShuttlePtr = (P(i64)) carryShuttle;
   i64 carry[NW+1];
 #else
