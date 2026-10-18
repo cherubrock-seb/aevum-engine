@@ -286,6 +286,18 @@ $(AUTOTUNE_CACHE_TEST): tests/runtime_autotune_cache_test.cpp src/RuntimeAutotun
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/runtime_autotune_cache_test.cpp src/RuntimeAutotune.cpp -o $@
 
+# tune.txt / config.txt: accept a last line with no final newline (worktodo stays strict)
+UNTERMINATED_LINE_TEST := build-tests/aevum-unterminated-last-line-test
+.PHONY: test-unterminated-last-line
+test-host: test-unterminated-last-line
+test-unterminated-last-line: $(UNTERMINATED_LINE_TEST)
+	$(UNTERMINATED_LINE_TEST)
+$(UNTERMINATED_LINE_TEST): tests/unterminated_last_line_test.cpp src/File.h src/File.cpp src/TuneEntry.cpp src/FFTConfig.cpp src/FFTConfig.h src/Args.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
+		tests/unterminated_last_line_test.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
+		$(TEST_GC_LINK) -o $@
+
 $(TYPE4_PLAN_TEST): tests/type4_pfa9_plan_test.cpp src/FFTConfig.cpp src/FFTConfig.h src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
