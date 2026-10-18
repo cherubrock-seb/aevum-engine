@@ -698,6 +698,22 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
     }
   }
 
+  // carryFused's !OLD_FENCE carry hand-off coordinates the lanes of a wavefront with sync() and nothing else, from
+  // inside a divergent branch, so a workgroup barrier is not a substitute.  sync() is bar.warp.sync on NVIDIA (unless
+  // NO_ASM removes the PTX) and free on AMD, where a wavefront advances in lock-step.  Anywhere else (Intel, Apple,
+  // PoCL) it is empty, the hand-off races, and the result is silently wrong: an Intel iGPU returns a wrong residue
+  // within 400 iterations.  base.cl defaults OLD_FENCE to 1 off AMD; make that hold when 0 is asked for explicitly.
+  {
+    auto noAsm = config.find("NO_ASM");
+    const bool warpSync = isNvidiaGpu(id) && (noAsm == config.end() || atoi(noAsm->second.c_str()) == 0);
+    if (!isAmdGpu(id) && !warpSync) {
+      if (auto it = config.find("OLD_FENCE"); it != config.end() && atoi(it->second.c_str()) == 0) {
+        it->second = "1";
+        if (doLog) { log("OLD_FENCE=0 needs an AMD GPU or NVIDIA PTX (a lock-step wavefront or a warp barrier); using OLD_FENCE=1.\n"); }
+      }
+    }
+  }
+
   // Register keys are host-side CUDA controls, never source specialization
   // macros. Strip them unconditionally so even AEVUM_REGISTER_PROFILES=0
   // (the host-side kill switch) cannot perturb unrelated source/cache identity.

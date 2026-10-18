@@ -91,6 +91,15 @@ G_H        "group height" == SMALL_HEIGHT / NH
 #define OLD_FENCE 1
 #endif
 
+// carryFused's !OLD_FENCE hand-off has one lane per wavefront publish (and one spin on) the ready flag for its whole
+// wavefront, with sync() as the only thing ordering the other lanes around it.  That needs a wavefront that runs in
+// lock-step (AMD) or a warp barrier (bar.warp.sync, NVIDIA with PTX).  Anywhere else sync() is empty and the hand-off
+// races, silently giving a wrong result (seen on an Intel iGPU).  The host already replaces an explicit OLD_FENCE=0 on
+// such devices; this is the backstop.
+#if !OLD_FENCE && !AMDGPU && !HAS_PTX
+#error "OLD_FENCE=0 needs an AMD GPU or NVIDIA PTX (a lock-step wavefront or a warp barrier); use OLD_FENCE=1"
+#endif
+
 // Keep the host allocation/sizing default and OpenCL layout specialization
 // coupled: NVIDIA uses the in-place middle/tail layout by default.
 #if !defined(INPLACE)
