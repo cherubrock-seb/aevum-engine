@@ -4,6 +4,7 @@
 
 #include "tinycuda.h"
 #include "GraphBatch.h"
+#include "CudaModuleLife.h"
 #include "PtxRegisterCache.h"
 #include "cudawrap.h"  // For NvrtcProgram::preprocessOpenCL and compile
 #include "CudaFill.h"
@@ -69,6 +70,25 @@ static void ensureContextCurrent() {
   if (g_cudaContext) {
     cuCtxSetCurrent(g_cudaContext);
   }
+}
+
+// Every loaded CUmodule is unloaded when the last program or kernel using it is released, in its own context and only
+// while that context is alive (see CudaModuleLife.h).  Never destroyed, so that a program or kernel released during
+// static destruction at exit still finds it.
+static cuda_module::Registry& g_modules = *new cuda_module::Registry;
+
+static void unloadModule(void* module, void* context) {
+  if (cuCtxPushCurrent(static_cast<CUcontext>(context)) != CUDA_SUCCESS) return;
+  cuModuleUnload(static_cast<CUmodule>(module));
+  CUcontext popped{};
+  cuCtxPopCurrent(&popped);
+}
+
+// A reference to a module just loaded in the current context.
+static std::shared_ptr<void> adoptModule(CUmodule module) {
+  CUcontext current{};
+  cuCtxGetCurrent(&current);
+  return g_modules.adopt(module, current, unloadModule);
 }
 
 // Global state for CUDA initialization
@@ -139,6 +159,7 @@ cl_context clCreateContext(const intptr_t*, unsigned nDevices, const cl_device_i
     return nullptr;
   }
   rememberCudaContext(ctx->ctx);
+  g_modules.contextCreated(ctx->ctx);
 
   // L2 persistence: no benefit measured for this workload.
   // cuCtxSetLimit(CU_LIMIT_PERSISTING_L2_CACHE_SIZE, 16 * 1024 * 1024);
@@ -151,6 +172,7 @@ int clReleaseContext(cl_context ctx) {
   if (ctx) {
     const CUcontext dead = ctx->ctx;
     forgetCudaContext(dead);
+    g_modules.contextDestroying(dead);   // cuCtxDestroy unloads its modules; programs and kernels released later must not
     cuCtxDestroy(dead);
     if (g_cudaContext) cuCtxSetCurrent(g_cudaContext);
     delete ctx;
@@ -160,13 +182,9 @@ int clReleaseContext(cl_context ctx) {
 
 int clReleaseProgram(cl_program p) {
   if (p) {
-    // NOTE: Do NOT unload the module here. PRPLL's loadAux() gets a kernel from
-    // the program, then releases the program. The kernel's CUfunction remains valid
-    // only while the CUmodule is loaded. In OpenCL, clCreateKernel retains the
-    // program. In our CUDA shim, we simply never unload modules — they persist for
-    // the process lifetime. This is safe because PRPLL creates a fixed set of kernels
-    // at startup and uses them until exit.
-    // if (p->moduleLoaded) cuModuleUnload(p->module);
+    // Drops the program's reference to its module.  As in OpenCL, where clCreateKernel retains the program, the
+    // module stays loaded while any kernel created from it is alive (loadAux() releases the program and keeps the
+    // kernel); the last reference unloads it (CudaModuleLife.h).
     delete p;
   }
   return CL_SUCCESS;
@@ -214,6 +232,7 @@ cl_program clCreateProgramWithBinary(cl_context ctx, unsigned nDevices, const cl
     CUresult r = cuModuleLoadData(&prog->module, prog->ptx.c_str());
     if (r == CUDA_SUCCESS) {
       prog->moduleLoaded = true;
+      prog->moduleRef = adoptModule(prog->module);
       if (binaryStatus) binaryStatus[0] = CL_SUCCESS;
     } else {
       fprintf(stderr, "cuModuleLoadData from cache failed: %d, PTX size=%zu\n", (int)r, lengths[0]);
@@ -482,6 +501,7 @@ cl_program clLinkProgram(cl_context ctx, unsigned nDevices, const cl_device_id*,
     return nullptr;
   }
   linked->moduleLoaded = true;
+  linked->moduleRef = adoptModule(linked->module);
 
   // Dump PTX to file when PRPLL_DUMP_PTX is set (e.g., PRPLL_DUMP_PTX=kernel)
   // Creates files like kernel_0.ptx, kernel_1.ptx, etc.
@@ -519,6 +539,7 @@ int clBuildProgram(cl_program prog, unsigned nDevices, const cl_device_id* devic
   CUresult r = cuModuleLoadData(&prog->module, prog->ptx.c_str());
   if (r != CUDA_SUCCESS) return CL_BUILD_PROGRAM_FAILURE;
   prog->moduleLoaded = true;
+  prog->moduleRef = adoptModule(prog->module);
   return CL_SUCCESS;
 }
 
@@ -570,6 +591,7 @@ cl_kernel clCreateKernel(cl_program prog, const char* name, int* err) {
     return nullptr;
   }
   prog->kernelExported = true;
+  k->moduleRef = prog->moduleRef;   // the module outlives the program while this kernel is alive
 
   // Shared memory carveout: default adaptive carveout is optimal for mixed kernel workloads.
 
@@ -1193,9 +1215,9 @@ bool cudaLoadRegLimitedKernel(cl_program prog, const char* kernelName, int maxRe
     fprintf(stderr, "%s: PTX register-limit JIT failed (%d): %s\n", kernelName, int(result), errors);
     return false; // Keep the original program intact; caller fails instead of running it.
   }
-  // No kernel has escaped from this freshly loaded program. Release the
-  // neutral module only after the replacement loaded successfully.
-  cuModuleUnload(prog->module);
+  // No kernel has escaped from this freshly loaded program (kernelExported), so the program holds the only reference
+  // to the neutral module: dropping it unloads it, only after the replacement loaded successfully.
+  prog->moduleRef = adoptModule(replacement);
   prog->module = replacement;
   // Do not replace prog->ptx: saveBinary must only persist the neutral image.
   fprintf(stderr, "%s: PTX register limit active (maxnreg=%d, minnctapersm=%d)\n", kernelName, maxRegs, minBlocks);

@@ -12,6 +12,7 @@
 #include <vector>
 #include <string>
 #include <cstring>
+#include <memory>
 
 // ---- Opaque handle wrappers ----
 // OpenCL uses opaque pointer types (struct _cl_foo*).
@@ -53,6 +54,7 @@ struct _cl_program {
   bool compiled;
   bool moduleLoaded;
   bool kernelExported{false}; // Prevent replacement while an existing CUfunction refers to this module
+  std::shared_ptr<void> moduleRef; // Keeps `module` loaded; shared with every kernel created from it (CudaModuleLife.h)
 
   _cl_program() : module{}, compiled{false}, moduleLoaded{false} {}
 };
@@ -62,7 +64,8 @@ typedef _cl_program* cl_program;
 struct _cl_kernel {
   CUfunction func;
   std::string name;
-  CUmodule parentModule;  // Keep reference so module isn't unloaded
+  CUmodule parentModule;
+  std::shared_ptr<void> moduleRef;  // Keeps parentModule loaded after the program is released (CudaModuleLife.h)
   int numArgs;
   int reqWorkGroupSize;   // From __launch_bounds__(N) in source, matches OpenCL reqd_work_group_size
 

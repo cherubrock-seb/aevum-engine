@@ -522,6 +522,16 @@ test-gpu-lost-error: $(GPU_LOST_ERROR_TEST)
 $(GPU_LOST_ERROR_TEST): tests/gpu_lost_error_test.cpp src/GpuLost.h src/clwrap.h src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gpu_lost_error_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+# The CUDA backend's CUmodule lifetime: unloaded by the last program/kernel, never after its context died (no CUDA needed).
+CUDA_MODULE_LIFE_TEST := build-tests/aevum-cuda-module-life-test
+.PHONY: test-cuda-module-life
+test-host: test-cuda-module-life
+test-cuda-module-life: $(CUDA_MODULE_LIFE_TEST)
+	$(CUDA_MODULE_LIFE_TEST)
+
+$(CUDA_MODULE_LIFE_TEST): tests/cuda_module_life_test.cpp src/cuda/CudaModuleLife.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_module_life_test.cpp -pthread -o $@
 # The CUDA backend's mapping of a CUDA driver result to the reported status (plain ints, no CUDA needed).
 CUDA_ERROR_MAP_TEST := build-tests/aevum-cuda-error-map-test
 .PHONY: test-cuda-error-map
