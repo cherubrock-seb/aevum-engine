@@ -286,6 +286,16 @@ typedef ulong2 GF61;        // A complex value using two Z61s.  For a GF(M61^2) 
 #error lean i128 carry requires full Type4
 #endif
 
+#ifndef AEVUM_EXPERIMENT_CARRY_SUB_X
+#define AEVUM_EXPERIMENT_CARRY_SUB_X 0
+#endif
+#if AEVUM_EXPERIMENT_CARRY_SUB_X != 0 && AEVUM_EXPERIMENT_CARRY_SUB_X != 1
+#error AEVUM_EXPERIMENT_CARRY_SUB_X must be 0 or 1
+#endif
+#if AEVUM_EXPERIMENT_CARRY_SUB_X && !AEVUM_EXPERIMENT_LEAN_CARRY128
+#error CARRY_SUB_X experiment requires lean Type4 carry
+#endif
+
 // The FP64 FFT can save a few FP64 ops by applying some of the weights using FMA.  nVidia compilers are clever enough to do this automatically.
 // AMD's rocm compiler needs us to do this explicitly (see carryfused.cl's precompute and fft_common's use of it below).  Only wired up
 // for FFT_TYPE==FFT64 with fft_WIDTH's RADIX 4 or 8 (fft4_skip1 / fft8_skip1 in fft4.cl / fft8.cl); not the 32-thread
