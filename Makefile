@@ -286,6 +286,17 @@ $(AUTOTUNE_CACHE_TEST): tests/runtime_autotune_cache_test.cpp src/RuntimeAutotun
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/runtime_autotune_cache_test.cpp src/RuntimeAutotune.cpp -o $@
 
+# Device test: middleShuffle (fft-middle.cl) transpose permutation for every type and IN_WG/IN_SIZEX pair.
+MIDDLE_SHUFFLE_TEST := build-tests/aevum-middle-shuffle-test
+.PHONY: test-middle-shuffle
+test-host: test-middle-shuffle
+test-middle-shuffle: $(MIDDLE_SHUFFLE_TEST)
+	$(MIDDLE_SHUFFLE_TEST)
+
+$(MIDDLE_SHUFFLE_TEST): tests/middle_shuffle_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/middle_shuffle_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+
 $(TYPE4_PLAN_TEST): tests/type4_pfa9_plan_test.cpp src/FFTConfig.cpp src/FFTConfig.h src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
