@@ -51,6 +51,13 @@ inline bool aevumRadix8For1K() {
 }
 #endif
 
+// Experimental PRPLL 256-wide radix-8 geometry.  Keep this width-side only
+// and opt-in until correctness and paired performance are established.
+inline bool aevumRadix8For256W() {
+  const char* value = std::getenv("AEVUM_RADIX256_W");
+  return value && value[0] == '8' && value[1] == '\0';
+}
+
 class FFTShape {
 public:
   static std::vector<FFTShape> allShapes(u32 from=0, u32 to = -1);
@@ -69,7 +76,8 @@ public:
 
   u32 size() const { return width * height * middle * 2; }
   u32 nW() const {
-    return (width == 256 || (width == 1024 && !aevumRadix8For1K())) ? 4 : 8;
+    if (width == 256) return aevumRadix8For256W() ? 8 : 4;
+    return (width == 1024 && !aevumRadix8For1K()) ? 4 : 8;
   }
   u32 nH() const {
     return (height == 256 || (height == 1024 && !aevumRadix8For1K())) ? 4 : 8;
