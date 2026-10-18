@@ -854,12 +854,34 @@ defines += toDefine("TRIG_COS", cosCoefs + '}');
 
   // When using multiple NTT primes or hybrid FFT/NTT, each FFT/NTT prime's data buffer and trig values are combined into one buffer.
   // The openCL code needs to know the offset to the data and trig values.  Distances are in "number of double2 values".
+  //
+  // smallTrig() shares the height combo table only when both the dimensions and
+  // their radix decompositions match. Equal dimensions with different nW/nH
+  // must use the compact width-only table and matching inter-plane offsets.
+  const bool widthSharesHeightTrig =
+      fft.shape.width == fft.shape.height && fft.shape.nW() == heightRadix;
+  const auto widthTrigFP64Dist = [&]() -> u32 {
+    return widthSharesHeightTrig
+        ? SMALLTRIGCOMBO_FP64_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix)
+        : fft.shape.width * 5u;
+  };
+  const auto widthTrigFP32Dist = [&]() -> u32 {
+    return widthSharesHeightTrig
+        ? SMALLTRIGCOMBO_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix)
+        : fft.shape.width * 5u * sizeof(float) / sizeof(double);
+  };
+  const auto widthTrigGF31Dist = [&]() -> u32 {
+    return widthSharesHeightTrig
+        ? SMALLTRIGCOMBO_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix)
+        : fft.shape.width * sizeof(uint) / sizeof(double);
+  };
+
   const u32 nDataElements = u32(middleDataElements(fft.shape.width, fft.shape.middle, fft.shape.height,
                                                    in_place, int(pad_size), in_wg, in_sizex, out_wg, out_sizex));
   if (fft.FFT_FP64 && fft.NTT_GF31) {
     // GF31 data is located after the FP64 data.  Compute size of the FP64 data and trigs.
     defines += toDefine("DISTGF31",      FP64_DATA_SIZE(nDataElements) / 2);
-    defines += toDefine("DISTWTRIGGF31", SMALLTRIG_FP64_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
+    defines += toDefine("DISTWTRIGGF31", widthTrigFP64Dist());
     defines += toDefine("DISTMTRIGGF31", MIDDLETRIG_FP64_DIST(fft.shape.width, fft.shape.middle, fft.shape.height));
     defines += toDefine("DISTHTRIGGF31", SMALLTRIGCOMBO_FP64_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
   }
@@ -867,25 +889,25 @@ defines += toDefine("TRIG_COS", cosCoefs + '}');
     // GF31 and GF61 data is located after the FP32 data.  Compute size of the FP32 data and trigs.
     u32 sz1, sz2, sz3, sz4;
     defines += toDefine("DISTGF31",      sz1 = FP32_DATA_SIZE(nDataElements) / 2);
-    defines += toDefine("DISTWTRIGGF31", sz2 = SMALLTRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
+    defines += toDefine("DISTWTRIGGF31", sz2 = widthTrigFP32Dist());
     defines += toDefine("DISTMTRIGGF31", sz3 = MIDDLETRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height));
     defines += toDefine("DISTHTRIGGF31", sz4 = SMALLTRIGCOMBO_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
     defines += toDefine("DISTGF61",      sz1 + GF31_DATA_SIZE(nDataElements) / 2);
-    defines += toDefine("DISTWTRIGGF61", sz2 + SMALLTRIG_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
+    defines += toDefine("DISTWTRIGGF61", sz2 + widthTrigGF31Dist());
     defines += toDefine("DISTMTRIGGF61", sz3 + MIDDLETRIG_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height));
     defines += toDefine("DISTHTRIGGF61", sz4 + SMALLTRIGCOMBO_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
   }
   else if (fft.FFT_FP32 && fft.NTT_GF31) {
     // GF31 data is located after the FP32 data.  Compute size of the FP32 data and trigs.
     defines += toDefine("DISTGF31",      FP32_DATA_SIZE(nDataElements) / 2);
-    defines += toDefine("DISTWTRIGGF31", SMALLTRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
+    defines += toDefine("DISTWTRIGGF31", widthTrigFP32Dist());
     defines += toDefine("DISTMTRIGGF31", MIDDLETRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height));
     defines += toDefine("DISTHTRIGGF31", SMALLTRIGCOMBO_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
   }
   else if (fft.FFT_FP32 && fft.NTT_GF61) {
     // GF61 data is located after the FP32 data.  Compute size of the FP32 data and trigs.
     defines += toDefine("DISTGF61",      FP32_DATA_SIZE(nDataElements) / 2);
-    defines += toDefine("DISTWTRIGGF61", SMALLTRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
+    defines += toDefine("DISTWTRIGGF61", widthTrigFP32Dist());
     defines += toDefine("DISTMTRIGGF61", MIDDLETRIG_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height));
     defines += toDefine("DISTHTRIGGF61", SMALLTRIGCOMBO_FP32_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
   }
@@ -896,7 +918,7 @@ defines += toDefine("TRIG_COS", cosCoefs + '}');
     defines += toDefine("DISTHTRIGGF31", 0);
     // GF61 data is located after the GF31 data.  Compute size of the GF31 data and trigs.
     defines += toDefine("DISTGF61",      GF31_DATA_SIZE(nDataElements) / 2);
-    defines += toDefine("DISTWTRIGGF61", SMALLTRIG_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
+    defines += toDefine("DISTWTRIGGF61", widthTrigGF31Dist());
     defines += toDefine("DISTMTRIGGF61", MIDDLETRIG_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height));
     defines += toDefine("DISTHTRIGGF61", SMALLTRIGCOMBO_GF31_DIST(fft.shape.width, fft.shape.middle, fft.shape.height, heightRadix));
   }
