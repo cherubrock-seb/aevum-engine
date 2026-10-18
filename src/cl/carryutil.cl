@@ -463,6 +463,9 @@ i96 weightAndCarryOne(Z31 u31, Z61 u61, u32 m31_invWeight, u32 m61_invWeight, bo
 
 #elif FFT_TYPE == FFT323161
 
+// Forward declaration for the PRPLL 0dec9d4 CARRY_SUB_X path.
+i128 OVERLOAD crtPlusCarry(i64 hi, u64 lo, i64 x, bool hasInCarry, i64 inCarry);
+
 // Apply inverse weight, add in optional carry, calculate roundoff error, convert to integer. Handle MUL3.
 i128 weightAndCarryOne(float uF2, Z31 u31, Z61 u61, float F2_invWeight, u32 m31_invWeight, u32 m61_invWeight, bool hasInCarry, i64 inCarry, float* maxROE) {
 
