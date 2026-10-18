@@ -278,6 +278,18 @@ $(FFT8_SKIP1_TEST): tests/fft8_skip1_test.cpp src/clwrap.cpp src/log.cpp src/Fil
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/fft8_skip1_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
 
+# KernelCompiler: a failed clLinkProgram is a compile failure; the link log comes from the linked program (device test)
+KERNEL_LINK_FAILURE_TEST := build-tests/aevum-kernel-link-failure-test
+.PHONY: test-kernel-link-failure
+test-host: test-kernel-link-failure
+test-kernel-link-failure: $(KERNEL_LINK_FAILURE_TEST)
+	$(KERNEL_LINK_FAILURE_TEST)
+$(KERNEL_LINK_FAILURE_TEST): tests/kernel_link_failure_test.cpp src/KernelCompiler.cpp src/KernelCompiler.h src/bundle.cpp src/OpenCLSourceBuilder.cpp src/clwrap.cpp src/sha3.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp src/Args.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
+		tests/kernel_link_failure_test.cpp src/KernelCompiler.cpp src/bundle.cpp src/OpenCLSourceBuilder.cpp src/clwrap.cpp src/sha3.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp src/Args.cpp \
+		$(TEST_GC_LINK) $(OPENCL_LIBS) $(DL_LIBS) -o $@
+
 $(EVENT_STATUS_TEST): tests/event_status_test.cpp src/Queue.cpp src/Event.cpp src/TimeInfo.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/timeutil.cpp src/common.cpp src/fs.cpp
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -fno-access-control -Wall -Wextra -Isrc $^ $(OPENCL_LIBS) -o $@
