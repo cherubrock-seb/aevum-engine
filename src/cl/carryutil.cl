@@ -499,8 +499,15 @@ i128 weightAndCarryOne(float uF2, Z31 u31, Z61 u61, float F2_invWeight, u32 m31_
   i64 x = (i64)n61 - nF2;
   i64 x2 = x - (i64)nF2 * ((i64)1 << 30);
 #if !MUL3
+#if AEVUM_EXPERIMENT_CARRY_SUB_X
+  // PRPLL 0dec9d4: for the validated small-carry domain, subtract the
+  // incoming i64 carry from x before the final i128 assembly.
+  i128 v = crtPlusCarry((x2 >> 33) + (i64)nF2 * ((i64)1 << 28),
+                        ((u64)x2 << 31) | n31, x, hasInCarry, inCarry);
+#else
   i128 v = sub(make_i128((x2 >> 33) + (i64)nF2 * ((i64)1 << 28),
                          ((u64)x2 << 31) | n31), x);
+#endif
 #else
   i64 x2_3 = x2 * 3;
   i128 v = add(make_i128((x2_3 >> 33) + (i64)(nF2 * 3) * ((i64)1 << 28),
@@ -527,7 +534,9 @@ i128 weightAndCarryOne(float uF2, Z31 u31, Z61 u61, float F2_invWeight, u32 m31_
 #if MUL3 && !AEVUM_EXPERIMENT_LEAN_CARRY128
   v = add(v, add(v, v));
 #endif
+#if !(AEVUM_EXPERIMENT_LEAN_CARRY128 && AEVUM_EXPERIMENT_CARRY_SUB_X && !MUL3)
   if (hasInCarry) v = add(v, inCarry);
+#endif
   return v;
 }
 
@@ -823,6 +832,18 @@ Word2 carryWord(Word2 a, CarryABM* carry, bool b1, bool b2) {
   a.y = carryStep(a.y + *carry, carry, b2);
   return a;
 }
+
+#if FFT_TYPE == FFT323161
+#ifndef AEVUM_EXPERIMENT_CARRY_SUB_X
+#define AEVUM_EXPERIMENT_CARRY_SUB_X 0
+#endif
+i128 OVERLOAD crtPlusCarry(i64 hi, u64 lo, i64 x, bool hasInCarry, i64 inCarry) {
+  if (AEVUM_EXPERIMENT_CARRY_SUB_X)
+    return sub(make_i128(hi, lo), hasInCarry ? x - inCarry : x);
+  i128 v = sub(make_i128(hi, lo), x);
+  return hasInCarry ? add(v, inCarry) : v;
+}
+#endif
 
 /**************************************************************************/
 /*     Do this last, it depends on weightAndCarryOne defined above        */
