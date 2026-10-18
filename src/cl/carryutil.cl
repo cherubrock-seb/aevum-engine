@@ -570,7 +570,15 @@ Word OVERLOAD carryStep(i96 x, i64 *outCarry, bool isBigWord) {
 // This code can be tricky because we must not shift i32 or u32 variables by 32.
 #if EXP / NWORDS >= 33
   i32 whi = lowBits(i96_mid32(x), nBitsLess32);
-  *outCarry = ((i64)i96_hi64(x) - (i64)whi) >> nBitsLess32;
+  // PRPLL 815cf27: for FFT3161/FFT3261, split the quotient into two
+  // 32-bit shifts instead of a 64-bit subtract+shift. The correction
+  // term is one exactly when the selected high word is negative.
+  if (FFT_TYPE == FFT3161 || FFT_TYPE == FFT3261) {
+    *outCarry = as_long((int2)(xtract32(i96_hi64(x), nBitsLess32),
+                               (i32)i96_hi32(x) >> nBitsLess32)) + (whi < 0);
+  } else {
+    *outCarry = ((i64)i96_hi64(x) - (i64)whi) >> nBitsLess32;
+  }
   return as_ulong((uint2)(i96_lo32(x), (u32)whi));
 #elif EXP / NWORDS == 32
   i32 whi = xtract32(i96_lo64(x), nBitsLess32) >> 31;
