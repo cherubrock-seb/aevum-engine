@@ -304,7 +304,7 @@ $(FFT_SPEC_ROBUSTNESS_TEST): tests/fft_spec_robustness_test.cpp src/FFTConfig.cp
 		tests/fft_spec_robustness_test.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
 		$(TEST_GC_LINK) -o $@
 
-$(FFT_EXPLICIT_CAPACITY_TEST): tests/fft_explicit_capacity_test.cpp src/FFTConfig.cpp src/FFTConfig.h src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
+$(FFT_EXPLICIT_CAPACITY_TEST): tests/fft_explicit_capacity_test.cpp src/FFTConfig.cpp src/FFTConfig.h src/fftbpw.h src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
 		tests/fft_explicit_capacity_test.cpp src/PrpUseTune.cpp src/RuntimeAutotune.cpp src/FFTConfig.cpp src/Args.cpp src/TuneEntry.cpp src/common.cpp src/fs.cpp src/File.cpp src/timeutil.cpp \
