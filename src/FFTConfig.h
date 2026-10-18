@@ -80,7 +80,7 @@ public:
   std::string spec() const { return (fft_type ? to_string(fft_type) + ':' : "") + numberK(width) + ':' + numberK(middle) + ':' + numberK(height); }
 
   float carry32BPW() const;
-  bool needsLargeCarry(u64 E) const;
+  bool needsLargeCarry(u64 E, bool mul3 = false) const;
   // Bits per word below which carryFused is unstable and the long carry (fftW + carryA + carryB) must be used.
   double longCarryBPW() const;
   bool needsLongCarry(u64 E) const;
