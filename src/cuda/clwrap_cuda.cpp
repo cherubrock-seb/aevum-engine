@@ -8,6 +8,7 @@
 #include "cudawrap.h"  // For NvrtcProgram::preprocessOpenCL and compile
 #include "CudaFill.h"
 #include "CudaErrorMap.h"
+#include "NvrtcArch.h"
 
 #include <cstdio>
 #include <cstring>
@@ -21,6 +22,7 @@
 #include <fstream>
 #include <filesystem>
 #include <unordered_set>
+#include <mutex>
 #ifdef __linux__
 #include <unistd.h>
 #endif
@@ -229,6 +231,23 @@ cl_program clCreateProgramWithBinary(cl_context ctx, unsigned nDevices, const cl
 // Build log storage (per-program)
 static string g_lastBuildLog;
 
+// The architectures this NVRTC accepts (nvrtcGetSupportedArchs, NVRTC >= 11.2), as major * 10 + minor; empty when
+// unknown.  See NvrtcArch.h for how the --gpu-architecture is chosen from them.
+static const vector<int>& nvrtcSupportedArchs() {
+  static const vector<int> archs = [] {
+    vector<int> v;
+#if CUDA_VERSION >= 11020
+    int n = 0;
+    if (nvrtcGetNumSupportedArchs(&n) == NVRTC_SUCCESS && n > 0) {
+      v.resize(n);
+      if (nvrtcGetSupportedArchs(v.data()) != NVRTC_SUCCESS) { v.clear(); }
+    }
+#endif
+    return v;
+  }();
+  return archs;
+}
+
 int clCompileProgram(cl_program prog, unsigned nDevices, const cl_device_id* devices, const char* options,
                      unsigned numHeaders, const cl_program* headers, const char* const* headerNames,
                      void (*)(cl_program, void*), void*) {
@@ -240,8 +259,31 @@ int clCompileProgram(cl_program prog, unsigned nDevices, const cl_device_id* dev
   cuDeviceGetAttribute(&major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, dev);
   cuDeviceGetAttribute(&minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, dev);
 
-  char archOpt[32];
-  snprintf(archOpt, sizeof(archOpt), "--gpu-architecture=sm_%d%d", major, minor);
+  // The GPU's own sm_XY when this NVRTC has it; otherwise PTX for the newest compute_XY below the GPU, which the driver
+  // JIT-compiles (CUDA 13 dropped sm_50..sm_72, and an older toolkit does not know the newest GPUs).
+  const int cc = major * 10 + minor;
+  const vector<int>& archs = nvrtcSupportedArchs();
+  const string arch = nvrtc_arch::choose(cc, archs);
+  if (arch.empty() || arch.rfind("sm_", 0) != 0) {
+    int nvMajor = 0, nvMinor = 0;
+    nvrtcVersion(&nvMajor, &nvMinor);
+    if (arch.empty()) {
+      char mes[384];
+      snprintf(mes, sizeof(mes), "This GPU is sm_%d, but this build's NVRTC %d.%d supports only sm_%d and newer. "
+               "Use an Aevum build made with an older CUDA toolkit (CUDA 13 dropped Maxwell, Pascal and Volta).",
+               cc, nvMajor, nvMinor, *min_element(archs.begin(), archs.end()));
+      fprintf(stderr, "%s\n", mes);
+      g_lastBuildLog = mes;
+      prog->compiled = false;
+      return CL_COMPILE_PROGRAM_FAILURE;
+    }
+    static std::once_flag logged;
+    std::call_once(logged, [&] {
+      fprintf(stderr, "NVRTC %d.%d does not support sm_%d; compiling for %s, which the driver JIT-compiles\n",
+              nvMajor, nvMinor, cc, arch.c_str());
+    });
+  }
+  const string archOpt = "--gpu-architecture=" + arch;
 
   // Parse OpenCL options string into NVRTC options
   // Convert OpenCL build options to NVRTC equivalents:

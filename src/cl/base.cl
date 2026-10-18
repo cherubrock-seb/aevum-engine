@@ -75,7 +75,14 @@ G_H        "group height" == SMALL_HEIGHT / NH
 #define HAS_PTX 0
 #elif NVIDIAGPU
 #define HAS_ASM 0
+// CC is the GPU's compute capability as major * 100 + minor.  NVRTC's __CUDA_ARCH__ is what the code is compiled for, as
+// major * 100 + minor * 10.  They agree unless the CUDA shim fell back to an older compute_XY than the GPU because its
+// NVRTC lacks the GPU's sm_XY; then the PTX must be valid for that older target.
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ / 100 * 100 + __CUDA_ARCH__ % 100 / 10) < CC
+#define HAS_PTX (__CUDA_ARCH__ / 100 * 100 + __CUDA_ARCH__ % 100 / 10)
+#else
 #define HAS_PTX CC     // C code computed the nVidia GPU's compute capability
+#endif
 #else
 #define HAS_ASM 0
 #define HAS_PTX 0

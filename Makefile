@@ -492,6 +492,16 @@ test-cuda-fill: $(CUDA_FILL_TEST)
 $(CUDA_FILL_TEST): tests/cuda_fill_test.cpp src/cuda/CudaFill.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_fill_test.cpp -o $@
+# The CUDA backend's NVRTC --gpu-architecture choice: own sm_XY, else the newest compute_XY below it (plain ints, no CUDA needed).
+CUDA_NVRTC_ARCH_TEST := build-tests/aevum-cuda-nvrtc-arch-test
+.PHONY: test-cuda-nvrtc-arch
+test-host: test-cuda-nvrtc-arch
+test-cuda-nvrtc-arch: $(CUDA_NVRTC_ARCH_TEST)
+	$(CUDA_NVRTC_ARCH_TEST)
+
+$(CUDA_NVRTC_ARCH_TEST): tests/cuda_nvrtc_arch_test.cpp src/cuda/NvrtcArch.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_nvrtc_arch_test.cpp -o $@
 # carryFused low-bpw cutoff (long carry below max(10, log2(N)/2 + 0.5) bpw)
 FFT_LONG_CARRY_CUTOFF_TEST := build-tests/aevum-fft-long-carry-cutoff-test
 .PHONY: test-fft-long-carry-cutoff
