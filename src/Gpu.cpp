@@ -804,6 +804,12 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
     if (doLog) { log("Using CARRY64\n"); }
     defines += toDefine("CARRY64", 1);
   }
+  // MUL3 consumes log2(3) bits of carry headroom, so it crosses to i64 before
+  // ordinary carryFused. An explicit long carry applies to both paths.
+  if (fft.carry == CARRY_64 || fft.shape.needsLargeCarry(E, true)) {
+    if (doLog) { log("Using MUL3_CARRY64\n"); }
+    defines += toDefine("MUL3_CARRY64", 1);
+  }
 
   u32 N = fft.shape.size();
   defines += toDefine("FFT_VARIANT", fft.variant);
