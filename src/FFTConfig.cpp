@@ -219,8 +219,9 @@ if (18.35 + 0.5 * (log2(13 * 1024 * 512) - log2(size())) > 19.0) return 19.0f;
   return float(18.35 + 0.5 * (log2(13 * 1024 * 512) - log2(size())));
 }
 
-bool FFTShape::needsLargeCarry(u64 E) const {
-  return E / double(size()) > carry32BPW();
+bool FFTShape::needsLargeCarry(u64 E, bool mul3) const {
+  // MUL3 triples each normalized value, consuming log2(3) bits of carry headroom.
+  return E / double(size()) > carry32BPW() - (mul3 ? log2(3.0) : 0.0);
 }
 
 // carryFused computes each pair's carry-out before it knows the carry-in from the previous line, then adds the carry-in to
