@@ -706,6 +706,10 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
     else ++it;
   }
   string defines = toDefine(config);
+  if (aevumRadix8For256W()) {
+    defines += toDefine("AEVUM_RADIX8_W256", 1);
+    if (doLog) log("AEVUM_RADIX256_W=8: width decomposition 4*8*8; NW=8.\n");
+  }
   if (doLog) { log("config: %s\n", defines.c_str()); }
 
   defines += toDefine(initializer_list<pair<string, u32>>{
