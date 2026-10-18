@@ -278,6 +278,17 @@ $(FFT8_SKIP1_TEST): tests/fft8_skip1_test.cpp src/clwrap.cpp src/log.cpp src/Fil
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/fft8_skip1_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
 
+# Device test: GF61 onePairSq (tailsquare.cl) against an exact mod-M61 model, AEVUM_GF61_BETTER_ONEPAIRSQ=0 and 1.
+GF61_ONEPAIRSQ_TEST := build-tests/aevum-gf61-onepairsq-test
+.PHONY: test-gf61-onepairsq
+test-host: test-gf61-onepairsq
+test-gf61-onepairsq: $(GF61_ONEPAIRSQ_TEST)
+	$(GF61_ONEPAIRSQ_TEST)
+
+$(GF61_ONEPAIRSQ_TEST): tests/gf61_onepairsq_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gf61_onepairsq_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+
 $(EVENT_STATUS_TEST): tests/event_status_test.cpp src/Queue.cpp src/Event.cpp src/TimeInfo.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/timeutil.cpp src/common.cpp src/fs.cpp
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -fno-access-control -Wall -Wextra -Isrc $^ $(OPENCL_LIBS) -o $@
