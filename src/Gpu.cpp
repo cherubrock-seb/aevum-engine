@@ -2987,7 +2987,7 @@ bool Gpu::regSupportsLeadCache() const {
   const char* pfa7_mode = std::getenv("AEVUM_PFA7_LEAD_MODE");
   const bool pfa7_test =
       pfa7_mode && (std::strcmp(pfa7_mode, "1") == 0 || std::strcmp(pfa7_mode, "2") == 0) &&
-      isNvidiaGpu(id) && fft.shape.fft_type == FFT3161 &&
+      isNvidiaGpu(shared.context->deviceId()) && fft.shape.fft_type == FFT3161 &&
       fft.pfa_radix == 7 && fft.shape.width == 512 &&
       fft.shape.middle == 7 && fft.shape.height == 512 && fft.variant == 202;
   return !useLongCarry && (!fft.isPfa() ||
