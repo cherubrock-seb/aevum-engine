@@ -448,7 +448,7 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
             "AEVUM_PFA7_CARRYB_FAST requires NVIDIA pfa7:1:512:7:512:202");
       config["PFA7_CARRYB_FAST"] = value;
       if (doLog)
-        log("AEVUM_PFA7_CARRYB_FAST=%s: experimental canonical carryB predecessor optimization.\\n", value);
+        log("AEVUM_PFA7_CARRYB_FAST=%s: experimental canonical carryB predecessor optimization.\n", value);
     }
   }
 
