@@ -3551,10 +3551,11 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
         // canonical carryB + fftP sequence every PFA plan supports.
         carryB(out);
         fftP(buf1, out);
-      } else if (fft.pfa_radix == 7 && args.value("AEVUM_PFA7_SEPARATE_CARRYB", 1)) {
-        // Profiling on RTX 3080 shows the lazy fused gather is substantially
-        // more expensive than the already-existing canonical carryB + fftP
-        // sequence.  Both produce the same retained width-transform state.
+      } else if (fft.pfa_radix == 7 && args.value("AEVUM_PFA7_SEPARATE_CARRYB", 0)) {
+        // Experimental PFA7 CUDA/OpenCL A/B: default to the existing
+        // fused carryB+fftP gather bridge. Set AEVUM_PFA7_SEPARATE_CARRYB=1
+        // to restore the known RTX 3080 faster canonical path.
+        // This is NOT PRPLL's native PFA carryFused implementation.
         carryB(out);
         fftP(buf1, out);
       } else {
