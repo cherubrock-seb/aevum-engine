@@ -10,7 +10,8 @@ assert 'std::strcmp(pfa7_mode, "1")' in gpu
 assert 'std::strcmp(pfa7_mode, "2")' in gpu
 assert 'fft.pfa_radix == 7 && fft.shape.width == 512' in gpu
 assert 'fft.shape.middle == 7 && fft.shape.height == 512' in gpu
-assert 'isNvidiaGpu(id)' in gpu
+assert 'isNvidiaGpu(shared.context->deviceId())' in gpu
+assert 'isNvidiaGpu(id) && fft.shape.fft_type == FFT3161' not in gpu
 assert 'fft.pfa_radix == 9' in gpu
 assert 'args.value("AEVUM_PFA7_SEPARATE_CARRYB", 1)' in gpu
 assert 'fftPCarryB(buf1, out);' in gpu
