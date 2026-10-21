@@ -107,8 +107,16 @@ def main():
         raise RuntimeError("Pass AEVUM_PFA7_LEAD_MODE equal to --mode")
     api = Engine(args.lib)
     h = api.new(args.exponent, args.device, TYPE2, args.kernels)
+    type2_us = None
     try:
         reference = api.exact(h, args.exponent, 20261021)
+        # One Type2 control per backend. This is a different plan; it is
+        # context, NOT an A/B measure of the same transform.
+        if args.mode == "0" and os.getenv("AEVUM_PFA7_CARRYB_FAST", "0") == "0":
+            type2_us = api.perf(h, args.iterations) * 1e6
+            print("TYPE2_REFERENCE=" + json.dumps(
+                {"us_per_iter": round(type2_us, 3),
+                 "iter_s": round(1e6 / type2_us, 3)}), flush=True)
     finally:
         api.destroy(h)
     h = api.new(args.exponent, args.device, PFA7, args.kernels)
@@ -120,7 +128,8 @@ def main():
             print("FIRST_DIFFERENCE=" + json.dumps(first_diff(reference, candidate)), flush=True)
             return 3
         us = api.perf(h, args.iterations) * 1e6
-        summary = {"mode": args.mode, "exact": valid, "p": args.exponent,
+        summary = {"mode": args.mode, "carry_fast": os.getenv("AEVUM_PFA7_CARRYB_FAST", "0"),
+                   "exact": valid, "p": args.exponent,
                    "plan": PFA7, "reference": TYPE2,
                    "iterations": args.iterations,
                    "us_per_iter": round(us, 3), "iter_s": round(1e6 / us, 3),
