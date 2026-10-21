@@ -432,6 +432,26 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
     if (doLog) log("AEVUM_PFA7_INPLACE=1: in-place transform interior, separate canonical fftW scatter.\n");
   }
 
+  // Isolated PFA7 carryB index optimization. Values: 0=stock, 1=direct
+  // predecessor indexing, 2=direct indexing plus zero-carry early exit.
+  // Non-PFA reference engines remain unchanged so GPU differential tests can
+  // compare against Type2 in the same process.
+  if (const char* value = std::getenv("AEVUM_PFA7_CARRYB_FAST")) {
+    if (std::strcmp(value, "0") != 0 && std::strcmp(value, "1") != 0 &&
+        std::strcmp(value, "2") != 0)
+      throw std::runtime_error("AEVUM_PFA7_CARRYB_FAST must be 0, 1 or 2");
+    if (std::strcmp(value, "0") != 0 && fft.isPfa() && fft.pfa_radix == 7) {
+      if (!isNvidiaGpu(id) || fft.shape.fft_type != FFT3161 ||
+          fft.shape.width != 512 || fft.shape.middle != 7 ||
+          fft.shape.height != 512 || fft.variant != 202)
+        throw std::runtime_error(
+            "AEVUM_PFA7_CARRYB_FAST requires NVIDIA pfa7:1:512:7:512:202");
+      config["PFA7_CARRYB_FAST"] = value;
+      if (doLog)
+        log("AEVUM_PFA7_CARRYB_FAST=%s: experimental canonical carryB predecessor optimization.\\n", value);
+    }
+  }
+
   if (const char* value = std::getenv("AEVUM_PFA_GF31_COSBASE")) {
     const auto it = config.find("AEVUM_PFA_GF31_COSBASE");
     if (it != config.end() && it->second != value)
