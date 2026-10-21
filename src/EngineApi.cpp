@@ -346,8 +346,14 @@ RegPaths productionRegPaths(const Gpu& gpu, const FFTConfig& fft, const std::str
   // explicit experiment until the word-exact GPU differential and an A/B
   // throughput run have passed on the target device.
   if (fft.isPfa()) {
-    const char* value = std::getenv("AEVUM_PFA_LEAD_BRIDGE");
-    paths.lead_cache = paths.lead_cache && value && std::atoi(value) != 0;
+    if (fft.pfa_radix == 7) {
+      const char* mode = std::getenv("AEVUM_PFA7_LEAD_MODE");
+      paths.lead_cache = paths.lead_cache && mode &&
+                         (std::strcmp(mode, "1") == 0 || std::strcmp(mode, "2") == 0);
+    } else {
+      const char* value = std::getenv("AEVUM_PFA_LEAD_BRIDGE");
+      paths.lead_cache = paths.lead_cache && value && std::atoi(value) != 0;
+    }
   }
   if (const char* value = std::getenv("AEVUM_REG_LEAD_CACHE"))
     paths.lead_cache = paths.lead_cache && std::atoi(value) != 0;
@@ -1962,7 +1968,9 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     lead_cache_enabled_ = reg_paths.lead_cache;
     if (verbose) {
       if (lead_cache_enabled_) {
-        if (fft.isPfa())
+        if (fft.pfa_radix == 7)
+          log("AEVUM_PFA7_LEAD_MODE: experimental retained-width PFA7 bridge enabled (mode=%s); exactness must be checked before performance.\n", std::getenv("AEVUM_PFA7_LEAD_MODE"));
+        else if (fft.isPfa())
           log("Aevum PFA9 lead bridge enabled: consecutive square_mul(reg,1) calls fuse carryB with the next fftP gather.\n");
         else
           log("Aevum register lead cache enabled: consecutive square_mul(reg,1) calls retain the width transform and use carryFused.\n");
