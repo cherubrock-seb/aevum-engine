@@ -2981,8 +2981,17 @@ bool Gpu::regSupportsLeadCache() const {
   // Keep the already validated Apple canonical-boundary path unchanged.
   return false;
 #else
+  // Experimental PFA7 retained-width bridge: NVIDIA only, exact geometry,
+  // disabled unless explicitly requested.  Mode 1 keeps canonical carryB+fftP;
+  // mode 2 tests the already-implemented fused fftPCarryB gather.
+  const char* pfa7_mode = std::getenv("AEVUM_PFA7_LEAD_MODE");
+  const bool pfa7_test =
+      pfa7_mode && (std::strcmp(pfa7_mode, "1") == 0 || std::strcmp(pfa7_mode, "2") == 0) &&
+      isNvidiaGpu(id) && fft.shape.fft_type == FFT3161 &&
+      fft.pfa_radix == 7 && fft.shape.width == 512 &&
+      fft.shape.middle == 7 && fft.shape.height == 512 && fft.variant == 202;
   return !useLongCarry && (!fft.isPfa() ||
-         (fft.shape.fft_type == FFT3161 && fft.pfa_radix == 9));
+         (fft.shape.fft_type == FFT3161 && fft.pfa_radix == 9) || pfa7_test);
 #endif
 }
 
@@ -3551,7 +3560,10 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
         // canonical carryB + fftP sequence every PFA plan supports.
         carryB(out);
         fftP(buf1, out);
-      } else if (fft.pfa_radix == 7 && args.value("AEVUM_PFA7_SEPARATE_CARRYB", 1)) {
+      } else if (fft.pfa_radix == 7 &&
+                 !(std::getenv("AEVUM_PFA7_LEAD_MODE") &&
+                   std::strcmp(std::getenv("AEVUM_PFA7_LEAD_MODE"), "2") == 0) &&
+                 args.value("AEVUM_PFA7_SEPARATE_CARRYB", 1)) {
         // Profiling on RTX 3080 shows the lazy fused gather is substantially
         // more expensive than the already-existing canonical carryB + fftP
         // sequence.  Both produce the same retained width-transform state.
