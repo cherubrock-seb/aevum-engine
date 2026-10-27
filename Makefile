@@ -578,3 +578,9 @@ $(STRICT_INT_TEST): tests/strict_int_test.cpp src/StrictInt.h
 test-host: test-carryfused-ready-sync
 test-carryfused-ready-sync:
 	python3 tests/carryfused_ready_sync_source_test.py
+
+# Opt-in NVIDIA GF61 sm120 reduction pair source contract.
+.PHONY: test-gf61-sm120-source
+test-host: test-gf61-sm120-source
+test-gf61-sm120-source:
+	python3 tests/gf61_sm120_source_test.py
