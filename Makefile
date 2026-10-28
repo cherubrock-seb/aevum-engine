@@ -599,3 +599,9 @@ $(STRICT_INT_TEST): tests/strict_int_test.cpp src/StrictInt.h
 test-host: test-carryfused-ready-sync
 test-carryfused-ready-sync:
 	python3 tests/carryfused_ready_sync_source_test.py
+
+# timeStr(): reentrant time conversion, since every worker thread logs
+.PHONY: test-time-reentrant
+test-host: test-time-reentrant
+test-time-reentrant:
+	python3 tests/time_reentrant_source_test.py
