@@ -18,6 +18,7 @@ class KernelCompiler {
   std::string baseArgs;
   std::string dump;
   const bool useCache;
+  const bool useMemCache;
   const bool verbose;
   
   std::vector<Program> clSources;
