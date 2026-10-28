@@ -800,6 +800,15 @@ throw "Aevum FFT type";
           static_cast<int>(fft.shape.fft_type));
     }
 #endif
+    const double explicit_bpw = E / double(fft.size());
+    if (explicit_bpw < fft.minBpw()) {
+      throw std::runtime_error(
+          "Aevum FFT plan " + fft.spec() +
+          " is too large for exponent " + std::to_string(E) +
+          " (" + std::to_string(explicit_bpw) + " bits/word < " +
+          std::to_string(fft.minBpw()) +
+          "); use AUTO or a smaller plan");
+    }
     if (fft.maxExp() * args.fftOverdrive < E) {
       // An explicit plan past its measured capacity would compute a silently wrong residue (and an LL run has
       // no Gerbicz check to notice), so refuse it.  -od raises the allowed exponent for the standalone program;
