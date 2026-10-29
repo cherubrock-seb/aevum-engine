@@ -166,4 +166,3 @@ CUresult cuGraphLaunch(CUgraphExec, CUstream) { return CUDA_ERROR_INVALID_VALUE;
 nvrtcResult nvrtcVersion(int* major, int* minor) { *major = 12; *minor = 0; return NVRTC_SUCCESS; }
 nvrtcResult nvrtcGetNumSupportedArchs(int* n) { *n = 0; return NVRTC_SUCCESS; }
 nvrtcResult nvrtcGetSupportedArchs(int*) { return NVRTC_SUCCESS; }
-
