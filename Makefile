@@ -640,3 +640,13 @@ test-proof-power-zero:
 test-host: test-carryfused-ready-sync
 test-carryfused-ready-sync:
 	python3 tests/carryfused_ready_sync_source_test.py
+
+# CUDA shim: the kernel-cache blob (PTX + CUBIN) and the PTX_VERSION relabeling (plain C++, no CUDA needed).
+CUDA_BINARY_BLOB_TEST := build-tests/aevum-cuda-binary-blob-test
+.PHONY: test-cuda-binary-blob
+test-host: test-cuda-binary-blob
+test-cuda-binary-blob: $(CUDA_BINARY_BLOB_TEST)
+	$(CUDA_BINARY_BLOB_TEST)
+$(CUDA_BINARY_BLOB_TEST): tests/cuda_binary_blob_test.cpp src/cuda/CudaBinaryBlob.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_binary_blob_test.cpp -o $@
