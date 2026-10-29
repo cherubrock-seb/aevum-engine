@@ -821,3 +821,9 @@ test-proof-result-survival:
 test-host: test-time-reentrant
 test-time-reentrant:
 	python3 tests/time_reentrant_source_test.py
+
+# main() maps how the run ended to the process exit status; needs the binary but no GPU kernels.
+.PHONY: test-main-exit-code
+test-host: test-main-exit-code
+test-main-exit-code: aevum
+	python3 tests/main_exit_code_test.py $(BIN)/aevum
