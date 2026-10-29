@@ -826,8 +826,18 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
   defines += toDefine("MAXBPW", (u32)(fft.maxBpw() * 100.0f));
 
   if (fft.FFT_FP64 || fft.FFT_FP32) {
-    defines += toDefine("WEIGHT_STEP", weightM1(N, E, fft.shape.height * fft.shape.middle, 0, 0, 1));
-    defines += toDefine("IWEIGHT_STEP", invWeightM1(N, E, fft.shape.height * fft.shape.middle, 0, 0, 1));
+    double const weightStep = weightM1(N, E, fft.shape.height * fft.shape.middle, 0, 0, 1);
+    double const iweightStep = invWeightM1(N, E, fft.shape.height * fft.shape.middle, 0, 0, 1);
+    if (fft.FFT_FP64) {
+      defines += toDefine("WEIGHT_STEP", weightStep);
+      defines += toDefine("IWEIGHT_STEP", iweightStep);
+    } else {
+      // FP32 kernels need float literals.  This is the same rounding the
+      // OpenCL compiler previously performed from the double constants,
+      // without requiring double-literal support on FP32-only devices.
+      defines += toDefine("WEIGHT_STEP", float(weightStep));
+      defines += toDefine("IWEIGHT_STEP", float(iweightStep));
+    }
     if (fft.FFT_FP64) defines += toDefine("TAILT", root1Fancy(fft.shape.height * 2, 1));
     else defines += toDefine("TAILT", root1FancyFP32(fft.shape.height * 2, 1));
 
