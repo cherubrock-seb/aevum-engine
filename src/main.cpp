@@ -16,6 +16,7 @@
 #include "Gpu.h"
 #include "tune.h"
 
+#include <cstring>
 #include <filesystem>
 #include <thread>
 // #include <format> from GCC-13 onwards
@@ -63,6 +64,13 @@ public:
 extern int putenv(char *);
 #endif
 
+// The exceptions that end a run on purpose: the user's stop, and the flags
+// that only print (-h, -info, -version). Everything else thrown to main() is
+// a failure.
+static bool isCleanExit(const char *reason) {
+  return !strcmp(reason, "stop requested") || !strcmp(reason, "help") || !strcmp(reason, "info") || !strcmp(reason, "version");
+}
+
 int main(int argc, char **argv) {
 //!MSVC version support
 #ifdef _MSC_VER
@@ -80,6 +88,10 @@ int main(int argc, char **argv) {
   setenv("ROC_SIGNAL_POOL_SIZE", "32", 0);
 #endif
 
+  // 0 for a normal end (the queue ran dry, a stop was requested, -h, -info or
+  // -version) and 1 for any other exception that reaches here (a kernel that
+  // would not compile, a missing device, a bad argument), so a supervisor can
+  // tell "out of work" from "cannot run" without parsing the log.
   int exitCode = 0;
 
   try {
@@ -148,10 +160,12 @@ int main(int argc, char **argv) {
     }
   } catch (const char *mes) {
     log("Exiting because \"%s\"\n", mes);
+    exitCode = isCleanExit(mes) ? 0 : 1;
   } catch (const string& mes) {
     log("Exiting because \"%s\"\n", mes.c_str());
+    exitCode = isCleanExit(mes.c_str()) ? 0 : 1;
   }
 
   log("Bye\n");
-  return exitCode; // not used yet.
+  return exitCode;
 }

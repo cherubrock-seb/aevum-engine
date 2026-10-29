@@ -599,3 +599,9 @@ $(STRICT_INT_TEST): tests/strict_int_test.cpp src/StrictInt.h
 test-host: test-carryfused-ready-sync
 test-carryfused-ready-sync:
 	python3 tests/carryfused_ready_sync_source_test.py
+
+# main() maps how the run ended to the process exit status; needs the binary but no GPU kernels.
+.PHONY: test-main-exit-code
+test-host: test-main-exit-code
+test-main-exit-code: aevum
+	python3 tests/main_exit_code_test.py $(BIN)/aevum
