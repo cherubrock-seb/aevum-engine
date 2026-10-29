@@ -29,6 +29,8 @@ extern std::vector<Call> uses;                        // every module load, laun
                                                       // context current at the time and the object's own context
 extern std::map<std::string, CUresult> failNext;      // make the next call of "cuMemFree", "cuMemAlloc" or
                                                       // "cuMemcpyHtoD" fail with this
+extern std::string pciBusId;                         // value returned by cuDeviceGetPCIBusId
+extern CUresult pciBusIdResult;                    // injected result for cuDeviceGetPCIBusId
 
 CUcontext current();
 bool alive(CUcontext c);
