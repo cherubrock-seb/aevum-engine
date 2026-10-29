@@ -635,6 +635,19 @@ test-host: test-proof-power-zero
 test-proof-power-zero:
 	python3 tests/proof_power_zero_source_test.py
 
+# ProofSet::reducePower() rebuilds the checkpoint table (host only, no device)
+PROOF_REDUCE_POWER_TEST := build-tests/aevum-proof-reduce-power-test
+.PHONY: test-proof-reduce-power
+test-host: test-proof-reduce-power
+test-proof-reduce-power: $(PROOF_REDUCE_POWER_TEST)
+	$(PROOF_REDUCE_POWER_TEST)
+
+$(PROOF_REDUCE_POWER_TEST): tests/proof_reduce_power_test.cpp src/Proof.cpp src/Proof.h src/File.cpp src/log.cpp src/common.cpp src/fs.cpp src/timeutil.cpp src/sha3.cpp src/md5.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc \
+		tests/proof_reduce_power_test.cpp src/Proof.cpp src/File.cpp src/log.cpp src/common.cpp src/fs.cpp src/timeutil.cpp src/sha3.cpp src/md5.cpp \
+		$(TEST_GC_LINK) -o $@
+
 # carryFused: warp sync() on both sides of the per-wavefront ready flag
 .PHONY: test-carryfused-ready-sync
 test-host: test-carryfused-ready-sync
