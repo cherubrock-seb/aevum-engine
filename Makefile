@@ -204,6 +204,13 @@ AUTOTUNE_CACHE_TEST := build-tests/aevum-runtime-autotune-cache-test
 
 .PHONY: test test-host test-fft-variant0-1k test-gpu test-pfa9-lead-bridge-gpu
 
+# selftest.cl must not pick its inline asm from a guessed wavefront size.
+.PHONY: test-selftest-wavefront-guard
+test-selftest-wavefront-guard:
+	python3 tests/selftest_wavefront_guard_source_test.py
+
+test-host: test-selftest-wavefront-guard
+
 test: test-host
 
 $(MONOLITHIC_SOURCE_TEST): tests/opencl_monolithic_source_test.cpp src/OpenCLSourceBuilder.cpp src/OpenCLSourceBuilder.h
