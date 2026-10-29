@@ -735,3 +735,9 @@ test-selftest-wavefront-guard:
 	python3 tests/selftest_wavefront_guard_source_test.py
 
 test-host: test-selftest-wavefront-guard
+
+# Finished PRP results survive proof-generation failure (source check, no device)
+.PHONY: test-proof-result-survival
+test-host: test-proof-result-survival
+test-proof-result-survival:
+	python3 tests/proof_result_survival_source_test.py src/Gpu.cpp
