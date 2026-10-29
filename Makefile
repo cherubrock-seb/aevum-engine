@@ -244,6 +244,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	python3 tests/engine_lead_cache_test.py
 	python3 tests/native_tune_compat_source_test.py
 	python3 tests/cuda_regcf3161_auto_policy_source_test.py
+	python3 tests/nvidia_cc_literal_test.py
 	python3 tests/cuda_engine_lib_makefile_source_test.py
 	python3 tests/cuda_context_lifecycle_source_test.py
 	python3 tests/middlein_gf61_cmul_source_test.py
