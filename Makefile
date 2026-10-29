@@ -336,6 +336,11 @@ test-gpu: $(BIN)/aevum
 test-gpu-pfa-ll: $(BIN)/aevum
 	bash tests/gpu_pfa_ll_test.sh $(BIN)/aevum
 
+# Proof generation failures end to end (slow: one full PRP of 2^400009-1 plus restarts; device test, not in test-host)
+.PHONY: test-gpu-proof-retry
+test-gpu-proof-retry: $(BIN)/aevum
+	bash tests/proof_retry_gpu_test.sh $(BIN)/aevum
+
 
 -include $(wildcard $(ENGINE_DEPDIR)/*.d)
 
@@ -659,7 +664,7 @@ $(PROOF_REDUCE_POWER_TEST): tests/proof_reduce_power_test.cpp src/Proof.cpp src/
 		tests/proof_reduce_power_test.cpp src/Proof.cpp src/File.cpp src/log.cpp src/common.cpp src/fs.cpp src/timeutil.cpp src/sha3.cpp src/md5.cpp \
 		$(TEST_GC_LINK) -o $@
 
-# Gpu::saveProof() retries at a lower proof power on a corrupt residue (source check, no device)
+# Gpu::saveProof() retries every failure, then lower powers; a failed proof does not lose the result (source check, no device)
 .PHONY: test-proof-crc-retry
 test-host: test-proof-crc-retry
 test-proof-crc-retry:
