@@ -11,6 +11,9 @@ bool prpll_verbose = false;
 std::string NvrtcProgram::preprocessOpenCL(const std::string& source) { return source; }
 std::string NvrtcProgram::compile(const std::string&, const std::string&, const std::vector<std::string>&,
                                   const std::vector<std::pair<std::string, std::string>>&) { return {}; }
+NvrtcProgram::Images NvrtcProgram::compileImages(const std::string&, const std::string&,
+                                                       const std::vector<std::string>&,
+                                                       const std::vector<std::pair<std::string, std::string>>&) { return {}; }
 
 namespace cuda_stub {
 thread_local std::vector<CUcontext> contextStack;
