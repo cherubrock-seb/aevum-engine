@@ -12,6 +12,7 @@
 #include <unistd.h>
 #endif
 #include <filesystem>
+#include <stdexcept>
 #include <vector>
 #include <string>
 #include <optional>
@@ -41,17 +42,15 @@
 
 namespace fs = std::filesystem;
 
-struct CRCError {
+// File errors derive from std::exception so that the top-level handlers in main(), gpuWorker() and Background::run()
+// log them and carry on instead of letting them reach std::terminate.
+struct FileError : std::runtime_error {
   std::string name;
+  FileError(const char* kind, std::string n) : std::runtime_error(std::string(kind) + ": " + n), name(std::move(n)) {}
 };
-
-struct ReadError {
-  std::string name;
-};
-
-struct WriteError {
-  std::string name;
-};
+struct CRCError   : FileError { explicit CRCError(std::string n)   : FileError("CRC error", std::move(n)) {} };
+struct ReadError  : FileError { explicit ReadError(std::string n)  : FileError("read error", std::move(n)) {} };
+struct WriteError : FileError { explicit WriteError(std::string n) : FileError("write error", std::move(n)) {} };
 
 class File {
   FILE* f = nullptr;
