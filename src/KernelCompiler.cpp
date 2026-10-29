@@ -13,6 +13,8 @@
 #include <cassert>
 #include <cinttypes>
 #include <future>
+#include <map>
+#include <mutex>
 
 using namespace std;
 
@@ -69,6 +71,7 @@ KernelCompiler::KernelCompiler(const Args& args, const Context* context, const s
   baseArgs{"-cl-finite-math-only " + openclStandardArg(context->get(), context->deviceId()) + clArgs},
   dump{args.dump},
   useCache{args.useCache},
+  useMemCache{args.doTune || args.doZtune || args.doCtune || args.carryTune},
   verbose{args.verbose},
   deviceId{context->deviceId()}
 {
@@ -159,6 +162,16 @@ static string to_hex(u64 d) {
   return buf;
 }
 
+// Tuner-only process-local cache.  Repeated Gpu instances created while
+// sweeping settings often request identical compiled kernels.  Keep their
+// binaries under the same content-derived key as the disk cache so a later
+// tuner candidate can rebuild the cl_program without recompiling source.
+// Normal non-tuner runs never populate or consult this cache.
+static std::mutex memCacheMutex;
+static std::map<u64, string> memCache;
+static size_t memCacheBytes = 0;
+static constexpr size_t MEM_CACHE_LIMIT = size_t(1) << 30;
+
 KernelHolder KernelCompiler::loadAux(const string& fileName, const string& kernelName, const string& args) const {
   Timer timer;
   bool fromCache = true;
@@ -171,11 +184,23 @@ KernelHolder KernelCompiler::loadAux(const string& fileName, const string& kerne
 
   Program program;
   string cacheFile;
+  const u64 key = SHA3::hash(contextHash, fileName, kernelName, compileArgs)[0];
 
   if (useCache) {
-    string f = kernelName + '-' + to_hex(SHA3::hash(contextHash, fileName, kernelName, compileArgs)[0]);
+    string f = kernelName + '-' + to_hex(key);
     cacheFile = cacheDir + '/' + f;
     program = loadBinary(context, deviceId, cacheFile);
+  }
+
+  if (!program && useMemCache) {
+    string bytes;
+    {
+      std::lock_guard<std::mutex> lock{memCacheMutex};
+      if (auto it = memCache.find(key); it != memCache.end()) bytes = it->second;
+    }
+    if (!bytes.empty()) {
+      program = loadBinaryBytes(context, deviceId, bytes, kernelName);
+    }
   }
 
   if (!program) {
@@ -253,6 +278,15 @@ KernelHolder KernelCompiler::loadAux(const string& fileName, const string& kerne
     if (useCache) {
       if (verbose) { log("saving binary to '%s'\n", cacheFile.c_str()); }
       saveBinary(program.get(), cacheFile);
+    }
+    if (useMemCache) {
+      string bytes = getBinary(program.get());
+      std::lock_guard<std::mutex> lock{memCacheMutex};
+      if (memCache.find(key) == memCache.end() &&
+          memCacheBytes + bytes.size() <= MEM_CACHE_LIMIT) {
+        memCacheBytes += bytes.size();
+        memCache.emplace(key, std::move(bytes));
+      }
     }
     if (verbose) { log("Loaded %s %s: %.0fms\n", kernelName.c_str(), args.c_str(), timer.at() * 1000); }
   }
