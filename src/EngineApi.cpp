@@ -2489,18 +2489,18 @@ int invoke(F&& f) {
     g_last_error.clear();
     f();
     return 1;
+  } catch (const ReadError& e) {      // the file errors are std::exceptions: catch them first
+    set_error("Aevum file read error", e.name);
+  } catch (const WriteError& e) {
+    set_error("Aevum file write error", e.name);
+  } catch (const CRCError& e) {
+    set_error("Aevum file CRC error", e.name);
   } catch (const std::exception& e) {
     set_error(e);
   } catch (const std::string& e) {
     set_error(e.c_str());
   } catch (const char* e) {
     set_error(e);
-  } catch (const ReadError& e) {
-    set_error("Aevum file read error", e.name);
-  } catch (const WriteError& e) {
-    set_error("Aevum file write error", e.name);
-  } catch (const CRCError& e) {
-    set_error("Aevum file CRC error", e.name);
   } catch (...) {
     set_error("unknown Aevum engine exception");
   }
@@ -2551,18 +2551,18 @@ aevum_engine_handle aevum_engine_create_ex(uint32_t exponent, size_t register_co
   try {
     g_last_error.clear();
     return new Runtime(exponent, register_count, device, verbose != 0, fft_spec, tune_dir, workload);
+  } catch (const ReadError& e) {      // the file errors are std::exceptions: catch them first
+    set_error("Aevum file read error", e.name);
+  } catch (const WriteError& e) {
+    set_error("Aevum file write error", e.name);
+  } catch (const CRCError& e) {
+    set_error("Aevum file CRC error", e.name);
   } catch (const std::exception& e) {
     set_error(e);
   } catch (const std::string& e) {
     set_error(e.c_str());
   } catch (const char* e) {
     set_error(e);
-  } catch (const ReadError& e) {
-    set_error("Aevum file read error", e.name);
-  } catch (const WriteError& e) {
-    set_error("Aevum file write error", e.name);
-  } catch (const CRCError& e) {
-    set_error("Aevum file CRC error", e.name);
   } catch (...) {
     set_error("unknown Aevum engine exception");
   }

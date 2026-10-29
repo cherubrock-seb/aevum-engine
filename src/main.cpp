@@ -150,6 +150,9 @@ int main(int argc, char **argv) {
     log("Exiting because \"%s\"\n", mes);
   } catch (const string& mes) {
     log("Exiting because \"%s\"\n", mes.c_str());
+  } catch (const std::exception& e) {
+    log("Exiting because of exception %s: %s\n", typeName(e), e.what());
+    exitCode = 1;
   }
 
   log("Bye\n");

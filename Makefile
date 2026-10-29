@@ -271,6 +271,16 @@ $(FFT_VARIANT0_1K_TEST): tests/fft_variant0_1k_test.cpp src/clwrap.cpp src/Trig.
 test-fft-variant0-1k: $(FFT_VARIANT0_1K_TEST)
 	$(FFT_VARIANT0_1K_TEST)
 
+# File errors are std::exceptions, so the top-level handlers catch them (host only, no device)
+FILE_ERROR_TEST := build-tests/aevum-file-error-exception-test
+.PHONY: test-file-error-exception
+test-host: test-file-error-exception
+test-file-error-exception: $(FILE_ERROR_TEST)
+	$(FILE_ERROR_TEST)
+$(FILE_ERROR_TEST): tests/file_error_exception_test.cpp src/File.h src/Background.h src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/file_error_exception_test.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp -pthread -o $@
+
 $(WMUL_LIMIT_TEST): tests/wmul_limit_test.cpp src/WmulLimit.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/wmul_limit_test.cpp -o $@
