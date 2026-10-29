@@ -135,7 +135,7 @@ int main() {
   int binStatus = -1;
   cl_program cached = clCreateProgramWithBinary(c1, 1, &dev, &binSize, &bin, &binStatus, &err);
   require(cached && err == CL_SUCCESS && binStatus == CL_SUCCESS, "clCreateProgramWithBinary");
-  load = lastUse("cuModuleLoadData");
+  load = lastUse("cuModuleLoadDataEx");
   require(load && load->current == c1->ctx, "a cached binary is loaded in the program's context, not the newest");
   require(clBuildProgram(cached, 1, &dev, nullptr, nullptr, nullptr) == CL_SUCCESS, "clBuildProgram of a binary");
 
@@ -145,7 +145,7 @@ int main() {
   cuCtxSetCurrent(c2->ctx);
   uses.clear();
   require(clBuildProgram(built, 1, &dev, "", nullptr, nullptr) == CL_SUCCESS, "clBuildProgram of a source");
-  load = lastUse("cuModuleLoadData");
+  load = lastUse("cuModuleLoadDataEx");
   require(load && load->current == c1->ctx, "clBuildProgram loads the module in the program's context");
 
   // The second context's own work still runs in the second context.

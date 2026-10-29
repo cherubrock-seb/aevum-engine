@@ -10,6 +10,7 @@
 #include "CudaFill.h"
 #include "CudaErrorMap.h"
 #include "NvrtcArch.h"
+#include "CudaBinaryBlob.h"
 
 #include <cstdio>
 #include <cstring>
@@ -252,24 +253,46 @@ cl_program clCreateProgramWithSource(cl_context ctx, unsigned count, const char*
   return prog;
 }
 
+// Loads prog->cubin when there is one (SASS for this device: no JIT, and no PTX-version check to fail on a driver
+// older than the toolkit), and otherwise, or when the driver rejects it (logged), the PTX through the driver's JIT.
+// A rejected CUBIN is dropped, so the kernel cache stores what loaded.
+static CUresult loadModule(_cl_program* prog, unsigned nOpts, CUjit_option* opts, void** optVals) {
+  if (!prog->cubin.empty()) {
+    CUresult const r = cuModuleLoadDataEx(&prog->module, prog->cubin.data(), nOpts, opts, optVals);
+    if (r == CUDA_SUCCESS) return r;
+    const char* errName = nullptr;
+    cuGetErrorName(r, &errName);
+    fprintf(stderr, "CUBIN rejected by the driver: %s (%d); loading the PTX through the JIT instead\n",
+            errName ? errName : "?", (int)r);
+    prog->cubin.clear();
+  }
+  return cuModuleLoadDataEx(&prog->module, prog->ptx.c_str(), nOpts, opts, optVals);
+}
+
 cl_program clCreateProgramWithBinary(cl_context ctx, unsigned nDevices, const cl_device_id*,
                                       const size_t* lengths, const unsigned char** binaries,
                                       int* binaryStatus, int* err) {
-  // "Binary" in CUDA land = PTX string
+  // The "binary" is the PTX, followed by the CUBIN when there is one (see CudaBinaryBlob.h)
   auto* prog = new _cl_program;
   prog->owner = programContext(ctx);
   if (lengths && binaries && lengths[0] > 0) {
-    prog->ptx.assign((const char*)binaries[0], lengths[0]);
+    const std::string blob((const char*)binaries[0], lengths[0]);
+    if (cuda_blob::split(blob, prog->ptx, prog->cubin) == cuda_blob::Split::BareElf) {
+      fprintf(stderr, "Cached kernel binary is a bare CUBIN (no PTX): recompiling\n");
+      if (binaryStatus) binaryStatus[0] = CL_INVALID_BINARY;
+      if (err) *err = CL_INVALID_BINARY;
+      return prog;
+    }
     prog->compiled = true;
-    // Load the module (JIT-compile PTX to SASS) in the program's own context
-    CUresult r = makeCurrent(prog->owner);
-    if (r == CUDA_SUCCESS) r = cuModuleLoadData(&prog->module, prog->ptx.c_str());
+ // Load in the program owning context: prefer the CUBIN, then fall back to the PTX JIT.
+ CUresult r = makeCurrent(prog->owner);
+ if (r == CUDA_SUCCESS) r = loadModule(prog, 0, nullptr, nullptr);
     if (r == CUDA_SUCCESS) {
       prog->moduleLoaded = true;
       prog->moduleRef = adoptModule(prog->module);
       if (binaryStatus) binaryStatus[0] = CL_SUCCESS;
     } else {
-      fprintf(stderr, "cuModuleLoadData from cache failed: %d, PTX size=%zu\n", (int)r, lengths[0]);
+      fprintf(stderr, "cuModuleLoadData from cache failed: %d, blob size=%zu\n", (int)r, lengths[0]);
       prog->compiled = false;
       if (binaryStatus) binaryStatus[0] = CL_INVALID_BINARY;
       if (err) { *err = CL_INVALID_BINARY; return prog; }
@@ -478,7 +501,22 @@ int clCompileProgram(cl_program prog, unsigned nDevices, const cl_device_id* dev
   }
 
   try {
-    prog->ptx = NvrtcProgram::compile(processedSource, "prpll_kernel.cu", nvrtcOpts, nvrtcHeaders);
+    // The PTX, and the CUBIN when NVRTC ran its ptxas for a real sm_XY (NvrtcArch.h falls back to compute_XY when
+    // this NVRTC does not know the GPU; then there is no CUBIN and the driver JITs the PTX as before).
+    auto images = NvrtcProgram::compileImages(processedSource, "prpll_kernel.cu", nvrtcOpts, nvrtcHeaders);
+    prog->ptx = std::move(images.ptx);
+    // PRPLL_PTX_ONLY=1 keeps the driver's JIT path, for comparing the two.
+    static const bool ptxOnly = getenv("PRPLL_PTX_ONLY") != nullptr;
+    prog->cubin = ptxOnly ? string{} : std::move(images.cubin);
+    // -use PTX_VERSION=x.y: an older driver rejects this NVRTC's CUBIN too, so the relabeled PTX goes through the JIT.
+    if (const string ptxVersion = cuda_blob::ptxVersionOverride(options ? options : ""); !ptxVersion.empty()) {
+      const string old = cuda_blob::setPtxVersion(prog->ptx, ptxVersion);
+      static std::once_flag logged;
+      std::call_once(logged, [&] {
+        fprintf(stderr, "PTX_VERSION: relabeling the PTX from version %s to %s\n", old.c_str(), ptxVersion.c_str());
+      });
+      prog->cubin.clear();
+    }
     prog->compiled = true;
     g_lastBuildLog.clear();
   } catch (const exception& e) {
@@ -503,7 +541,9 @@ int clCompileProgram(cl_program prog, unsigned nDevices, const cl_device_id* dev
     return CL_COMPILE_PROGRAM_FAILURE;
   }
 
-  // If --maxrregcount is set it seems nvrtc compile ignores the setting.  Instead modify the PTX and load the modified PTX.
+  // NVRTC accepts --maxrregcount but its CUBIN's register use ignores it (seen with CUDA 13.0: 24 registers asked
+  // for carryFused, 64 used), while the driver's JIT honors a .maxnreg directive spliced into the PTX.  So a kernel
+  // that asks for a register cap drops the CUBIN and takes the PTX path; the rest keep the CUBIN.
 
   if (maxregcount) {
     string maxntidPattern = ".maxntid ";
@@ -514,6 +554,7 @@ int clCompileProgram(cl_program prog, unsigned nDevices, const cl_device_id* dev
       prog->ptx.insert(pos, maxnregPattern);
       startpos = pos + 20;
     }
+    prog->cubin.clear();
   }
 
   return CL_SUCCESS;
@@ -537,6 +578,7 @@ cl_program clLinkProgram(cl_context ctx, unsigned nDevices, const cl_device_id*,
   auto* linked = new _cl_program;
   linked->owner = owner;
   linked->ptx = progs[0]->ptx;
+  linked->cubin = progs[0]->cubin;
   linked->compiled = true;
   // Carry preprocessed source through for KERNEL(N) parsing in clCreateKernel
   for (unsigned i = 0; i < nProgs; ++i) {
@@ -557,7 +599,7 @@ cl_program clLinkProgram(cl_context ctx, unsigned nDevices, const cl_device_id*,
     (void*)(size_t)sizeof(jitErrorLog), (void*)jitErrorLog,
     (void*)(size_t)sizeof(jitInfoLog), (void*)jitInfoLog
   };
-  CUresult r = cuModuleLoadDataEx(&linked->module, linked->ptx.c_str(), 4, jitOpts, jitOptVals);
+  CUresult r = loadModule(linked, 4, jitOpts, jitOptVals);
   if (r != CUDA_SUCCESS) {
     const char* errName = nullptr;
     cuGetErrorName(r, &errName);
@@ -615,9 +657,9 @@ int clBuildProgram(cl_program prog, unsigned nDevices, const cl_device_id* devic
   int err = clCompileProgram(prog, nDevices, devices, options, 0, nullptr, nullptr, nullptr, nullptr);
   if (err != CL_SUCCESS) return err;
 
-  CUresult r = makeCurrent(prog->owner);
-  if (r != CUDA_SUCCESS) return clStatusFromCu(r);
-  r = cuModuleLoadData(&prog->module, prog->ptx.c_str());
+ CUresult r = makeCurrent(prog->owner);
+ if (r != CUDA_SUCCESS) return clStatusFromCu(r);
+ r = loadModule(prog, 0, nullptr, nullptr);
   if (r != CUDA_SUCCESS) return CL_BUILD_PROGRAM_FAILURE;
   prog->moduleLoaded = true;
   prog->moduleRef = adoptModule(prog->module);
@@ -638,15 +680,19 @@ int clGetProgramBuildInfo(cl_program prog, cl_device_id, cl_program_build_info i
 
 int clGetProgramInfo(cl_program prog, cl_program_info info, size_t size, void* value, size_t* sizeRet) {
   if (!prog) return CL_INVALID_PROGRAM;
+  // The cache blob: the PTX, then the CUBIN behind its marker when one loaded (see CudaBinaryBlob.h).
   if (info == CL_PROGRAM_BINARY_SIZES) {
-    size_t ptxSize = prog->ptx.size();
+    size_t blobSize = cuda_blob::join(prog->ptx, prog->cubin).size();
     if (sizeRet) *sizeRet = sizeof(size_t);
-    if (value && size >= sizeof(size_t)) memcpy(value, &ptxSize, sizeof(size_t));
+    if (value && size >= sizeof(size_t)) memcpy(value, &blobSize, sizeof(size_t));
   } else if (info == CL_PROGRAM_BINARIES) {
     if (sizeRet) *sizeRet = sizeof(unsigned char*);
     if (value && size >= sizeof(unsigned char*)) {
       unsigned char** ptrs = (unsigned char**)value;
-      if (ptrs[0]) memcpy(ptrs[0], prog->ptx.data(), prog->ptx.size());
+      if (ptrs[0]) {
+        const string blob = cuda_blob::join(prog->ptx, prog->cubin);
+        memcpy(ptrs[0], blob.data(), blob.size());
+      }
     }
   }
   return CL_SUCCESS;
