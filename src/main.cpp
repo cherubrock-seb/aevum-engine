@@ -17,6 +17,8 @@
 #include "tune.h"
 
 #include <filesystem>
+#include <stdexcept>
+#include <system_error>
 #include <thread>
 // #include <format> from GCC-13 onwards
 
@@ -88,7 +90,9 @@ int main(int argc, char **argv) {
       Args args{true};
       args.parse(mainLine);
       if (!args.dir.empty()) {
-        fs::current_path(args.dir);
+        std::error_code ec;
+        fs::current_path(args.dir, ec);
+        if (ec) { throw std::runtime_error("cannot use -dir '" + args.dir + "': " + ec.message()); }
       }
     }
 
@@ -150,6 +154,10 @@ int main(int argc, char **argv) {
     log("Exiting because \"%s\"\n", mes);
   } catch (const string& mes) {
     log("Exiting because \"%s\"\n", mes.c_str());
+  } catch (const std::exception& e) {
+    // E.g. -dir naming a directory that does not exist.  Like the cases above this is logged and ends the run, with status 1.
+    log("Exiting because of exception %s: %s\n", typeName(e), e.what());
+    exitCode = 1;
   }
 
   log("Bye\n");

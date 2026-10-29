@@ -650,3 +650,20 @@ test-cuda-binary-blob: $(CUDA_BINARY_BLOB_TEST)
 $(CUDA_BINARY_BLOB_TEST): tests/cuda_binary_blob_test.cpp src/cuda/CudaBinaryBlob.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_binary_blob_test.cpp -o $@
+
+# File errors (CRC/read/write) are std::exceptions that the top-level handlers catch (host only, no device)
+FILE_ERRORS_TEST := build-tests/aevum-file-errors-test
+.PHONY: test-file-errors-std-exception
+test-host: test-file-errors-std-exception
+test-file-errors-std-exception: $(FILE_ERRORS_TEST)
+	$(FILE_ERRORS_TEST)
+
+$(FILE_ERRORS_TEST): tests/file_errors_std_exception_test.cpp src/File.h src/Background.h src/File.cpp src/log.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc -pthread tests/file_errors_std_exception_test.cpp src/File.cpp src/log.cpp src/common.cpp src/fs.cpp src/timeutil.cpp -o $@
+
+# -dir naming a missing directory is reported, not an uncaught exception; needs the binary but no GPU.
+.PHONY: test-main-missing-dir
+test-host: test-main-missing-dir
+test-main-missing-dir: aevum
+	python3 tests/main_missing_dir_test.py $(BIN)/aevum
