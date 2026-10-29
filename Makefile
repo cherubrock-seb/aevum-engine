@@ -129,6 +129,11 @@ test-small-factor-gpu: engine-lib
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) tests/engine_small_factor_gpu_test.cpp $(DL_LIBS) -o build-tests/aevum-engine-small-factor-gpu-test
 	build-tests/aevum-engine-small-factor-gpu-test build-engine/libaevum_engine.so $${AEVUM_TEST_DEVICE:-0} .
 
+# Device test (OpenCL; PoCL is enough): a faulting PRP -use tuner probe must not take the production engine down.
+.PHONY: test-prp-use-isolation-gpu
+test-prp-use-isolation-gpu: engine-lib
+	bash tests/prp_use_isolation_gpu.sh $(ENGINE_LIB) $${AEVUM_TEST_DEVICE:-0}
+
 clean:
 	rm -rf build-debug build-release build-cuda build-engine build-tests build-examples
 
