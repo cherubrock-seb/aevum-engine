@@ -6,6 +6,7 @@
 #include "clwrap.h"
 #include "gpuid.h"
 #include "Proof.h"
+#include "StrictInt.h"
 
 #include <vector>
 #include <string>
@@ -16,8 +17,8 @@
 #include <sstream>
 #include <algorithm>
 
-// This is a copy of the args.verbose flag.  It allows the CUDA wrapper to access the flag.
-bool prpll_verbose = 0;
+// This is a copy of the args.verbose level.  It allows the CUDA wrapper to access the value.
+int prpll_verbose = 0;
 
 int Args::value(const string& key, int valNotFound) const {
   auto it = flags.find(key);
@@ -149,7 +150,7 @@ named "config.txt" in the Aevum run directory.
 -pool <dir>        : specify a directory with the shared (pooled) worktodo.txt and results.txt
                      Multiple Aevum instances, each in its own directory, can share a pool of assignments and report
                      the results back to the common pool.
--verbose           : print more log, useful for developers
+-verbose [<level>] : print more log, useful for developers; level 99 also runs the developer self-tests
 -version           : print only the version and exit
 -user <name>       : specify the mersenne.org user name (for result reporting)
 -workers <N>       : specify the number of parallel PRP tests to run (default 1)
@@ -341,8 +342,13 @@ void Args::parse(const string& line) {
     } else if (key == "-carryTune") {
       carryTune = true;
     } else if (key == "-verbose" || key == "-v") {
-      verbose = true;
-      prpll_verbose = true;
+      int level = 1;
+      if (!s.empty() && (!parseStrictInt(s, level) || level < 0)) {
+        log("-verbose expects an optional level >= 0 (got '%s')\n", s.c_str());
+        throw "-verbose [<level>]";
+      }
+      verbose = level;
+      prpll_verbose = level;
     } else if (key == "-time") {
       profile = true;
     } else if (key == "-workers") {
