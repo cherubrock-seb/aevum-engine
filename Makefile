@@ -783,3 +783,9 @@ test-host: test-selftest-wavefront-guard
 test-host: test-proof-result-survival
 test-proof-result-survival:
 	python3 tests/proof_result_survival_source_test.py src/Gpu.cpp
+
+# timeStr(): reentrant time conversion, since every worker thread logs
+.PHONY: test-time-reentrant
+test-host: test-time-reentrant
+test-time-reentrant:
+	python3 tests/time_reentrant_source_test.py
