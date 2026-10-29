@@ -102,6 +102,37 @@ int main() {
       tooLargeRejected,
       "too-large forced FFT was not rejected before GPU creation");
 
+  for (const std::string adaptivePfa : {
+           "pfa9:4:512:9:512:202",
+           "pfa9fast:4:512:9:512:202"
+       }) {
+    bool adaptiveTooLargeRejected = false;
+
+    try {
+      (void) FFTConfig::bestFit(
+          args, 1000003u, adaptivePfa);
+    } catch (const std::runtime_error& e) {
+      adaptiveTooLargeRejected =
+          std::string(e.what()).find(
+              "too large for exponent") != std::string::npos;
+    }
+
+    require(
+        adaptiveTooLargeRejected,
+        "adaptive PFA9 Type4 bypassed the minimum BPW gate");
+  }
+
+  FFTConfig validAdaptivePfa =
+      FFTConfig::bestFit(
+          args, 20000003u,
+          "pfa9:4:512:9:512:202");
+
+  require(
+      validAdaptivePfa.isPfa() &&
+      validAdaptivePfa.shape.fft_type == FFT3161 &&
+      validAdaptivePfa.adaptive_type4_elided,
+      "valid adaptive PFA9 Type4 behavior changed");
+
   const std::string small = "1:256:2:256:101";
 
   bool tooSmallRejected = false;

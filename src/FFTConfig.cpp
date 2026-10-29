@@ -754,6 +754,19 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
     // fits, execute the same requested shape/variant without the redundant
     // FP32 plane.  Use pfa9full:4 only for the true three-plane diagnostic path.
     if (fft.adaptive_type4_request) {
+      // Adaptive Type-4 PFA9 can return the paired FFT3161 plan before the
+      // common explicit-plan capacity checks below.  Enforce the same
+      // minimum-bits-per-word gate before that early return.
+      const double adaptive_bpw = E / double(fft.size());
+      if (adaptive_bpw < fft.minBpw()) {
+        throw std::runtime_error(
+            "Aevum FFT plan " + fft.spec() +
+            " is too large for exponent " + std::to_string(E) +
+            " (" + std::to_string(adaptive_bpw) + " bits/word < " +
+            std::to_string(fft.minBpw()) +
+            "); use AUTO or a smaller plan");
+      }
+
       FFTConfig paired{FFTShape{FFT3161, fft.shape.width, fft.shape.middle, fft.shape.height},
                        fft.variant, fft.carry};
       paired.pfa_radix = fft.pfa_radix;
