@@ -659,6 +659,12 @@ $(PROOF_REDUCE_POWER_TEST): tests/proof_reduce_power_test.cpp src/Proof.cpp src/
 		tests/proof_reduce_power_test.cpp src/Proof.cpp src/File.cpp src/log.cpp src/common.cpp src/fs.cpp src/timeutil.cpp src/sha3.cpp src/md5.cpp \
 		$(TEST_GC_LINK) -o $@
 
+# Gpu::saveProof() retries at a lower proof power on a corrupt residue (source check, no device)
+.PHONY: test-proof-crc-retry
+test-host: test-proof-crc-retry
+test-proof-crc-retry:
+	python3 tests/proof_crc_retry_source_test.py
+
 # carryFused: warp sync() on both sides of the per-wavefront ready flag
 .PHONY: test-carryfused-ready-sync
 test-host: test-carryfused-ready-sync
