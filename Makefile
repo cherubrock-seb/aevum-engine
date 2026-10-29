@@ -394,6 +394,7 @@ STATS_SLOT_TEST := build-tests/aevum-stats-slot-test
 test-host: test-pr132-small-items
 test-pr132-small-items: test-stats-slot
 	python3 tests/kernel_config_guards_test.py
+	python3 tests/carryfused_cs_fence_test.py
 	python3 tests/carryfused_weight_shift_modulus_test.py
 	python3 tests/carry_gf61_seed_overflow_test.py
 	python3 tests/prp_middle1_type_gate_test.py
