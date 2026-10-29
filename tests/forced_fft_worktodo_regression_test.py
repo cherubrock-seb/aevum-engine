@@ -102,6 +102,7 @@ int main() {
       tooLargeRejected,
       "too-large forced FFT was not rejected before GPU creation");
 
+#if !defined(__APPLE__)
   for (const std::string adaptivePfa : {
            "pfa9:4:512:9:512:202",
            "pfa9fast:4:512:9:512:202"
@@ -132,6 +133,28 @@ int main() {
       validAdaptivePfa.shape.fft_type == FFT3161 &&
       validAdaptivePfa.adaptive_type4_elided,
       "valid adaptive PFA9 Type4 behavior changed");
+#else
+  for (const std::string adaptivePfa : {
+           "pfa9:4:512:9:512:202",
+           "pfa9fast:4:512:9:512:202"
+       }) {
+    bool applePfaRejected = false;
+
+    try {
+      (void) FFTConfig::bestFit(
+          args, 1000003u, adaptivePfa);
+    } catch (const std::runtime_error& e) {
+      applePfaRejected =
+          std::string(e.what()).find(
+              "Apple OpenCL 1.2 supports only stock FFT3161") !=
+          std::string::npos;
+    }
+
+    require(
+        applePfaRejected,
+        "Apple explicit PFA rejection behavior changed");
+  }
+#endif
 
   const std::string small = "1:256:2:256:101";
 
