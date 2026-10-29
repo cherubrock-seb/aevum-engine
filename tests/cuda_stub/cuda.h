@@ -106,6 +106,7 @@ CUresult cuDriverGetVersion(int* driverVersion);
 CUresult cuDeviceGetCount(int* count);
 CUresult cuDeviceGet(CUdevice* device, int ordinal);
 CUresult cuDeviceGetName(char* name, int len, CUdevice dev);
+CUresult cuDeviceGetPCIBusId(char* pci, int len, CUdevice dev);
 CUresult cuDeviceGetAttribute(int* pi, CUdevice_attribute attrib, CUdevice dev);
 CUresult cuDeviceTotalMem(size_t* bytes, CUdevice dev);
 
