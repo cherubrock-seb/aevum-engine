@@ -358,7 +358,7 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 heightRad
   }
   if (cuda_graph_squares) {
 #if defined(CUDA_BACKEND)
-    if (!isNvidiaGpu(id) || getNvidiaComputeCapability(id) < 750)
+    if (!isNvidiaGpu(id) || getNvidiaComputeCapability(id) < 705)   // major * 100 + minor: sm_75 is 705
       throw std::runtime_error("AEVUM_CUDA_GRAPH_SQUARES requires CUDA sm_75+");
 #else
     throw std::runtime_error("AEVUM_CUDA_GRAPH_SQUARES requires the CUDA backend");
