@@ -611,3 +611,9 @@ test-proof-power-zero:
 test-host: test-carryfused-ready-sync
 test-carryfused-ready-sync:
 	python3 tests/carryfused_ready_sync_source_test.py
+# selftest.cl must not pick its inline asm from a guessed wavefront size.
+.PHONY: test-selftest-wavefront-guard
+test-selftest-wavefront-guard:
+	python3 tests/selftest_wavefront_guard_source_test.py
+
+test-host: test-selftest-wavefront-guard
