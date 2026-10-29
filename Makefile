@@ -388,6 +388,16 @@ test-shufl-permutation: $(SHUFL_PERMUTATION_TEST)
 $(SHUFL_PERMUTATION_TEST): tests/shufl_permutation_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/shufl_permutation_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+# FP32 slowTrig accuracy (trigCoefsFP32 + trig.cl reducedCosSin emulated in float).  -ffp-contract=off: the emulation's
+# multiplies and fmas must round exactly as written.
+TRIG_FP32_TEST := build-tests/aevum-trig-fp32-accuracy-test
+.PHONY: test-trig-fp32-accuracy
+test-host: test-trig-fp32-accuracy
+test-trig-fp32-accuracy: $(TRIG_FP32_TEST)
+	$(TRIG_FP32_TEST)
+$(TRIG_FP32_TEST): tests/trig_fp32_accuracy_test.cpp src/Trig.cpp src/Trig.h src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 -ffp-contract=off $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/trig_fp32_accuracy_test.cpp src/Trig.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp -o $@
 # PR132 cumulative semantic integration
 STATS_SLOT_TEST := build-tests/aevum-stats-slot-test
 .PHONY: test-pr132-small-items test-stats-slot
