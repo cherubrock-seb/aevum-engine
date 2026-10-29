@@ -204,6 +204,9 @@ named "config.txt" in the Aevum run directory.
   -use INPLACE=n   : Perform tranforms in-place.  Great if the reduced memory usage fits in the GPU's L2 cache.
                      0 = not in-place, 1 = nVidia friendly access pattern, 2 = AMD friendly access pattern.
   -use PAD=<val>   : insert pad bytes to possibly improve memory access patterns.  Val is number bytes to pad.
+  -use CS_FENCE=0|1 : device-scope release/acquire fences in carryFused's hand-offs between workgroups.
+                     Default 1 except on AMD and nVidia.  If carryFused gives errors that -carry long does not, try 1.
+  -use CS_ATOMIC=0|1 : carryFused's carry shuttle accessed with device-scope atomics.  Default 1 except on AMD and nVidia.
   -use MIDDLE_IN_LDS_TRANSPOSE=0|1  : Transpose values in local memory before writing to global memory
   -use MIDDLE_OUT_LDS_TRANSPOSE=0|1 : Transpose values in local memory before writing to global memory
   -use TABMUL_CHAIN=<val>: Controls how trig values are obtained in WIDTH and HEIGHT when FFT-spec is 1.
