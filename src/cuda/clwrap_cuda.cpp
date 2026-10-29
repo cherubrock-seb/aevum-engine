@@ -35,7 +35,10 @@ using namespace std;
 // Track allocated cl_mem objects so clSetKernelArg can distinguish buffer args from scalars.
 // In OpenCL, buffer args are passed as &memobj where memobj is cl_mem (a pointer to _cl_mem).
 // We need to convert these to CUdeviceptr for CUDA kernel launch.
+// The set is shared by every thread that drives a Gpu (-workers N runs N of them at once), so all access goes
+// through g_allocatedBuffersMutex.
 static unordered_set<cl_mem> g_allocatedBuffers;
+static std::mutex g_allocatedBuffersMutex;
 
 // CUDA autotune temporarily creates a second context. Keep the live
 // contexts in creation order so destroying a temporary tuning context restores
@@ -784,10 +787,23 @@ int clSetKernelArg(cl_kernel k, unsigned pos, size_t size, const void* value) {
   // We need to store the CUdeviceptr (GPU address) instead of the cl_mem (host pointer).
   if (size == sizeof(cl_mem) && value) {
     cl_mem mem = *(cl_mem*)value;
-    if (mem && g_allocatedBuffers.count(mem)) {
-      CUdeviceptr devPtr = mem->ptr;
-      k->setArg(pos, sizeof(CUdeviceptr), &devPtr);
-      return CL_SUCCESS;
+    if (mem) {
+      // Look the buffer up and copy its device pointer under the lock: another worker may be creating or releasing
+      // buffers at the same time (an insert can rehash the set under a concurrent lookup, and a release deletes the
+      // _cl_mem).
+      CUdeviceptr devPtr = 0;
+      bool isBuffer = false;
+      {
+        std::lock_guard<std::mutex> lock(g_allocatedBuffersMutex);
+        if (g_allocatedBuffers.count(mem)) {
+          isBuffer = true;
+          devPtr = mem->ptr;
+        }
+      }
+      if (isBuffer) {
+        k->setArg(pos, sizeof(CUdeviceptr), &devPtr);
+        return CL_SUCCESS;
+      }
     }
     // NULL cl_mem → pass a null device pointer
     if (!mem) {
@@ -828,7 +844,10 @@ cl_mem clCreateBuffer(cl_context ctx, cl_mem_flags flags, size_t size, void* hos
       return nullptr;
     }
   }
-  g_allocatedBuffers.insert(buf);
+  {
+    std::lock_guard<std::mutex> lock(g_allocatedBuffersMutex);
+    g_allocatedBuffers.insert(buf);
+  }
   if (err) *err = CL_SUCCESS;
   return buf;
 }
@@ -839,7 +858,10 @@ int clReleaseMemObject(cl_mem buf) {
     // Free in the context the memory was allocated in, not whichever one the shim made current last.  If that
     // context is gone, cuCtxDestroy already freed the memory.
     CudaContextScope owner(buf->owner);
-    g_allocatedBuffers.erase(buf);
+    {
+      std::lock_guard<std::mutex> lock(g_allocatedBuffersMutex);
+      g_allocatedBuffers.erase(buf);
+    }
     CUresult const r = owner.status() == CUDA_SUCCESS ? cuMemFree(buf->ptr) : owner.status();
     status = clStatusFromCu(r);
     delete buf;
