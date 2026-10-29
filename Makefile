@@ -477,6 +477,15 @@ test-apple-fftp61-seed: $(APPLE_FFTP61_SEED_TEST)
 $(APPLE_FFTP61_SEED_TEST): tests/apple_fftp61_scalar_seed_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(wildcard src/cl/*.cl)
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/apple_fftp61_scalar_seed_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
+# math.cl: every i96 implementation provides both make_i96(i64, u32) and make_i96(i64, u64) (device test; any OpenCL device)
+I96_MAKE_TEST := build-tests/aevum-i96-make-test
+.PHONY: test-i96-make
+test-host: test-i96-make
+test-i96-make: $(I96_MAKE_TEST)
+	$(I96_MAKE_TEST)
+$(I96_MAKE_TEST): tests/i96_make_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/i96_make_test.cpp src/clwrap.cpp src/log.cpp src/File.cpp src/common.cpp src/fs.cpp src/timeutil.cpp $(OPENCL_LIBS) -o $@
 # PR134 cumulative semantic integration
 APPLE_TAILZERO_TEST := build-tests/aevum-apple-tailzero-halfline-test
 .PHONY: test-pr134-small-items test-apple-tailzero-halfline
