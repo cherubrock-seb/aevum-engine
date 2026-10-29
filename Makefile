@@ -600,6 +600,12 @@ test-host: test-proof-background-join
 test-proof-background-join:
 	python3 tests/proof_background_join_source_test.py
 
+# isPrimePRP() runs without a ProofSet when the proof power is 0 (source check, no device)
+.PHONY: test-proof-power-zero
+test-host: test-proof-power-zero
+test-proof-power-zero:
+	python3 tests/proof_power_zero_source_test.py
+
 # ProofSet::reducePower() rebuilds the checkpoint table (host only, no device)
 PROOF_REDUCE_POWER_TEST := build-tests/aevum-proof-reduce-power-test
 .PHONY: test-proof-reduce-power
