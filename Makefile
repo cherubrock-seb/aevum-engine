@@ -667,3 +667,13 @@ $(FILE_ERRORS_TEST): tests/file_errors_std_exception_test.cpp src/File.h src/Bac
 test-host: test-main-missing-dir
 test-main-missing-dir: aevum
 	python3 tests/main_missing_dir_test.py $(BIN)/aevum
+
+# The CUDA shim answers CL_DEVICE_TOPOLOGY_AMD from the device's PCI bus id (-pci), using the shared host CUDA stub.
+CUDA_TOPOLOGY_PCI_TEST := build-tests/aevum-cuda-topology-pci-test
+.PHONY: test-cuda-topology-pci
+test-host: test-cuda-topology-pci
+test-cuda-topology-pci: $(CUDA_TOPOLOGY_PCI_TEST)
+	$(CUDA_TOPOLOGY_PCI_TEST)
+$(CUDA_TOPOLOGY_PCI_TEST): tests/cuda_topology_pci_test.cpp $(wildcard tests/cuda_stub/*) src/cuda/clwrap_cuda.cpp $(wildcard src/cuda/*.h) src/common.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Wno-unused-parameter -DCUDA_BACKEND -Isrc -Itests/cuda_stub tests/cuda_topology_pci_test.cpp tests/cuda_stub/stub_driver.cpp src/cuda/clwrap_cuda.cpp -o $@
