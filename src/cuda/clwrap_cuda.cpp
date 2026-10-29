@@ -74,6 +74,25 @@ static void ensureContextCurrent() {
   }
 }
 
+// Makes an object's own context current on this thread: the context its program, kernel, queue or event was created
+// in.  The shim's newest context (ensureContextCurrent) is the wrong one whenever several are alive (an engine next to
+// an autotune context, workers or engines on other devices), and it is per process while the current context is per
+// thread.  Like ensureContextCurrent it leaves the context current; a null owner falls back to the newest context.
+static CUresult makeCurrent(CUcontext owner) {
+  if (!owner) {
+    ensureContextCurrent();
+    return CUDA_SUCCESS;
+  }
+  CUcontext current{};
+  if (cuCtxGetCurrent(&current) == CUDA_SUCCESS && current == owner) return CUDA_SUCCESS;
+  return cuCtxSetCurrent(owner);
+}
+
+// The context a program made for `ctx` belongs to: the given one, else the shim's newest.
+static CUcontext programContext(cl_context ctx) {
+  return ctx ? ctx->ctx : g_cudaContext;
+}
+
 // Every loaded CUmodule is unloaded when the last program or kernel using it is released, in its own context and only
 // while that context is alive (see CudaModuleLife.h).  Never destroyed, so that a program or kernel released during
 // static destruction at exit still finds it.
@@ -221,6 +240,7 @@ int clReleaseCommandQueue(cl_command_queue q) {
 cl_program clCreateProgramWithSource(cl_context ctx, unsigned count, const char** strings,
                                       const size_t* lengths, int* err) {
   auto* prog = new _cl_program;
+  prog->owner = programContext(ctx);
   for (unsigned i = 0; i < count; i++) {
     if (lengths && lengths[i]) {
       prog->source.append(strings[i], lengths[i]);
@@ -237,12 +257,13 @@ cl_program clCreateProgramWithBinary(cl_context ctx, unsigned nDevices, const cl
                                       int* binaryStatus, int* err) {
   // "Binary" in CUDA land = PTX string
   auto* prog = new _cl_program;
+  prog->owner = programContext(ctx);
   if (lengths && binaries && lengths[0] > 0) {
     prog->ptx.assign((const char*)binaries[0], lengths[0]);
     prog->compiled = true;
-    // Load the module (JIT-compile PTX to SASS)
-    ensureContextCurrent();
-    CUresult r = cuModuleLoadData(&prog->module, prog->ptx.c_str());
+    // Load the module (JIT-compile PTX to SASS) in the program's own context
+    CUresult r = makeCurrent(prog->owner);
+    if (r == CUDA_SUCCESS) r = cuModuleLoadData(&prog->module, prog->ptx.c_str());
     if (r == CUDA_SUCCESS) {
       prog->moduleLoaded = true;
       prog->moduleRef = adoptModule(prog->module);
@@ -501,15 +522,20 @@ int clCompileProgram(cl_program prog, unsigned nDevices, const cl_device_id* dev
 cl_program clLinkProgram(cl_context ctx, unsigned nDevices, const cl_device_id*,
                           const char* options, unsigned nProgs, const cl_program* progs,
                           void (*)(cl_program, void*), void*, int* err) {
-  ensureContextCurrent();
   // In CUDA, compilation produces PTX directly — no separate link step needed.
-  // Just load the PTX as a CUmodule.
+  // Just load the PTX as a CUmodule, in the context the program is linked for.
   if (!progs || nProgs == 0 || !progs[0] || !progs[0]->compiled) {
     if (err) *err = CL_LINK_PROGRAM_FAILURE;
     return nullptr;
   }
+  const CUcontext owner = ctx ? ctx->ctx : progs[0]->owner ? progs[0]->owner : g_cudaContext;
+  if (CUresult r = makeCurrent(owner); r != CUDA_SUCCESS) {
+    if (err) *err = clStatusFromCu(r);
+    return nullptr;
+  }
 
   auto* linked = new _cl_program;
+  linked->owner = owner;
   linked->ptx = progs[0]->ptx;
   linked->compiled = true;
   // Carry preprocessed source through for KERNEL(N) parsing in clCreateKernel
@@ -589,7 +615,9 @@ int clBuildProgram(cl_program prog, unsigned nDevices, const cl_device_id* devic
   int err = clCompileProgram(prog, nDevices, devices, options, 0, nullptr, nullptr, nullptr, nullptr);
   if (err != CL_SUCCESS) return err;
 
-  CUresult r = cuModuleLoadData(&prog->module, prog->ptx.c_str());
+  CUresult r = makeCurrent(prog->owner);
+  if (r != CUDA_SUCCESS) return clStatusFromCu(r);
+  r = cuModuleLoadData(&prog->module, prog->ptx.c_str());
   if (r != CUDA_SUCCESS) return CL_BUILD_PROGRAM_FAILURE;
   prog->moduleLoaded = true;
   prog->moduleRef = adoptModule(prog->module);
@@ -627,14 +655,18 @@ int clGetProgramInfo(cl_program prog, cl_program_info info, size_t size, void* v
 // ---- Kernel ----
 
 cl_kernel clCreateKernel(cl_program prog, const char* name, int* err) {
-  ensureContextCurrent();
   if (!prog || !prog->moduleLoaded) {
     if (err) *err = CL_INVALID_PROGRAM;
+    return nullptr;
+  }
+  if (CUresult r = makeCurrent(prog->owner); r != CUDA_SUCCESS) {
+    if (err) *err = clStatusFromCu(r);
     return nullptr;
   }
   auto* k = new _cl_kernel;
   k->name = name;
   k->parentModule = prog->module;
+  k->owner = prog->owner;
   CUresult r = cuModuleGetFunction(&k->func, prog->module, name);
   if (r != CUDA_SUCCESS) {
     fprintf(stderr, "cuModuleGetFunction('%s') failed: %d, moduleLoaded=%d, module=%p\n",
@@ -728,7 +760,7 @@ int clSetKernelArg(cl_kernel k, unsigned pos, size_t size, const void* value) {
 cl_mem clCreateBuffer(cl_context ctx, cl_mem_flags flags, size_t size, void* hostPtr, int* err) {
   auto* buf = new _cl_mem;
   buf->size = size;
-  ensureContextCurrent();
+  if (!ctx) ensureContextCurrent();
   // Allocate in the buffer's own context (the shim's current one when none is given) and remember it: the buffer is
   // freed there, whichever context is current when it is released.
   CudaContextScope owner(ctx ? ctx->ctx : nullptr);
@@ -806,7 +838,8 @@ int clEnqueueNDRangeKernel(cl_command_queue q, cl_kernel k, unsigned workDim,
                             const size_t* localSize, unsigned nWaits,
                             const cl_event* waits, cl_event* event) {
   if (!q || !k) return CL_INVALID_VALUE;
-  ensureContextCurrent();
+  // The launch, its events and a graph capture all happen in the queue's context.
+  if (CUresult r = makeCurrent(q->owner); r != CUDA_SUCCESS) return clStatusFromCu(r);
 
   size_t gs = globalSize[0];
   size_t ls = localSize ? localSize[0] : 256;
@@ -899,7 +932,8 @@ int clEnqueueReadBuffer(cl_command_queue q, cl_mem buf, cl_bool blocking,
                          unsigned nWaits, const cl_event* waits, cl_event* event) {
   // Must use stream-ordered copy because the stream was created with CU_STREAM_NON_BLOCKING,
   // which means cuMemcpyDtoH (NULL stream) won't wait for pending kernels on this stream.
-  CUresult r = cuMemcpyDtoHAsync(ptr, buf->ptr + offset, size, q->stream);
+  CUresult r = makeCurrent(q->owner);
+  if (r == CUDA_SUCCESS) r = cuMemcpyDtoHAsync(ptr, buf->ptr + offset, size, q->stream);
   if (r == CUDA_SUCCESS && blocking) {
     r = cuStreamSynchronize(q->stream);
   }
@@ -911,7 +945,8 @@ int clEnqueueWriteBuffer(cl_command_queue q, cl_mem buf, cl_bool blocking,
                           size_t offset, size_t size, const void* ptr,
                           unsigned nWaits, const cl_event* waits, cl_event* event) {
   // Must use stream-ordered copy (same reason as clEnqueueReadBuffer above)
-  CUresult r = cuMemcpyHtoDAsync(buf->ptr + offset, ptr, size, q->stream);
+  CUresult r = makeCurrent(q->owner);
+  if (r == CUDA_SUCCESS) r = cuMemcpyHtoDAsync(buf->ptr + offset, ptr, size, q->stream);
   if (r == CUDA_SUCCESS && blocking) {
     r = cuStreamSynchronize(q->stream);
   }
@@ -922,7 +957,8 @@ int clEnqueueWriteBuffer(cl_command_queue q, cl_mem buf, cl_bool blocking,
 int clEnqueueCopyBuffer(cl_command_queue q, cl_mem src, cl_mem dst,
                          size_t srcOffset, size_t dstOffset, size_t size,
                          unsigned nWaits, const cl_event* waits, cl_event* event) {
-  CUresult r = cuMemcpyDtoDAsync(dst->ptr + dstOffset, src->ptr + srcOffset, size, q->stream);
+  CUresult r = makeCurrent(q->owner);
+  if (r == CUDA_SUCCESS) r = cuMemcpyDtoDAsync(dst->ptr + dstOffset, src->ptr + srcOffset, size, q->stream);
   if (event) *event = nullptr;
   return clStatusFromCu(r);
 }
@@ -936,7 +972,9 @@ int clEnqueueFillBuffer(cl_command_queue q, cl_mem buf, const void* pattern,
   // allows, and rejects what OpenCL rejects instead of writing something the caller did not ask for.
   cuda_fill::Plan const p = cuda_fill::plan(pattern, patternSize, offset, size, buf->size);
   CUdeviceptr const dst = buf->ptr + p.offset;
-  CUresult r = CUDA_SUCCESS;
+  if (p.op == cuda_fill::Op::Invalid) return CL_INVALID_VALUE;
+  CUresult r = makeCurrent(q->owner);
+  if (r != CUDA_SUCCESS) return clStatusFromCu(r);
   switch (p.op) {
   case cuda_fill::Op::Invalid:
     return CL_INVALID_VALUE;
@@ -966,6 +1004,11 @@ int clEnqueueFillBuffer(cl_command_queue q, cl_mem buf, const void* pattern,
 }
 
 int clEnqueueMarkerWithWaitList(cl_command_queue q, unsigned nWaits, const cl_event* waits, cl_event* event) {
+  // The marker's event is created in the current context, which must be the queue's.
+  if (CUresult r = makeCurrent(q->owner); r != CUDA_SUCCESS) {
+    if (event) *event = nullptr;
+    return clStatusFromCu(r);
+  }
   if (nWaits) {
     for (unsigned int i = 0; i < nWaits; ++i) {
       cuStreamWaitEvent(q->stream, waits[i]->end, 0);
@@ -989,7 +1032,10 @@ int clFlush(cl_command_queue q) {
 int clFinish(cl_command_queue q) {
   // A kernel that faulted leaves a sticky error that cuStreamSynchronize returns: report it here, where the work
   // is waited for, rather than as the failure of whichever copy comes next.
-  return q ? clStatusFromCu(cuStreamSynchronize(q->stream)) : CL_SUCCESS;
+  if (!q) return CL_SUCCESS;
+  CUresult r = makeCurrent(q->owner);
+  if (r == CUDA_SUCCESS) r = cuStreamSynchronize(q->stream);
+  return clStatusFromCu(r);
 }
 
 // ---- Events ----
@@ -1003,7 +1049,9 @@ int clWaitForEvents(unsigned n, const cl_event* events) {
   int status = CL_SUCCESS;
   for (unsigned i = 0; i < n; i++) {
     if (events[i] && events[i]->end) {
-      int const st = clStatusFromCu(cuEventSynchronize(events[i]->end));
+      CUresult r = makeCurrent(events[i]->owner);
+      if (r == CUDA_SUCCESS) r = cuEventSynchronize(events[i]->end);
+      int const st = clStatusFromCu(r);
       if (st != CL_SUCCESS && status == CL_SUCCESS) status = st;  // keep waiting for the rest, report the first error
     }
   }
@@ -1017,7 +1065,9 @@ int clGetEventInfo(cl_event ev, cl_event_info info, size_t size, void* value, si
     if (ev->end) {
       // NOT_READY is running; any other failure is the sticky error of a faulted context and is reported as the
       // (negative) status of the command, not as complete.
-      status = cuda_error_map::eventStatusFromCu((int) cuEventQuery(ev->end));
+      CUresult r = makeCurrent(ev->owner);
+      if (r == CUDA_SUCCESS) r = cuEventQuery(ev->end);
+      status = cuda_error_map::eventStatusFromCu((int) r);
     }
     if (sizeRet) *sizeRet = sizeof(int);
     if (value && size >= sizeof(int)) memcpy(value, &status, sizeof(int));
@@ -1040,7 +1090,7 @@ int clGetEventProfilingInfo(cl_event ev, cl_profiling_info info, size_t size, vo
     timestamp = 0;  // Relative start
   } else if (info == CL_PROFILING_COMMAND_END || info == CL_PROFILING_COMMAND_COMPLETE) {
     float ms = 0;
-    cuEventElapsedTime(&ms, ev->start, ev->end);
+    if (makeCurrent(ev->owner) == CUDA_SUCCESS) cuEventElapsedTime(&ms, ev->start, ev->end);
     timestamp = (u64)(ms * 1e6);  // Convert ms to ns
   }
 
@@ -1223,7 +1273,7 @@ int clGetKernelArgInfo(cl_kernel k, unsigned pos, cl_kernel_arg_info info,
 int clGetKernelWorkGroupInfo(cl_kernel k, cl_device_id dev, cl_kernel_work_group_info info,
                               size_t size, void* value, size_t* sizeRet) {
   if (!k) return CL_INVALID_KERNEL;
-  ensureContextCurrent();
+  if (CUresult r = makeCurrent(k->owner); r != CUDA_SUCCESS) return clStatusFromCu(r);
   if (info == CL_KERNEL_COMPILE_WORK_GROUP_SIZE) {
     // Return the __launch_bounds__ value parsed from source during clCreateKernel.
     // This matches OpenCL's CL_KERNEL_COMPILE_WORK_GROUP_SIZE which returns reqd_work_group_size.
@@ -1250,7 +1300,7 @@ int clGetKernelWorkGroupInfo(cl_kernel k, cl_device_id dev, cl_kernel_work_group
 
 void* clSVMAlloc(cl_context ctx, cl_svm_mem_flags, size_t size, unsigned) {
   CUdeviceptr ptr = 0;
-  ensureContextCurrent();
+  if (!ctx) ensureContextCurrent();
   CudaContextScope owner(ctx ? ctx->ctx : nullptr);
   if (owner.status() != CUDA_SUCCESS || cuMemAlloc(&ptr, size) != CUDA_SUCCESS) return nullptr;
   return (void*)(uintptr_t)ptr;
@@ -1258,7 +1308,7 @@ void* clSVMAlloc(cl_context ctx, cl_svm_mem_flags, size_t size, unsigned) {
 
 void clSVMFree(cl_context ctx, void* ptr) {
   if (!ptr) return;
-  ensureContextCurrent();
+  if (!ctx) ensureContextCurrent();
   CudaContextScope owner(ctx ? ctx->ctx : nullptr);
   if (owner.status() == CUDA_SUCCESS) cuMemFree((CUdeviceptr)(uintptr_t)ptr);
 }
@@ -1276,7 +1326,11 @@ int clSetKernelArgSVMPointer(cl_kernel k, unsigned pos, const void* ptr) {
 bool cudaLoadRegLimitedKernel(cl_program prog, const char* kernelName, int maxRegs, int minBlocks) {
   if (!prog || !prog->moduleLoaded || prog->kernelExported)
     throw std::runtime_error("PTX register limit must precede kernel creation");
-  ensureContextCurrent();
+  // The replacement module belongs to the program's context, like the one it replaces.
+  if (CUresult r = makeCurrent(prog->owner); r != CUDA_SUCCESS) {
+    fprintf(stderr, "%s: cannot make the program's CUDA context current (%d)\n", kernelName, int(r));
+    return false;
+  }
   const string limited = aevumPtxWithRegisterLimit(prog->ptx, kernelName, maxRegs, minBlocks);
   CUmodule replacement{};
   char errors[8192] = {};
@@ -1298,13 +1352,13 @@ bool cudaLoadRegLimitedKernel(cl_program prog, const char* kernelName, int maxRe
 
 void cudaGraphBatchBegin(cl_command_queue q) {
   if (!q || q->profiling) throw std::runtime_error("CUDA square graph requires an unprofiled queue");
-  ensureContextCurrent();
+  if (makeCurrent(q->owner) != CUDA_SUCCESS) throw std::runtime_error("CUDA square graph: queue context is gone");
   if (!q->squareGraph) q->squareGraph = new AevumCudaGraphBatch;
   q->squareGraph->begin();
 }
 void cudaGraphBatchEnd(cl_command_queue q) {
   if (!q || !q->squareGraph) throw std::runtime_error("CUDA square graph not begun");
-  ensureContextCurrent();
+  if (makeCurrent(q->owner) != CUDA_SUCCESS) throw std::runtime_error("CUDA square graph: queue context is gone");
   q->squareGraph->launch(q->stream);
 }
 void cudaGraphBatchAbort(cl_command_queue q) noexcept {
@@ -1318,6 +1372,7 @@ void cudaGraphBatchAbort(cl_command_queue q) noexcept {
 // not the gaps between non-contiguous allocations.
 void cudaSetL2Persistent(cl_command_queue q, const std::vector<cl_mem>& buffers) {
   if (!q) return;
+  if (makeCurrent(q->owner) != CUDA_SUCCESS) return;
 
   // Find address span and total data size
   CUdeviceptr minAddr = ~(CUdeviceptr)0;
