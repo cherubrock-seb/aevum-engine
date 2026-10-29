@@ -267,6 +267,12 @@ std::future<KernelHolder> KernelCompiler::load(const string& fileName, const str
   return async(std::launch::async, &KernelCompiler::loadAux, this, fileName, kernelName, args);
 #else
   std::promise<KernelHolder> promise;
+  const auto start = std::chrono::steady_clock::now();
+  struct AddTime {
+    std::atomic<std::chrono::steady_clock::rep>& total;
+    std::chrono::steady_clock::time_point start;
+    ~AddTime() { total += (std::chrono::steady_clock::now() - start).count(); }
+  } add_time{loadTicks, start};
   promise.set_value(loadAux(fileName, kernelName, args));
   return promise.get_future();
 #endif

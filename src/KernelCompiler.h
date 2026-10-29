@@ -4,6 +4,8 @@
 
 #include "clwrap.h"
 
+#include <atomic>
+#include <chrono>
 #include <vector>
 #include <string>
 #include <future>
@@ -34,4 +36,10 @@ public:
   KernelCompiler(const Args& args, const Context* context, const string& clArgs);
   
   std::future<KernelHolder> load(const string& fileName, const string& kernelName, const string& args) const;
+
+  // Total time spent loading kernels (compiling them, or reading them from the kernel cache).
+  std::chrono::steady_clock::duration loadTime() const { return std::chrono::steady_clock::duration(loadTicks.load()); }
+
+private:
+  mutable std::atomic<std::chrono::steady_clock::rep> loadTicks{0};
 };

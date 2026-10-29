@@ -611,3 +611,13 @@ test-proof-power-zero:
 test-host: test-carryfused-ready-sync
 test-carryfused-ready-sync:
 	python3 tests/carryfused_ready_sync_source_test.py
+# The plan search's time budget counts measurement, not engine builds.
+TUNE_BUDGET_TEST := build-tests/aevum-tune-budget-test
+.PHONY: test-tune-budget
+test-host: test-tune-budget
+test-tune-budget: $(TUNE_BUDGET_TEST)
+	$(TUNE_BUDGET_TEST)
+	python3 tests/autotune_budget_source_test.py
+$(TUNE_BUDGET_TEST): tests/tune_budget_test.cpp src/TuneBudget.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/tune_budget_test.cpp -o $@
