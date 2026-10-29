@@ -677,3 +677,14 @@ test-cuda-topology-pci: $(CUDA_TOPOLOGY_PCI_TEST)
 $(CUDA_TOPOLOGY_PCI_TEST): tests/cuda_topology_pci_test.cpp $(wildcard tests/cuda_stub/*) src/cuda/clwrap_cuda.cpp $(wildcard src/cuda/*.h) src/common.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Wno-unused-parameter -DCUDA_BACKEND -Isrc -Itests/cuda_stub tests/cuda_topology_pci_test.cpp tests/cuda_stub/stub_driver.cpp src/cuda/clwrap_cuda.cpp -o $@
+
+# Signal: SIGTERM and SIGINT request a graceful stop, a second Ctrl-C exits (no GPU).
+# Quote-only include search prevents src/Signal.h from shadowing the C library signal.h on case-insensitive macOS filesystems.
+SIGNAL_TEST := build-tests/aevum-signal-test
+.PHONY: test-signal
+test-host: test-signal
+test-signal: $(SIGNAL_TEST)
+	$(SIGNAL_TEST)
+$(SIGNAL_TEST): tests/signal_test.cpp src/Signal.cpp src/Signal.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -iquote src tests/signal_test.cpp src/Signal.cpp -o $@
