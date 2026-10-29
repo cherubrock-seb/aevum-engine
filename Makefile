@@ -712,3 +712,9 @@ test-tune-budget: $(TUNE_BUDGET_TEST)
 $(TUNE_BUDGET_TEST): tests/tune_budget_test.cpp src/TuneBudget.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/tune_budget_test.cpp -o $@
+# selftest.cl must not pick its inline asm from a guessed wavefront size.
+.PHONY: test-selftest-wavefront-guard
+test-selftest-wavefront-guard:
+	python3 tests/selftest_wavefront_guard_source_test.py
+
+test-host: test-selftest-wavefront-guard
