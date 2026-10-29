@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <bitset>
 #include <limits>
+#include <optional>
 #include <iomanip>
 #include <sstream>
 #include <type_traits>
@@ -4118,8 +4119,11 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
   assert(checkStep % logStep == 0);
 
   u32 power = getProofPower(k);
-  
-  ProofSet proofSet{E, power};
+
+  // power == 0 means "proof generation disabled" (no complete set of residues can be built from here on).  ProofSet
+  // does not accept 0, so only construct one when there is a proof to make.
+  std::optional<ProofSet> proofSet;
+  if (power) { proofSet.emplace(E, power); }
 
   bool isPrime = false;
 
@@ -4138,7 +4142,7 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
 
   bool skipNextCheckUpdate = false;
 
-  u64 persistK = proofSet.next(k);
+  u64 persistK = proofSet ? proofSet->next(k) : u64(-1);
   enum LEAD_TYPE leadIn = LEAD_NONE;
 
   assert(k % blockSize == 0);
@@ -4183,7 +4187,7 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
         goto reload;
       }
       (*background)([=, E=this->E] { ProofSet::save(E, power, k, compactBits(rawData, E)); });
-      persistK = proofSet.next(k);
+      persistK = proofSet->next(k);
     }
 
     if (k == kEnd) {
@@ -4242,7 +4246,13 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
         doBigLog(k, res, ok, secsPerIt, kEndEnd, nErrors);
 
         if (k >= kEndEnd) {
-          fs::path proofFile = saveProof(args, proofSet);
+          // The proof residue at k == E is written by the background thread; make sure it is on disk before
+          // computeProof() reads it back.
+          fs::path proofFile;
+          if (proofSet) {
+            background->waitEmpty();
+            proofFile = saveProof(args, *proofSet);
+          }
           return {isPrime, finalRes64, nErrors, proofFile.string(), toHex(res2048)};
         }        
       } else {
