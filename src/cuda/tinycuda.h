@@ -14,6 +14,31 @@
 #include <cstring>
 #include <memory>
 
+// Makes `ctx` current on this thread for the scope (cuCtxPushCurrent) and restores the caller's context after
+// (cuCtxPopCurrent).  A CUDA object is freed in the context it was created in: with several contexts alive (several
+// devices or workers, autotune contexts, engines created and destroyed through the engine API) that is not
+// necessarily the one the shim made current last.  A null ctx changes nothing.
+class CudaContextScope {
+public:
+  explicit CudaContextScope(CUcontext ctx)
+    : status_(ctx ? cuCtxPushCurrent(ctx) : CUDA_SUCCESS), pushed_(ctx && status_ == CUDA_SUCCESS) {}
+  ~CudaContextScope() {
+    if (pushed_) {
+      CUcontext popped{};
+      cuCtxPopCurrent(&popped);
+    }
+  }
+  CudaContextScope(const CudaContextScope&) = delete;
+  CudaContextScope& operator=(const CudaContextScope&) = delete;
+
+  // CUDA_SUCCESS, or why `ctx` could not be made current (e.g. it was destroyed).
+  CUresult status() const { return status_; }
+
+private:
+  CUresult status_;
+  bool pushed_;
+};
+
 // ---- Opaque handle wrappers ----
 // OpenCL uses opaque pointer types (struct _cl_foo*).
 // CUDA uses different representations (int, pointer, u64).
@@ -35,6 +60,7 @@ struct _cl_command_queue {
   cl_context context;
   bool profiling;
   AevumCudaGraphBatch* squareGraph{nullptr};
+  CUcontext owner{};   // the context the stream was created in (context->ctx; the cl_context may be released first)
 };
 typedef _cl_command_queue* cl_command_queue;
 
@@ -42,6 +68,7 @@ typedef _cl_command_queue* cl_command_queue;
 struct _cl_mem {
   CUdeviceptr ptr;
   size_t size;
+  CUcontext owner{};   // the context the memory was allocated in, and is freed in
 };
 typedef _cl_mem* cl_mem;
 
@@ -112,9 +139,13 @@ struct _cl_event {
   CUevent end;
   bool hasTimings;
   u32 commandType;
+  CUcontext owner;   // the context current when the event was made: cuEventCreate creates its events there
 
-  _cl_event() : start{}, end{}, hasTimings{false}, commandType{0} {}
+  _cl_event() : start{}, end{}, hasTimings{false}, commandType{0}, owner{} { cuCtxGetCurrent(&owner); }
   ~_cl_event() {
+    if (!start && !end) return;
+    CudaContextScope scope(owner);
+    if (scope.status() != CUDA_SUCCESS) return;   // its context is gone, and cuCtxDestroy destroyed its events
     if (start) cuEventDestroy(start);
     if (end) cuEventDestroy(end);
   }
