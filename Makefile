@@ -599,3 +599,9 @@ $(STRICT_INT_TEST): tests/strict_int_test.cpp src/StrictInt.h
 test-host: test-carryfused-ready-sync
 test-carryfused-ready-sync:
 	python3 tests/carryfused_ready_sync_source_test.py
+
+# -dir naming a missing directory is reported, not an uncaught exception; needs the binary but no GPU.
+.PHONY: test-main-missing-dir
+test-host: test-main-missing-dir
+test-main-missing-dir: aevum
+	python3 tests/main_missing_dir_test.py $(BIN)/aevum
