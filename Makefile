@@ -552,6 +552,16 @@ test-cuda-error-map: $(CUDA_ERROR_MAP_TEST)
 $(CUDA_ERROR_MAP_TEST): tests/cuda_error_map_test.cpp src/cuda/CudaErrorMap.h src/GpuLost.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_error_map_test.cpp -o $@
+# The CUDA shim frees buffers, streams and events in their own context: the real clwrap_cuda.cpp built against a
+# recording stand-in for the CUDA driver (tests/cuda_stub, no CUDA needed).
+CUDA_RELEASE_CONTEXT_TEST := build-tests/aevum-cuda-release-context-test
+.PHONY: test-cuda-release-context
+test-host: test-cuda-release-context
+test-cuda-release-context: $(CUDA_RELEASE_CONTEXT_TEST)
+	$(CUDA_RELEASE_CONTEXT_TEST)
+$(CUDA_RELEASE_CONTEXT_TEST): tests/cuda_release_context_test.cpp tests/cuda_stub/cuda.h tests/cuda_stub/nvrtc.h src/cuda/clwrap_cuda.cpp $(wildcard src/cuda/*.h) src/common.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Wno-unused-parameter -DCUDA_BACKEND -Isrc -Itests/cuda_stub tests/cuda_release_context_test.cpp src/cuda/clwrap_cuda.cpp -o $@
 DATA_LAYOUT_TEST := build-tests/aevum-data-layout-test
 
 .PHONY: test-data-layout

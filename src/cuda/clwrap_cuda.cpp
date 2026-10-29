@@ -193,16 +193,27 @@ int clReleaseProgram(cl_program p) {
 }
 
 int clReleaseCommandQueue(cl_command_queue q) {
+  int status = CL_SUCCESS;
   if (q) {
-    if (q->squareGraph) {
-      ensureContextCurrent();
-      cuStreamSynchronize(q->stream);
-      delete q->squareGraph;
+    {
+      // The stream and its graphs belong to the queue's context, not necessarily the one the shim made current last.
+      CudaContextScope owner(q->owner);
+      CUresult r = owner.status();
+      if (r == CUDA_SUCCESS) {
+        if (q->squareGraph) {
+          r = cuStreamSynchronize(q->stream);
+          delete q->squareGraph;
+        }
+        CUresult const destroyed = cuStreamDestroy(q->stream);
+        if (r == CUDA_SUCCESS) r = destroyed;
+      }
+      // Else the context is gone and cuCtxDestroy destroyed the stream and graphs with it; the graph cache's host
+      // side is left alone rather than destroying handles that may since name another context's objects.
+      status = clStatusFromCu(r);
     }
-    cuStreamDestroy(q->stream);
     delete q;
   }
-  return CL_SUCCESS;
+  return status;
 }
 
 // ---- Program compilation (NVRTC) ----
@@ -718,7 +729,12 @@ cl_mem clCreateBuffer(cl_context ctx, cl_mem_flags flags, size_t size, void* hos
   auto* buf = new _cl_mem;
   buf->size = size;
   ensureContextCurrent();
-  CUresult r = cuMemAlloc(&buf->ptr, size);
+  // Allocate in the buffer's own context (the shim's current one when none is given) and remember it: the buffer is
+  // freed there, whichever context is current when it is released.
+  CudaContextScope owner(ctx ? ctx->ctx : nullptr);
+  CUresult r = owner.status();
+  if (r == CUDA_SUCCESS) r = cuCtxGetCurrent(&buf->owner);
+  if (r == CUDA_SUCCESS) r = cuMemAlloc(&buf->ptr, size);
   if (r != CUDA_SUCCESS) {
     delete buf;
     if (err) *err = clStatusFromCu(r);
@@ -734,13 +750,17 @@ cl_mem clCreateBuffer(cl_context ctx, cl_mem_flags flags, size_t size, void* hos
 }
 
 int clReleaseMemObject(cl_mem buf) {
+  int status = CL_SUCCESS;
   if (buf) {
-    ensureContextCurrent();
+    // Free in the context the memory was allocated in, not whichever one the shim made current last.  If that
+    // context is gone, cuCtxDestroy already freed the memory.
+    CudaContextScope owner(buf->owner);
     g_allocatedBuffers.erase(buf);
-    cuMemFree(buf->ptr);
+    CUresult const r = owner.status() == CUDA_SUCCESS ? cuMemFree(buf->ptr) : owner.status();
+    status = clStatusFromCu(r);
     delete buf;
   }
-  return CL_SUCCESS;
+  return status;
 }
 
 // ---- Command Queue ----
@@ -762,6 +782,7 @@ cl_command_queue clCreateCommandQueueWithProperties(cl_context ctx, cl_device_id
 
   // Make sure context is current
   cuCtxSetCurrent(ctx->ctx);
+  q->owner = ctx->ctx;
   CUresult r = cuStreamCreate(&q->stream, CU_STREAM_NON_BLOCKING);
   if (r != CUDA_SUCCESS) {
     delete q;
@@ -1221,16 +1242,19 @@ int clGetKernelWorkGroupInfo(cl_kernel k, cl_device_id dev, cl_kernel_work_group
 
 // ---- SVM (not used but must exist) ----
 
-void* clSVMAlloc(cl_context, cl_svm_mem_flags, size_t size, unsigned) {
-  CUdeviceptr ptr;
+void* clSVMAlloc(cl_context ctx, cl_svm_mem_flags, size_t size, unsigned) {
+  CUdeviceptr ptr = 0;
   ensureContextCurrent();
-  cuMemAlloc(&ptr, size);
+  CudaContextScope owner(ctx ? ctx->ctx : nullptr);
+  if (owner.status() != CUDA_SUCCESS || cuMemAlloc(&ptr, size) != CUDA_SUCCESS) return nullptr;
   return (void*)(uintptr_t)ptr;
 }
 
-void clSVMFree(cl_context, void* ptr) {
+void clSVMFree(cl_context ctx, void* ptr) {
+  if (!ptr) return;
   ensureContextCurrent();
-  cuMemFree((CUdeviceptr)(uintptr_t)ptr);
+  CudaContextScope owner(ctx ? ctx->ctx : nullptr);
+  if (owner.status() == CUDA_SUCCESS) cuMemFree((CUdeviceptr)(uintptr_t)ptr);
 }
 
 int clSetKernelArgSVMPointer(cl_kernel k, unsigned pos, const void* ptr) {
