@@ -855,7 +855,7 @@ snprintf(buf, sizeof(buf), "%#.9gf", (double)(float)v);
 return string(buf);
 };
 string sinCoefs = "{", cosCoefs = "{";
-for (u32 i = 0; i < 8; ++i) {
+for (u32 i = 0; i < coefs.sinCoefs.size(); ++i) {
 sinCoefs += lit(coefs.sinCoefs[i]) + ',';
 cosCoefs += lit(coefs.cosCoefs[i]) + ',';
 }
