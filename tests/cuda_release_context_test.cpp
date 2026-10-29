@@ -2,175 +2,17 @@
 //
 // With several contexts alive (several devices or workers, autotune contexts, engines created and destroyed through
 // the engine API), clReleaseMemObject used to make the newest context current and cuMemFree there, ignoring the
-// result.  This test builds the real src/cuda/clwrap_cuda.cpp against a recording stand-in for the CUDA driver
-// (tests/cuda_stub/cuda.h and the cu* functions below): no GPU and no CUDA install needed.  The stand-in keeps a
-// per-thread context stack like the driver, and fails a free, a stream or an event destroyed in the wrong context the
-// way the driver can (CUDA_ERROR_INVALID_VALUE / CUDA_ERROR_INVALID_CONTEXT).
+// result.  This test builds the real src/cuda/clwrap_cuda.cpp against the recording stand-in driver in
+// tests/cuda_stub: no GPU and no CUDA install needed.
 #include "cuda/tinycuda.h"
-#include "cuda/cudawrap.h"
+#include "stub_driver.h"
 
-#include <algorithm>
 #include <cstdio>
 #include <cstring>
-#include <map>
-#include <string>
-#include <vector>
 
-bool prpll_verbose = false;
-std::string NvrtcProgram::preprocessOpenCL(const std::string& source) { return source; }
-std::string NvrtcProgram::compile(const std::string&, const std::string&, const std::vector<std::string>&,
-                                  const std::vector<std::pair<std::string, std::string>>&) { return {}; }
+using namespace cuda_stub;
+
 const char* aevumCudaLastError();
-
-// ---- The stand-in driver ----
-
-struct CUctx_st { int id; bool alive; };
-struct CUstream_st { CUcontext owner; };
-struct CUevent_st { CUcontext owner; };
-
-namespace {
-std::vector<CUcontext> stack;                   // this thread's context stack; back() is current
-std::map<CUdeviceptr, CUcontext> allocations;   // live device memory and the context it was allocated in
-CUdeviceptr nextPtr = 0x10000;
-
-struct Call { std::string what; CUcontext current; CUcontext owner; };
-std::vector<Call> calls;                        // every free / destroy, with the context current at the time
-
-CUresult failNextFree = CUDA_SUCCESS;           // make the next cuMemFree fail with this
-
-CUcontext current() { return stack.empty() ? nullptr : stack.back(); }
-bool alive(CUcontext c) { return c && c->alive; }
-
-// Like the driver: an object can only be freed or destroyed with its own (live) context current.
-CUresult destroyIn(const char* what, CUcontext owner) {
-  calls.push_back({what, current(), owner});
-  if (!alive(current())) return CUDA_ERROR_INVALID_CONTEXT;
-  return current() == owner ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE;
-}
-}  // namespace
-
-CUresult cuInit(unsigned) { return CUDA_SUCCESS; }
-CUresult cuGetErrorName(CUresult r, const char** s) { *s = r == CUDA_SUCCESS ? "CUDA_SUCCESS" : "CUDA_ERROR_STUB"; return CUDA_SUCCESS; }
-CUresult cuDriverGetVersion(int* v) { *v = 12000; return CUDA_SUCCESS; }
-CUresult cuDeviceGetCount(int* n) { *n = 1; return CUDA_SUCCESS; }
-CUresult cuDeviceGet(CUdevice* d, int i) { *d = i; return CUDA_SUCCESS; }
-CUresult cuDeviceGetName(char* name, int len, CUdevice) { std::snprintf(name, len, "stub"); return CUDA_SUCCESS; }
-CUresult cuDeviceGetAttribute(int* v, CUdevice_attribute, CUdevice) { *v = 0; return CUDA_SUCCESS; }
-CUresult cuDeviceTotalMem(size_t* b, CUdevice) { *b = 0; return CUDA_SUCCESS; }
-
-CUresult cuCtxCreate(CUcontext* out, unsigned, CUdevice) {
-  static int ids = 0;
-  *out = new CUctx_st{++ids, true};
-  stack.push_back(*out);   // cuCtxCreate pushes the new context
-  return CUDA_SUCCESS;
-}
-CUresult cuCtxDestroy(CUcontext c) {
-  if (!alive(c)) return CUDA_ERROR_INVALID_CONTEXT;
-  c->alive = false;        // kept allocated so a stale handle stays distinguishable
-  stack.erase(std::remove(stack.begin(), stack.end(), c), stack.end());
-  for (auto it = allocations.begin(); it != allocations.end();) {
-    it = it->second == c ? allocations.erase(it) : std::next(it);
-  }
-  return CUDA_SUCCESS;
-}
-CUresult cuCtxSetCurrent(CUcontext c) {
-  if (!c) { if (!stack.empty()) stack.pop_back(); return CUDA_SUCCESS; }
-  if (!alive(c)) return CUDA_ERROR_INVALID_CONTEXT;
-  if (stack.empty()) stack.push_back(c); else stack.back() = c;
-  return CUDA_SUCCESS;
-}
-CUresult cuCtxGetCurrent(CUcontext* c) { *c = current(); return CUDA_SUCCESS; }
-CUresult cuCtxPushCurrent(CUcontext c) {
-  if (!alive(c)) return CUDA_ERROR_INVALID_CONTEXT;
-  stack.push_back(c);
-  return CUDA_SUCCESS;
-}
-CUresult cuCtxPopCurrent(CUcontext* c) {
-  if (stack.empty()) return CUDA_ERROR_INVALID_CONTEXT;
-  if (c) *c = stack.back();
-  stack.pop_back();
-  return CUDA_SUCCESS;
-}
-CUresult cuCtxSetLimit(CUlimit, size_t) { return CUDA_SUCCESS; }
-
-CUresult cuMemAlloc(CUdeviceptr* p, size_t) {
-  if (!alive(current())) return CUDA_ERROR_INVALID_CONTEXT;
-  *p = nextPtr;
-  nextPtr += 0x1000;
-  allocations[*p] = current();
-  return CUDA_SUCCESS;
-}
-CUresult cuMemFree(CUdeviceptr p) {
-  auto it = allocations.find(p);
-  CUresult r = destroyIn("cuMemFree", it == allocations.end() ? nullptr : it->second);
-  if (r == CUDA_SUCCESS && failNextFree != CUDA_SUCCESS) r = failNextFree;
-  failNextFree = CUDA_SUCCESS;
-  if (r == CUDA_SUCCESS) allocations.erase(it);
-  return r;
-}
-CUresult cuMemGetInfo(size_t* f, size_t* t) { *f = *t = 0; return CUDA_SUCCESS; }
-CUresult cuMemcpyHtoD(CUdeviceptr, const void*, size_t) { return CUDA_SUCCESS; }
-CUresult cuMemcpyDtoH(void*, CUdeviceptr, size_t) { return CUDA_SUCCESS; }
-CUresult cuMemcpyHtoDAsync(CUdeviceptr, const void*, size_t, CUstream) { return CUDA_SUCCESS; }
-CUresult cuMemcpyDtoHAsync(void*, CUdeviceptr, size_t, CUstream) { return CUDA_SUCCESS; }
-CUresult cuMemcpyDtoDAsync(CUdeviceptr, CUdeviceptr, size_t, CUstream) { return CUDA_SUCCESS; }
-CUresult cuMemsetD8Async(CUdeviceptr, unsigned char, size_t, CUstream) { return CUDA_SUCCESS; }
-CUresult cuMemsetD16Async(CUdeviceptr, unsigned short, size_t, CUstream) { return CUDA_SUCCESS; }
-CUresult cuMemsetD32Async(CUdeviceptr, unsigned, size_t, CUstream) { return CUDA_SUCCESS; }
-CUresult cuMemsetD2D32Async(CUdeviceptr, size_t, unsigned, size_t, size_t, CUstream) { return CUDA_SUCCESS; }
-
-CUresult cuModuleLoadData(CUmodule*, const void*) { return CUDA_ERROR_INVALID_VALUE; }
-CUresult cuModuleLoadDataEx(CUmodule*, const void*, unsigned, CUjit_option*, void**) { return CUDA_ERROR_INVALID_VALUE; }
-CUresult cuModuleUnload(CUmodule) { return CUDA_SUCCESS; }
-CUresult cuModuleGetFunction(CUfunction*, CUmodule, const char*) { return CUDA_ERROR_INVALID_VALUE; }
-CUresult cuFuncGetAttribute(int* v, CUfunction_attribute, CUfunction) { *v = 0; return CUDA_SUCCESS; }
-CUresult cuLaunchKernel(CUfunction, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, CUstream,
-                        void**, void**) { return CUDA_SUCCESS; }
-
-CUresult cuStreamCreate(CUstream* s, unsigned) {
-  if (!alive(current())) return CUDA_ERROR_INVALID_CONTEXT;
-  *s = new CUstream_st{current()};
-  return CUDA_SUCCESS;
-}
-CUresult cuStreamDestroy(CUstream s) {
-  CUresult r = destroyIn("cuStreamDestroy", s->owner);
-  if (r == CUDA_SUCCESS) delete s;
-  return r;
-}
-CUresult cuStreamSynchronize(CUstream) { return CUDA_SUCCESS; }
-CUresult cuStreamWaitEvent(CUstream, CUevent, unsigned) { return CUDA_SUCCESS; }
-CUresult cuStreamSetAttribute(CUstream, CUstreamAttrID, const CUstreamAttrValue*) { return CUDA_SUCCESS; }
-
-CUresult cuEventCreate(CUevent* e, unsigned) {
-  if (!alive(current())) return CUDA_ERROR_INVALID_CONTEXT;
-  *e = new CUevent_st{current()};
-  return CUDA_SUCCESS;
-}
-CUresult cuEventDestroy(CUevent e) {
-  CUresult r = destroyIn("cuEventDestroy", e->owner);
-  if (r == CUDA_SUCCESS) delete e;
-  return r;
-}
-CUresult cuEventRecord(CUevent, CUstream) { return CUDA_SUCCESS; }
-CUresult cuEventQuery(CUevent) { return CUDA_SUCCESS; }
-CUresult cuEventSynchronize(CUevent) { return CUDA_SUCCESS; }
-CUresult cuEventElapsedTime(float* ms, CUevent, CUevent) { *ms = 0; return CUDA_SUCCESS; }
-
-CUresult cuGraphCreate(CUgraph*, unsigned) { return CUDA_ERROR_INVALID_VALUE; }
-CUresult cuGraphDestroy(CUgraph) { return CUDA_SUCCESS; }
-CUresult cuGraphAddKernelNode(CUgraphNode*, CUgraph, const CUgraphNode*, size_t, const CUDA_KERNEL_NODE_PARAMS*) {
-  return CUDA_ERROR_INVALID_VALUE;
-}
-CUresult cuGraphInstantiateWithFlags(CUgraphExec*, CUgraph, unsigned long long) { return CUDA_ERROR_INVALID_VALUE; }
-CUresult cuGraphExecKernelNodeSetParams(CUgraphExec, CUgraphNode, const CUDA_KERNEL_NODE_PARAMS*) {
-  return CUDA_ERROR_INVALID_VALUE;
-}
-CUresult cuGraphExecDestroy(CUgraphExec) { return CUDA_SUCCESS; }
-CUresult cuGraphLaunch(CUgraphExec, CUstream) { return CUDA_ERROR_INVALID_VALUE; }
-
-nvrtcResult nvrtcVersion(int* major, int* minor) { *major = 12; *minor = 0; return NVRTC_SUCCESS; }
-nvrtcResult nvrtcGetNumSupportedArchs(int* n) { *n = 0; return NVRTC_SUCCESS; }
-nvrtcResult nvrtcGetSupportedArchs(int*) { return NVRTC_SUCCESS; }
 
 // ---- The test ----
 
@@ -220,7 +62,7 @@ int main() {
 
   // A failing cuMemFree is reported, not swallowed; the caller's context is still restored.
   calls.clear();
-  failNextFree = CUDA_ERROR_UNKNOWN;
+  failNext["cuMemFree"] = CUDA_ERROR_UNKNOWN;
   require(clReleaseMemObject(buf2) != CL_SUCCESS, "a cuMemFree error is returned by clReleaseMemObject");
   require(aevumCudaLastError() && std::strstr(aevumCudaLastError(), "(999)"), "the CUDA error is kept for the message");
   require(only("cuMemFree") != nullptr, "the failing release tried exactly one free");
