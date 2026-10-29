@@ -13,9 +13,10 @@ std::string NvrtcProgram::compile(const std::string&, const std::string&, const 
                                   const std::vector<std::pair<std::string, std::string>>&) { return {}; }
 
 namespace cuda_stub {
-std::vector<CUcontext> stack;
+thread_local std::vector<CUcontext> stack;
 std::map<CUdeviceptr, CUcontext> allocations;
 std::vector<Call> calls;
+std::vector<Call> uses;
 std::map<std::string, CUresult> failNext;
 
 CUcontext current() { return stack.empty() ? nullptr : stack.back(); }
@@ -34,6 +35,13 @@ CUresult injected(const char* what) {
   CUresult r = it->second;
   failNext.erase(it);
   return r;
+}
+
+// Like the driver: a function or stream can only be used with its own (live) context current.
+CUresult useIn(const char* what, CUcontext owner) {
+  uses.push_back({what, current(), owner});
+  if (!alive(current())) return CUDA_ERROR_INVALID_CONTEXT;
+  return current() == owner ? CUDA_SUCCESS : CUDA_ERROR_INVALID_HANDLE;
 }
 
 // Like the driver: an object can only be freed or destroyed with its own (live) context current.
@@ -106,21 +114,41 @@ CUresult cuMemFree(CUdeviceptr p) {
 CUresult cuMemGetInfo(size_t* f, size_t* t) { *f = *t = 0; return CUDA_SUCCESS; }
 CUresult cuMemcpyHtoD(CUdeviceptr, const void*, size_t) { return injected("cuMemcpyHtoD"); }
 CUresult cuMemcpyDtoH(void*, CUdeviceptr, size_t) { return CUDA_SUCCESS; }
-CUresult cuMemcpyHtoDAsync(CUdeviceptr, const void*, size_t, CUstream) { return CUDA_SUCCESS; }
-CUresult cuMemcpyDtoHAsync(void*, CUdeviceptr, size_t, CUstream) { return CUDA_SUCCESS; }
-CUresult cuMemcpyDtoDAsync(CUdeviceptr, CUdeviceptr, size_t, CUstream) { return CUDA_SUCCESS; }
-CUresult cuMemsetD8Async(CUdeviceptr, unsigned char, size_t, CUstream) { return CUDA_SUCCESS; }
-CUresult cuMemsetD16Async(CUdeviceptr, unsigned short, size_t, CUstream) { return CUDA_SUCCESS; }
-CUresult cuMemsetD32Async(CUdeviceptr, unsigned, size_t, CUstream) { return CUDA_SUCCESS; }
-CUresult cuMemsetD2D32Async(CUdeviceptr, size_t, unsigned, size_t, size_t, CUstream) { return CUDA_SUCCESS; }
+CUresult cuMemcpyHtoDAsync(CUdeviceptr, const void*, size_t, CUstream s) { return useIn("cuMemcpyHtoDAsync", s->owner); }
+CUresult cuMemcpyDtoHAsync(void*, CUdeviceptr, size_t, CUstream s) { return useIn("cuMemcpyDtoHAsync", s->owner); }
+CUresult cuMemcpyDtoDAsync(CUdeviceptr, CUdeviceptr, size_t, CUstream s) { return useIn("cuMemcpyDtoDAsync", s->owner); }
+CUresult cuMemsetD8Async(CUdeviceptr, unsigned char, size_t, CUstream s) { return useIn("cuMemsetD8Async", s->owner); }
+CUresult cuMemsetD16Async(CUdeviceptr, unsigned short, size_t, CUstream s) { return useIn("cuMemsetD16Async", s->owner); }
+CUresult cuMemsetD32Async(CUdeviceptr, unsigned, size_t, CUstream s) { return useIn("cuMemsetD32Async", s->owner); }
+CUresult cuMemsetD2D32Async(CUdeviceptr, size_t, unsigned, size_t, size_t, CUstream s) {
+  return useIn("cuMemsetD2D32Async", s->owner);
+}
 
-CUresult cuModuleLoadData(CUmodule*, const void*) { return CUDA_ERROR_INVALID_VALUE; }
-CUresult cuModuleLoadDataEx(CUmodule*, const void*, unsigned, CUjit_option*, void**) { return CUDA_ERROR_INVALID_VALUE; }
+// A module is loaded in the current context, and its functions belong to it.
+static CUresult loadModule(const char* what, CUmodule* m) {
+  uses.push_back({what, current(), current()});
+  if (!alive(current())) return CUDA_ERROR_INVALID_CONTEXT;
+  if (CUresult r = injected(what)) return r;
+  *m = new CUmod_st{current()};
+  return CUDA_SUCCESS;
+}
+CUresult cuModuleLoadData(CUmodule* m, const void*) { return loadModule("cuModuleLoadData", m); }
+CUresult cuModuleLoadDataEx(CUmodule* m, const void*, unsigned, CUjit_option*, void**) {
+  return loadModule("cuModuleLoadDataEx", m);
+}
 CUresult cuModuleUnload(CUmodule) { return CUDA_SUCCESS; }
-CUresult cuModuleGetFunction(CUfunction*, CUmodule, const char*) { return CUDA_ERROR_INVALID_VALUE; }
+CUresult cuModuleGetFunction(CUfunction* f, CUmodule m, const char*) {
+  if (!m || !alive(m->owner)) return CUDA_ERROR_INVALID_HANDLE;
+  *f = new CUfunc_st{m};
+  return CUDA_SUCCESS;
+}
 CUresult cuFuncGetAttribute(int* v, CUfunction_attribute, CUfunction) { *v = 0; return CUDA_SUCCESS; }
-CUresult cuLaunchKernel(CUfunction, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, CUstream,
-                        void**, void**) { return CUDA_SUCCESS; }
+CUresult cuLaunchKernel(CUfunction f, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, CUstream s,
+                        void**, void**) {
+  // The function, the stream and the current context must all be the same context.
+  if (f->module->owner != s->owner) { uses.push_back({"cuLaunchKernel", current(), s->owner}); return CUDA_ERROR_INVALID_HANDLE; }
+  return useIn("cuLaunchKernel", s->owner);
+}
 
 CUresult cuStreamCreate(CUstream* s, unsigned) {
   if (!alive(current())) return CUDA_ERROR_INVALID_CONTEXT;
@@ -132,7 +160,7 @@ CUresult cuStreamDestroy(CUstream s) {
   if (r == CUDA_SUCCESS) delete s;
   return r;
 }
-CUresult cuStreamSynchronize(CUstream) { return CUDA_SUCCESS; }
+CUresult cuStreamSynchronize(CUstream s) { return useIn("cuStreamSynchronize", s->owner); }
 CUresult cuStreamWaitEvent(CUstream, CUevent, unsigned) { return CUDA_SUCCESS; }
 CUresult cuStreamSetAttribute(CUstream, CUstreamAttrID, const CUstreamAttrValue*) { return CUDA_SUCCESS; }
 

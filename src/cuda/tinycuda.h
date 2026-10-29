@@ -82,6 +82,7 @@ struct _cl_program {
   bool moduleLoaded;
   bool kernelExported{false}; // Prevent replacement while an existing CUfunction refers to this module
   std::shared_ptr<void> moduleRef; // Keeps `module` loaded; shared with every kernel created from it (CudaModuleLife.h)
+  CUcontext owner{};      // the program's context: its module is loaded there, and its kernels run there
 
   _cl_program() : module{}, compiled{false}, moduleLoaded{false} {}
 };
@@ -93,6 +94,7 @@ struct _cl_kernel {
   std::string name;
   CUmodule parentModule;
   std::shared_ptr<void> moduleRef;  // Keeps parentModule loaded after the program is released (CudaModuleLife.h)
+  CUcontext owner{};      // the context of parentModule (the program's)
   int numArgs;
   int reqWorkGroupSize;   // From __launch_bounds__(N) in source, matches OpenCL reqd_work_group_size
 

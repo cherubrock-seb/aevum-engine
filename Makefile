@@ -562,6 +562,15 @@ test-cuda-release-context: $(CUDA_RELEASE_CONTEXT_TEST)
 $(CUDA_RELEASE_CONTEXT_TEST): tests/cuda_release_context_test.cpp $(wildcard tests/cuda_stub/*) src/cuda/clwrap_cuda.cpp $(wildcard src/cuda/*.h) src/common.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Wno-unused-parameter -DCUDA_BACKEND -Isrc -Itests/cuda_stub tests/cuda_release_context_test.cpp tests/cuda_stub/stub_driver.cpp src/cuda/clwrap_cuda.cpp -o $@
+# The CUDA shim runs each program, kernel, queue and event operation in its own context (stand-in driver, no GPU).
+CUDA_OBJECT_CONTEXT_TEST := build-tests/aevum-cuda-object-context-test
+.PHONY: test-cuda-object-context
+test-host: test-cuda-object-context
+test-cuda-object-context: $(CUDA_OBJECT_CONTEXT_TEST)
+	$(CUDA_OBJECT_CONTEXT_TEST)
+$(CUDA_OBJECT_CONTEXT_TEST): tests/cuda_object_context_test.cpp $(wildcard tests/cuda_stub/*) src/cuda/clwrap_cuda.cpp $(wildcard src/cuda/*.h) src/common.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -pthread -Wall -Wextra -Wno-unused-parameter -DCUDA_BACKEND -Isrc -Itests/cuda_stub tests/cuda_object_context_test.cpp tests/cuda_stub/stub_driver.cpp src/cuda/clwrap_cuda.cpp -o $@
 DATA_LAYOUT_TEST := build-tests/aevum-data-layout-test
 
 .PHONY: test-data-layout
