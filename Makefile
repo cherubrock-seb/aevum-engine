@@ -453,6 +453,17 @@ $(CUDA_EVENT_STATUS_TEST): tests/cuda_event_status_test.cpp src/cuda/CudaEventSt
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_event_status_test.cpp -o $@
 
+# The CUDA shim answers CL_DEVICE_TOPOLOGY_AMD from the device's PCI bus id (-pci): the real clwrap_cuda.cpp built against a
+# stand-in for the CUDA driver (tests/cuda_stub, no CUDA needed).
+CUDA_TOPOLOGY_PCI_TEST := build-tests/aevum-cuda-topology-pci-test
+.PHONY: test-cuda-topology-pci
+test-host: test-cuda-topology-pci
+test-cuda-topology-pci: $(CUDA_TOPOLOGY_PCI_TEST)
+	$(CUDA_TOPOLOGY_PCI_TEST)
+$(CUDA_TOPOLOGY_PCI_TEST): tests/cuda_topology_pci_test.cpp tests/cuda_topology_pci_decl.h $(wildcard tests/cuda_stub/*) src/cuda/clwrap_cuda.cpp $(wildcard src/cuda/*.h) src/common.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Wno-unused-parameter -DCUDA_BACKEND -Isrc -Itests/cuda_stub -include tests/cuda_topology_pci_decl.h tests/cuda_topology_pci_test.cpp tests/cuda_stub/stub_driver.cpp src/cuda/clwrap_cuda.cpp -o $@
+
 # PR136 cumulative semantic integration
 .PHONY: test-pr136-small-items
 test-host: test-pr136-small-items
