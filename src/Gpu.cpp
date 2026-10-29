@@ -3815,18 +3815,24 @@ fs::path Gpu::saveProof(const Args& args, ProofSet& proofSet) {
   bool problem_proof = false;
   for ( ; ; ) {
     for (int retry = 0; retry == 0 || (retry == 1 && !problem_proof); ++retry) {
-      auto [proof, hashes] = proofSet.computeProof(this);
-      fs::path tmpFile = proof.file(args.proofToVerifyDir);
-      proof.save(tmpFile);
-            
-      fs::path proofFile = proof.file(args.proofResultDir);
+      try {
+        auto [proof, hashes] = proofSet.computeProof(this);
+        fs::path tmpFile = proof.file(args.proofToVerifyDir);
+        proof.save(tmpFile);
 
-      bool ok = Proof::load(tmpFile).verify(this, hashes);
-      log("Proof '%s' verification %s\n", tmpFile.string().c_str(), ok ? "OK" : "FAILED");
-      if (ok) {
-        fancyRename(tmpFile, proofFile);
-        log("Proof '%s' generated\n", proofFile.string().c_str());
-        return proofFile;
+        fs::path proofFile = proof.file(args.proofResultDir);
+
+        bool ok = Proof::load(tmpFile).verify(this, hashes);
+        log("Proof '%s' verification %s\n", tmpFile.string().c_str(), ok ? "OK" : "FAILED");
+        if (ok) {
+          fancyRename(tmpFile, proofFile);
+          log("Proof '%s' generated\n", proofFile.string().c_str());
+          return proofFile;
+        }
+      } catch (const CRCError& e) {
+        // A corrupt proof residue: retrying at the same power reads the same file, so go to a lower power.
+        log("Proof residue '%s' failed its checksum; trying a lower proof power\n", e.name.c_str());
+        break;
       }
     }
     problem_proof = true;
