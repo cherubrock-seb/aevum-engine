@@ -379,6 +379,12 @@ struct CandidateRefused : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
+// A PRP -use profile that ran to completion but failed one of the tuner's own
+// gates (word mismatch, roundoff, a failed PRP check, an invalid timing).
+struct UseRejected : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
 // Build a candidate's engine, turning a deterministic refusal into
 // CandidateRefused.  The native engine has just been built on the same tuning
 // context, and every earlier candidate finished its benchmark there, so the
@@ -387,12 +393,13 @@ struct CandidateRefused : std::runtime_error {
 // context is gone, and is passed on unchanged so the search stops.  Under CUDA
 // driver errors and configuration errors share one exception type, so every
 // failure is passed on.
-std::unique_ptr<Gpu> makeCandidateGpu(uint32_t exponent, const GpuCommon& shared, const FFTConfig& fft) {
+std::unique_ptr<Gpu> makeCandidateGpu(uint32_t exponent, const GpuCommon& shared, const FFTConfig& fft,
+                                      const std::vector<KeyVal>& use = std::vector<KeyVal>()) {
 #if defined(CUDA_BACKEND)
-  return Gpu::make(exponent, shared, fft, {}, false);
+  return Gpu::make(exponent, shared, fft, use, false);
 #else
   try {
-    return Gpu::make(exponent, shared, fft, {}, false);
+    return Gpu::make(exponent, shared, fft, use, false);
   } catch (const gpu_error&) {
     throw;
   } catch (const std::bad_alloc&) {
@@ -657,11 +664,18 @@ BridgeComparison comparePreparedMulLead(Gpu& gpu, uint32_t exponent) {
 // pending so consecutive square_mul(reg,1) calls retain the width transform.
 // Keeping the tuner on the same path avoids validating a micro-workload that
 // can disagree with the real PRP engine.
+//
+// Run it on a TuneContext, never on the production engine's context: a probe
+// that faults, or hangs until the driver resets its context, must not take the
+// production engine down with it.  With `candidate` set, a configuration the
+// engine refuses to build is reported as CandidateRefused (see
+// makeCandidateGpu); the baseline probe passes every error on unchanged.
 class PrpUseProbe {
 public:
   PrpUseProbe(uint32_t exponent, size_t register_count, GpuCommon shared,
-              const FFTConfig& fft, const std::vector<KeyVal>& use)
-      : gpu_(Gpu::make(exponent, shared, fft, use, false)) {
+              const FFTConfig& fft, const std::vector<KeyVal>& use, bool candidate = false)
+      : gpu_(candidate ? makeCandidateGpu(exponent, shared, fft, use)
+                       : Gpu::make(exponent, shared, fft, use, false)) {
     const auto count = static_cast<u32>(std::max<size_t>(register_count, 1));
     regs_ = gpu_->makeBufVector(count);
     prepared_ = gpu_->makeTransformBufVector(static_cast<u32>(std::min<size_t>(register_count, 2)));
@@ -670,7 +684,10 @@ public:
 #else
     scratch_ = gpu_->makeBufVector(1);
 #endif
-    lead_ = gpu_->regSupportsLeadCache();
+    // The lead cache only where the production Runtime would enable it: the
+    // PFA gate and AEVUM_REG_LEAD_CACHE apply here too, so the probe never
+    // times (or faults in) a path the selected engine would not run.
+    lead_ = productionRegPaths(*gpu_, fft, openclDeviceName(shared.context->deviceId())).lead_cache;
     // Mirror the production Runtime allocation/initialization footprint used
     // by the benchmark. The prepared operand is not part of PRP timing, but it
     // is materialized before timing in the real engine.
@@ -950,18 +967,28 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
     return use;
   };
   const Words seed=deterministicResidue(exponent,0x12345678u);
+  // Every probe below runs in this tuning context, created only once there is
+  // something to measure.  A candidate that faults, or hangs until the driver
+  // resets the context, then takes down only this context: the search stops,
+  // the context is dropped on return, and the production engine is built on
+  // the untouched shared.context.
+  std::optional<TuneContext> tune;
+  auto tuning=[&]() -> const GpuCommon& {
+    if(!tune)tune.emplace(shared.context->deviceId(),shared);
+    return tune->shared;
+  };
   auto exact_profile=[&](const std::string& profile) {
     Words reference;
     {
-      PrpUseProbe base(exponent,regs,shared,fft,existing);
+      PrpUseProbe base(exponent,regs,tuning(),fft,existing);
       base.reset(seed);base.sequence(16);reference=base.read();
     }
     {
-      PrpUseProbe candidate(exponent,regs,shared,fft,merged(profile));
+      PrpUseProbe candidate(exponent,regs,tuning(),fft,merged(profile),!profile.empty());
       candidate.gpu().regPrpRoe(true);candidate.reset(seed);candidate.sequence(16);
       const Words value=candidate.read();
-      if(reference!=value)throw std::runtime_error("WORD MISMATCH");
-      if(candidate.gpu().regPrpRoe(false)>=0.35)throw std::runtime_error("ROE gate");
+      if(reference!=value)throw UseRejected("WORD MISMATCH");
+      if(candidate.gpu().regPrpRoe(false)>=0.35)throw UseRejected("ROE gate");
     }
   };
   auto prp_cost=[&](const std::string& profile,int quick) {
@@ -969,10 +996,34 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
     // true PRP state/check/square path, includes its own warm-up and correctness
     // check, and avoids the synthetic square-chain confirmation that hid the
     // RTX3080 ~7% implementation gain in R4.
-    auto gpu=Gpu::make(exponent,shared,fft,merged(profile),false);
+    auto gpu=profile.empty() ? Gpu::make(exponent,tuning(),fft,merged(profile),false)
+                             : makeCandidateGpu(exponent,tuning(),fft,merged(profile));
     const double us=gpu->timePRP(quick);
-    if(!std::isfinite(us) || us<=0.0 || us>=100000.0)throw std::runtime_error("invalid PRP timing/check");
+    if(!std::isfinite(us) || us<=0.0 || us>=100000.0)throw UseRejected("invalid PRP timing/check");
     return us;
+  };
+  // A rejection (word mismatch, roundoff, a failed PRP check, a slower or
+  // refused profile, kernels that do not build: KernelCompiler throws a
+  // std::string when a kernel does not compile, on first use) is a property
+  // of the profile: log it and go on.  Any other error, an OpenCL error above
+  // all, may have left the tuning context unusable, so it is not a
+  // measurement: stop the search with the profile marked as failed.  The
+  // resume cursor still moves past it, so a profile that always faults is not
+  // retried on every start.
+  std::string failed_profile,failure;
+  auto run_profile=[&](const std::string& profile,auto&& body) {
+    try{body();return true;}
+    catch(const UseRejected& e){if(verbose)log("AEVUM_USE_REJECT profile=%s reason=%s\n",profile.c_str(),e.what());}
+    catch(const CandidateRefused& e){if(verbose)log("AEVUM_USE_REJECT profile=%s reason=refused (%s)\n",profile.c_str(),e.what());}
+    catch(const std::string& e){if(verbose)log("AEVUM_USE_REJECT profile=%s reason=kernel build (%s)\n",profile.c_str(),e.c_str());}
+    catch(const std::exception& e){failed_profile=profile;failure=e.what();}
+    catch(const char* e){failed_profile=profile;failure=e?e:"engine exception";}
+    catch(...){failed_profile=profile;failure="engine exception";}
+    return false;
+  };
+  auto report_failure=[&] {
+    log("AEVUM_USE_FAIL profile=%s reason=%s; search stopped, tuning OpenCL context discarded\n",
+        failed_profile.empty()?"defaults":failed_profile.c_str(),failure.c_str());
   };
 
   if(verbose)log("AEVUM_PRP_USE search-v6 shape=%s candidates<=%u budget=%" PRIu64 "ms resume_screen=%u resume_finalist=%u metric=timePRP\n",
@@ -985,7 +1036,7 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
       for(unsigned index=state.next_screen;index<planned;++index) {
         if(elapsed()>=static_cast<int64_t>(budget)){progress.interrupted=true;break;}
         const auto& profile=profiles[index];
-        try {
+        const bool ok=run_profile(profile,[&] {
           exact_profile(profile);
           double a,b;
           // Candidate construction/compilation is outside timePRP's timer.
@@ -997,15 +1048,15 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
           if(verbose)log("AEVUM_USE_SCREEN profile=%s exact=1 metric=timePRP gain=%.5f baseline_us=%.4f candidate_us=%.4f\n",
               profile.c_str(),gain,a,b);
           rank(profile,gain);
-        }catch(const std::exception& e){if(verbose)log("AEVUM_USE_REJECT profile=%s reason=%s\n",profile.c_str(),e.what());}
-        catch(...){if(verbose)log("AEVUM_USE_REJECT profile=%s reason=engine-exception\n",profile.c_str());}
+        });
         state.next_screen=index+1;progress.screened=state.next_screen;save_state();
+        if(!ok && !failure.empty()){report_failure();progress.interrupted=true;break;}
         if(elapsed()>=static_cast<int64_t>(budget)){progress.interrupted=state.next_screen<planned;break;}
         if(!top.empty() && elapsed()>static_cast<int64_t>(budget)/2 && state.next_screen<planned){progress.interrupted=true;break;}
       }
     }
 
-    if(state.next_screen==planned) {
+    if(failure.empty() && state.next_screen==planned) {
       progress.screened=planned;progress.finalists=top.size();
       if(state.next_finalist>top.size())state.next_finalist=0;
       if(budget>=100 && state.next_finalist<top.size()) {
@@ -1013,7 +1064,7 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
         for(unsigned fi=state.next_finalist;fi<top.size();++fi) {
           if(elapsed()>=static_cast<int64_t>(budget)){progress.interrupted=true;break;}
           const auto screened=top[fi];
-          try {
+          const bool ok=run_profile(screened.profile,[&] {
             exact_profile(screened.profile);
             // Discard one sample of each side. The measured samples below use
             // separate Gpu objects and upstream timePRP, closely matching the
@@ -1041,13 +1092,13 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
             bool engine_keep=false; double engine_gain=1.0;
             if(keep) {
               auto engine_cost=[&](const std::string& profile) {
-                PrpUseProbe probe(exponent,regs,shared,fft,merged(profile));
+                PrpUseProbe probe(exponent,regs,tuning(),fft,merged(profile),!profile.empty());
                 probe.reset(seed);probe.sequence(64); // production benchmark warmup
                 probe.reset(seed);
                 const auto begin=std::chrono::steady_clock::now();
                 probe.sequence(256);
                 const double secs=std::chrono::duration<double>(std::chrono::steady_clock::now()-begin).count();
-                if(!std::isfinite(secs) || secs<=0.0)throw std::runtime_error("invalid engine-style PRP timing");
+                if(!std::isfinite(secs) || secs<=0.0)throw UseRejected("invalid engine-style PRP timing");
                 return secs;
               };
               std::array<double,3> ea{},eb{};unsigned ewins=0;double eworst=100;
@@ -1062,20 +1113,24 @@ std::vector<KeyVal> selectPrpUse(uint32_t exponent, size_t regs, GpuCommon share
                   screened.profile.c_str(),engine_gain,eworst,engine_keep,ea[0],ea[1],ea[2],eb[0],eb[1],eb[2]);
             }
             if(keep && engine_keep && engine_gain>winning_gain){winner=screened.profile;winning_gain=engine_gain;}
-          }catch(const std::exception& e){if(verbose)log("AEVUM_USE_REJECT profile=%s reason=%s\n",screened.profile.c_str(),e.what());}
-          catch(...){if(verbose)log("AEVUM_USE_REJECT profile=%s reason=engine-exception\n",screened.profile.c_str());}
+          });
           state.next_finalist=fi+1;progress.finalized=state.next_finalist;save_state();
+          if(!ok && !failure.empty()){report_failure();progress.interrupted=true;break;}
           if(elapsed()>=static_cast<int64_t>(budget) && state.next_finalist<top.size()){progress.interrupted=true;break;}
         }
       } else progress.finalized=state.next_finalist;
     }
-  }catch(const std::exception& e){progress.interrupted=true;if(verbose)log("AEVUM_USE_REJECT reason=%s\n",e.what());}
-  catch(...){progress.interrupted=true;if(verbose)log("AEVUM_USE_REJECT reason=engine-exception\n");}
+  }catch(const std::exception& e){failed_profile.clear();failure=e.what();report_failure();}
+  catch(...){failed_profile.clear();failure="engine exception";report_failure();}
+  tune.reset();
 
   progress.screened=state.next_screen;
   if(state.next_screen==planned){progress.finalists=top.size();progress.finalized=state.next_finalist;}
   if(state.next_screen<planned || (state.next_screen==planned && state.next_finalist<top.size()))progress.interrupted=true;
   else progress.interrupted=false;
+  // A run that stopped on an engine error makes no lasting decision; the next
+  // start resumes after the profile that failed.
+  if(!failure.empty())progress.interrupted=true;
   // A cold shape-tune invocation may intentionally expose only the first half
   // of the bounded -use neighbourhood.  Never turn that reduced scope into a
   // permanent positive/negative cache decision: the next AUTO invocation has
@@ -1160,8 +1215,11 @@ std::vector<KeyVal> selectCudaZeroHack(uint32_t exponent, size_t regs, GpuCommon
   const auto start=std::chrono::steady_clock::now();
 
   try {
-    PrpUseProbe base(exponent,regs,shared,fft,w1);
-    PrpUseProbe candidate(exponent,regs,shared,fft,w0);
+    // Both probes run in a context of their own, so a fault in either cannot
+    // leave the production engine on a dead context.
+    TuneContext tune(shared.context->deviceId(),shared);
+    PrpUseProbe base(exponent,regs,tune.shared,fft,w1);
+    PrpUseProbe candidate(exponent,regs,tune.shared,fft,w0);
     base.reset(seed);
     candidate.reset(seed);
     base.sequence(64);
