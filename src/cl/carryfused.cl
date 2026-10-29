@@ -24,9 +24,9 @@ void spin() {
 // or performance change. The existing surrounding memory fences are retained.
 #if __OPENCL_C_VERSION__ >= 200
 #define AEVUM_READY_STORE(ptr) \
-  atomic_store((atomic_uint *) (ptr), 1u)
+  atomic_store((global atomic_uint *) (ptr), 1u)
 #define AEVUM_READY_LOAD(ptr) \
-  atomic_load_explicit((atomic_uint *) (ptr), memory_order_relaxed, memory_scope_device)
+  atomic_load_explicit((global atomic_uint *) (ptr), memory_order_relaxed, memory_scope_device)
 #else
 #define AEVUM_READY_STORE(ptr) \
   atomic_xchg((volatile global uint *) (ptr), 1u)
