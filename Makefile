@@ -630,3 +630,8 @@ test-proof-crc-retry:
 test-host: test-carryfused-ready-sync
 test-carryfused-ready-sync:
 	python3 tests/carryfused_ready_sync_source_test.py
+# Finished PRP results survive proof-generation failure (source check, no device)
+.PHONY: test-proof-result-survival
+test-host: test-proof-result-survival
+test-proof-result-survival:
+	python3 tests/proof_result_survival_source_test.py src/Gpu.cpp

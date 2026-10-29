@@ -4257,7 +4257,12 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
           fs::path proofFile;
           if (proofSet) {
             background->waitEmpty();
-            proofFile = saveProof(args, *proofSet);
+            try {
+              proofFile = saveProof(args, *proofSet);
+            } catch (...) {
+              if (Signal::stopRequested()) { throw; }
+              log("Proof generation failed; reporting the result without a proof\n");
+            }
           }
           return {isPrime, finalRes64, nErrors, proofFile.string(), toHex(res2048)};
         }        
