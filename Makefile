@@ -543,6 +543,16 @@ test-cuda-module-life: $(CUDA_MODULE_LIFE_TEST)
 $(CUDA_MODULE_LIFE_TEST): tests/cuda_module_life_test.cpp src/cuda/CudaModuleLife.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/cuda_module_life_test.cpp -pthread -o $@
+# The CUDA shim's clCreateBuffer reports a failed CL_MEM_COPY_HOST_PTR upload: the real clwrap_cuda.cpp built against
+# a recording stand-in for the CUDA driver (tests/cuda_stub, no CUDA needed).
+CUDA_CREATE_BUFFER_COPY_TEST := build-tests/aevum-cuda-create-buffer-copy-test
+.PHONY: test-cuda-create-buffer-copy
+test-host: test-cuda-create-buffer-copy
+test-cuda-create-buffer-copy: $(CUDA_CREATE_BUFFER_COPY_TEST)
+	$(CUDA_CREATE_BUFFER_COPY_TEST)
+$(CUDA_CREATE_BUFFER_COPY_TEST): tests/cuda_create_buffer_copy_test.cpp $(wildcard tests/cuda_stub/*) src/cuda/clwrap_cuda.cpp $(wildcard src/cuda/*.h) src/common.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Wno-unused-parameter -DCUDA_BACKEND -Isrc -Itests/cuda_stub tests/cuda_create_buffer_copy_test.cpp tests/cuda_stub/stub_driver.cpp src/cuda/clwrap_cuda.cpp -o $@
 # The CUDA backend's mapping of a CUDA driver result to the reported status (plain ints, no CUDA needed).
 CUDA_ERROR_MAP_TEST := build-tests/aevum-cuda-error-map-test
 .PHONY: test-cuda-error-map
