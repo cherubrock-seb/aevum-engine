@@ -594,6 +594,17 @@ $(STRICT_INT_TEST): tests/strict_int_test.cpp src/StrictInt.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/strict_int_test.cpp -o $@
 
+# File errors (CRC/read/write) are std::exceptions that the top-level handlers catch (host only, no device)
+FILE_ERRORS_TEST := build-tests/aevum-file-errors-test
+.PHONY: test-file-errors-std-exception
+test-host: test-file-errors-std-exception
+test-file-errors-std-exception: $(FILE_ERRORS_TEST)
+	$(FILE_ERRORS_TEST)
+
+$(FILE_ERRORS_TEST): tests/file_errors_std_exception_test.cpp src/File.h src/Background.h src/File.cpp src/log.cpp src/common.cpp src/fs.cpp src/timeutil.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc -pthread tests/file_errors_std_exception_test.cpp src/File.cpp src/log.cpp src/common.cpp src/fs.cpp src/timeutil.cpp -o $@
+
 # carryFused: warp sync() on both sides of the per-wavefront ready flag
 .PHONY: test-carryfused-ready-sync
 test-host: test-carryfused-ready-sync
