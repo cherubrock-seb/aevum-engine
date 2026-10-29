@@ -21,6 +21,8 @@ std::map<CUdeviceptr, CUcontext> allocations;
 std::vector<Call> calls;
 std::vector<Call> uses;
 std::map<std::string, CUresult> failNext;
+std::string pciBusId = "0000:00:00.0";
+CUresult pciBusIdResult = CUDA_SUCCESS;
 
 CUcontext current() { return contextStack.empty() ? nullptr : contextStack.back(); }
 bool alive(CUcontext c) { return c && c->alive; }
@@ -61,6 +63,11 @@ CUresult cuDriverGetVersion(int* v) { *v = 12000; return CUDA_SUCCESS; }
 CUresult cuDeviceGetCount(int* n) { *n = 1; return CUDA_SUCCESS; }
 CUresult cuDeviceGet(CUdevice* d, int i) { *d = i; return CUDA_SUCCESS; }
 CUresult cuDeviceGetName(char* name, int len, CUdevice) { std::snprintf(name, len, "stub"); return CUDA_SUCCESS; }
+CUresult cuDeviceGetPCIBusId(char* pci, int len, CUdevice) {
+  if (pciBusIdResult != CUDA_SUCCESS) return pciBusIdResult;
+  std::snprintf(pci, len, "%s", pciBusId.c_str());
+  return CUDA_SUCCESS;
+}
 CUresult cuDeviceGetAttribute(int* v, CUdevice_attribute, CUdevice) { *v = 0; return CUDA_SUCCESS; }
 CUresult cuDeviceTotalMem(size_t* b, CUdevice) { *b = 0; return CUDA_SUCCESS; }
 
