@@ -726,7 +726,13 @@ cl_mem clCreateBuffer(cl_context ctx, cl_mem_flags flags, size_t size, void* hos
   }
   // Handle CL_MEM_COPY_HOST_PTR
   if ((flags & CL_MEM_COPY_HOST_PTR) && hostPtr) {
-    cuMemcpyHtoD(buf->ptr, hostPtr, size);
+    r = cuMemcpyHtoD(buf->ptr, hostPtr, size);
+    if (r != CUDA_SUCCESS) {   // never hand out a buffer that silently lacks its initial contents
+      cuMemFree(buf->ptr);
+      delete buf;
+      if (err) *err = clStatusFromCu(r);
+      return nullptr;
+    }
   }
   g_allocatedBuffers.insert(buf);
   if (err) *err = CL_SUCCESS;
