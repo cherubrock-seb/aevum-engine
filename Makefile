@@ -676,6 +676,7 @@ test-proof-crc-retry:
 test-host: test-carryfused-ready-sync
 test-carryfused-ready-sync:
 	python3 tests/carryfused_ready_sync_source_test.py
+	python3 tests/carryfused_ready_per_line_test.py
 
 # CUDA shim: the kernel-cache blob (PTX + CUBIN) and the PTX_VERSION relabeling (plain C++, no CUDA needed).
 CUDA_BINARY_BLOB_TEST := build-tests/aevum-cuda-binary-blob-test
