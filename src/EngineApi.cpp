@@ -14,6 +14,7 @@ Licensed under GNU GPL version 3. See LICENSE and UPSTREAM.md.
 #include "Gpu.h"
 #include "GpuCommon.h"
 #include "TrigBufCache.h"
+#include "TuneBudget.h"
 #include "TuneEntry.h"
 #include "RuntimeAutotune.h"
 #include "PrpUseTune.h"
@@ -466,14 +467,44 @@ struct PlanComparison {
   double speedup = 0.0;
 };
 
+// `setup`, when given, gets the time spent building the two engines and
+// compiling their kernels (they compile lazily, on first use, so the kernel
+// time is taken from the engines' compilers), which the search's time budget
+// does not count.  It is filled in on a refusal or an error too.
 PlanComparison comparePlans(uint32_t exponent,
                             aevum_autotune::Workload workload,
                             GpuCommon shared,
                             const std::string& device_name,
                             const FFTConfig& native_fft,
-                            const FFTConfig& candidate_fft) {
-  auto native_gpu = Gpu::make(exponent, shared, native_fft, {}, false);
-  auto candidate_gpu = makeCandidateGpu(exponent, shared, candidate_fft);
+                            const FFTConfig& candidate_fft,
+                            std::chrono::steady_clock::duration* setup = nullptr) {
+  const auto build_start = std::chrono::steady_clock::now();
+  std::unique_ptr<Gpu> native_gpu, candidate_gpu;
+  bool built = false;
+  std::chrono::steady_clock::duration build{};
+  struct SetupAccount {
+    std::chrono::steady_clock::duration* setup;
+    std::chrono::steady_clock::time_point build_start;
+    const bool& built;
+    std::chrono::steady_clock::duration& build;
+    std::unique_ptr<Gpu>& native_gpu;
+    std::unique_ptr<Gpu>& candidate_gpu;
+    // Runs on every return, a refusal and an error, before the engines go.
+    // `build` holds the construction time less the kernel loads during it,
+    // which are counted once, through kernelLoadTime().
+    ~SetupAccount() {
+      if (!setup) return;
+      if (!built) { *setup += std::chrono::steady_clock::now() - build_start; return; }
+      *setup += build;
+      for (const Gpu* gpu : {native_gpu.get(), candidate_gpu.get()})
+        if (gpu) *setup += gpu->kernelLoadTime();
+    }
+  } setup_account{setup, build_start, built, build, native_gpu, candidate_gpu};
+  native_gpu = Gpu::make(exponent, shared, native_fft, {}, false);
+  candidate_gpu = makeCandidateGpu(exponent, shared, candidate_fft);
+  build = std::chrono::steady_clock::now() - build_start -
+          native_gpu->kernelLoadTime() - candidate_gpu->kernelLoadTime();
+  built = true;
   const RegPaths native_paths = productionRegPaths(*native_gpu, native_fft, device_name);
   const RegPaths candidate_paths = productionRegPaths(*candidate_gpu, candidate_fft, device_name);
   auto native_regs = native_gpu->makeBufVector(2);
@@ -1541,6 +1572,9 @@ public:
           return false;
         };
         std::optional<TuneContext> tune;
+        // The budget counts measurement only: the tuning context and each
+        // engine build (kernel compiles) are excluded, see TuneBudget.
+        TuneBudget<> budget(tune_start);
 
         if (verbose) {
           const uint32_t band = aevum_autotune::exponentBandStart(exponent_);
@@ -1551,8 +1585,7 @@ public:
         }
         for (size_t candidate_index = 0; candidate_index < candidates.size(); ++candidate_index) {
           const std::string& candidate_spec = candidates[candidate_index];
-          const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-              std::chrono::steady_clock::now() - tune_start).count();
+          const auto elapsed = budget.elapsedMs(std::chrono::steady_clock::now());
           const bool strategic_seed_pending = candidate_index < strategic_candidate_count;
           if (tried.count(candidate_spec)) continue;
           if (!strategic_seed_pending && tried.size() >= candidate_cap) break;
@@ -1566,9 +1599,19 @@ public:
           tried.insert(candidate_spec);
           std::string failure;
           try {
-            if (!tune) tune.emplace(selected_device, shared_);
+            if (!tune) {
+              const auto context_start = std::chrono::steady_clock::now();
+              tune.emplace(selected_device, shared_);
+              budget.exclude(std::chrono::steady_clock::now() - context_start);
+            }
+            std::chrono::steady_clock::duration setup{};
+            struct ExcludeSetup {
+              TuneBudget<>& budget;
+              std::chrono::steady_clock::duration& setup;
+              ~ExcludeSetup() { budget.exclude(setup); }
+            } exclude_setup{budget, setup};
             const PlanComparison cmp = comparePlans(exponent_, workload_, tune->shared, device_name,
-                                                    native_fft, *candidate_fft);
+                                                    native_fft, *candidate_fft, &setup);
             if (!cmp.exact) {
               if (verbose) log("Aevum autotune: reject %s (WORD MISMATCH).\n", candidate_spec.c_str());
               continue;
@@ -1673,8 +1716,8 @@ public:
         autotune_elapsed_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - tune_start).count());
         if (verbose) {
-          log("Aevum autotune: selected=%s advantage=%.4fx tested=%u tune=%" PRIu64 "ms.\n",
-              selected_spec.c_str(), autotune_plan_speedup, tested, autotune_elapsed_ms);
+          log("Aevum autotune: selected=%s advantage=%.4fx tested=%u tune=%" PRIu64 "ms (setup %" PRId64 "ms not budgeted).\n",
+              selected_spec.c_str(), autotune_plan_speedup, tested, autotune_elapsed_ms, budget.excludedMs());
         }
         if (!plan_search_complete) {
           log("Aevum autotune: search deferred after %zu of the candidate plans; the next run continues it.\n",

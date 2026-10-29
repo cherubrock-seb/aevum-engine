@@ -701,3 +701,14 @@ test-signal: $(SIGNAL_TEST)
 $(SIGNAL_TEST): tests/signal_test.cpp src/Signal.cpp src/Signal.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -iquote src tests/signal_test.cpp src/Signal.cpp -o $@
+
+# The plan search's time budget counts measurement, not engine builds.
+TUNE_BUDGET_TEST := build-tests/aevum-tune-budget-test
+.PHONY: test-tune-budget
+test-host: test-tune-budget
+test-tune-budget: $(TUNE_BUDGET_TEST)
+	$(TUNE_BUDGET_TEST)
+	python3 tests/autotune_budget_source_test.py
+$(TUNE_BUDGET_TEST): tests/tune_budget_test.cpp src/TuneBudget.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/tune_budget_test.cpp -o $@
