@@ -35,7 +35,10 @@ using namespace std;
 // Track allocated cl_mem objects so clSetKernelArg can distinguish buffer args from scalars.
 // In OpenCL, buffer args are passed as &memobj where memobj is cl_mem (a pointer to _cl_mem).
 // We need to convert these to CUdeviceptr for CUDA kernel launch.
+// The set is shared by every thread that drives a Gpu (-workers N runs N of them at once), so all access goes
+// through g_allocatedBuffersMutex.
 static unordered_set<cl_mem> g_allocatedBuffers;
+static std::mutex g_allocatedBuffersMutex;
 
 // CUDA autotune temporarily creates a second context. Keep the live
 // contexts in creation order so destroying a temporary tuning context restores
@@ -784,10 +787,23 @@ int clSetKernelArg(cl_kernel k, unsigned pos, size_t size, const void* value) {
   // We need to store the CUdeviceptr (GPU address) instead of the cl_mem (host pointer).
   if (size == sizeof(cl_mem) && value) {
     cl_mem mem = *(cl_mem*)value;
-    if (mem && g_allocatedBuffers.count(mem)) {
-      CUdeviceptr devPtr = mem->ptr;
-      k->setArg(pos, sizeof(CUdeviceptr), &devPtr);
-      return CL_SUCCESS;
+    if (mem) {
+      // Look the buffer up and copy its device pointer under the lock: another worker may be creating or releasing
+      // buffers at the same time (an insert can rehash the set under a concurrent lookup, and a release deletes the
+      // _cl_mem).
+      CUdeviceptr devPtr = 0;
+      bool isBuffer = false;
+      {
+        std::lock_guard<std::mutex> lock(g_allocatedBuffersMutex);
+        if (g_allocatedBuffers.count(mem)) {
+          isBuffer = true;
+          devPtr = mem->ptr;
+        }
+      }
+      if (isBuffer) {
+        k->setArg(pos, sizeof(CUdeviceptr), &devPtr);
+        return CL_SUCCESS;
+      }
     }
     // NULL cl_mem → pass a null device pointer
     if (!mem) {
@@ -828,7 +844,10 @@ cl_mem clCreateBuffer(cl_context ctx, cl_mem_flags flags, size_t size, void* hos
       return nullptr;
     }
   }
-  g_allocatedBuffers.insert(buf);
+  {
+    std::lock_guard<std::mutex> lock(g_allocatedBuffersMutex);
+    g_allocatedBuffers.insert(buf);
+  }
   if (err) *err = CL_SUCCESS;
   return buf;
 }
@@ -839,7 +858,10 @@ int clReleaseMemObject(cl_mem buf) {
     // Free in the context the memory was allocated in, not whichever one the shim made current last.  If that
     // context is gone, cuCtxDestroy already freed the memory.
     CudaContextScope owner(buf->owner);
-    g_allocatedBuffers.erase(buf);
+    {
+      std::lock_guard<std::mutex> lock(g_allocatedBuffersMutex);
+      g_allocatedBuffers.erase(buf);
+    }
     CUresult const r = owner.status() == CUDA_SUCCESS ? cuMemFree(buf->ptr) : owner.status();
     status = clStatusFromCu(r);
     delete buf;
@@ -1232,10 +1254,31 @@ int clGetDeviceInfo(cl_device_id dev, cl_device_info info, size_t size, void* va
     if (value && size >= 1) memcpy(value, empty, 1);
     break;
   }
-  case CL_DEVICE_BOARD_NAME_AMD:
-  case CL_DEVICE_PCIE_ID_AMD:
   case CL_DEVICE_TOPOLOGY_AMD: {
-    // AMD-specific queries — return failure
+    // The device's PCIe position in the AMD extension's shape, so `-pci <bus:device.function>` selects a CUDA device the way it
+    // selects an AMD one (gpuid.cpp getPosFromBdf -> clwrap.cpp getBdfFromDevice).  The enumeration ordinal `-device N` names is
+    // not stable (CUDA orders FASTEST_FIRST unless CUDA_DEVICE_ORDER says otherwise, and a second card or a driver update can
+    // renumber), while the bus id is what nvidia-smi and every launcher already know the card by.
+    char bdf[32] = {0};
+    if (cuDeviceGetPCIBusId(bdf, sizeof(bdf), dev->dev) != CUDA_SUCCESS) return CL_INVALID_VALUE;
+    // "0000:6a:00.0" is domain:bus:device.function; tolerate a missing domain.
+    unsigned domain = 0, bus = 0, device = 0, function = 0;
+    if (sscanf(bdf, "%x:%x:%x.%x", &domain, &bus, &device, &function) != 4 &&
+        sscanf(bdf, "%x:%x.%x", &bus, &device, &function) != 3) {
+      return CL_INVALID_VALUE;
+    }
+    cl_device_topology_amd top{};
+    top.pcie.type = CL_DEVICE_TOPOLOGY_TYPE_PCIE_AMD;
+    top.pcie.bus = (char) bus;
+    top.pcie.device = (char) device;
+    top.pcie.function = (char) function;
+    if (sizeRet) *sizeRet = sizeof(top);
+    if (value && size >= sizeof(top)) memcpy(value, &top, sizeof(top));
+    break;
+  }
+  case CL_DEVICE_BOARD_NAME_AMD:
+  case CL_DEVICE_PCIE_ID_AMD: {
+    // AMD-specific queries with no CUDA counterpart — return failure
     return CL_INVALID_VALUE;
   }
   case CL_DEVICE_GLOBAL_FREE_MEMORY_AMD: {

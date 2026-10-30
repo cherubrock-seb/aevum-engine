@@ -58,10 +58,37 @@ u32 parseInt(const string& s) {
   return u32(strtod(s.c_str(), nullptr) * multiple);
 }
 
+// The shapes of one FFT type with a size in [sizeFrom, sizeTo], smallest first.
+vector<FFTShape> shapesOfType(enum FFT_TYPES type, u32 sizeFrom, u32 sizeTo) {
+  vector<FFTShape> configs;
+  for (u32 width : {256, 512, 1024, 4096}) {
+    for (u32 height : {256, 512, 1024}) {
+      if (width == 256 && height == 1024) { continue; } // Skip because we prefer width >= height
+      for (u32 middle : {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}) {
+        if (type != FFT64 && (middle & (middle - 1))) continue;   // Reject non-power-of-two NTTs
+        u32 sz = width * height * middle * 2;
+        if (sizeFrom <= sz && sz <= sizeTo) {
+          configs.push_back({type, width, middle, height});
+        }
+      }
+    }
+  }
+  std::sort(configs.begin(), configs.end(),
+            [](const FFTShape &a, const FFTShape &b) {
+              if (a.size() != b.size()) { return (a.size() < b.size()); }
+              if (a.width != b.width) {
+                if (a.width == 1024 || b.width == 1024) { return a.width == 1024; }
+                return a.width < b.width;
+              }
+              return a.height < b.height;
+            });
+  return configs;
+}
+
 } // namespace
 
 // Accepts:
-// - a prefix indicating FFT_type (if not specified, default is FP64)
+// - a prefix indicating FFT_type (if not specified, default is FFT3161); a size or size range then means shapes of that type
 // - a single config: 1K:13:256
 // - a size: 6.5M
 // - a range of sizes: 6.5M-7M
@@ -78,6 +105,10 @@ vector<FFTShape> FFTShape::multiSpec(const string& iniSpec) {
       fft_type = (enum FFT_TYPES) parseInt(parts[0]);
       parts = vector(next(parts.begin()), parts.end());
     }
+    if (parts.empty()) {
+      log("Could not find a FFT config for '%s'\n", spec.c_str());
+      throw "Invalid FFT spec";
+    }
     assert(parts.size() <= 3);
     if (parts.size() == 3) {
       u32 width = parseInt(parts[0]);
@@ -88,11 +119,13 @@ vector<FFTShape> FFTShape::multiSpec(const string& iniSpec) {
     }
     assert(parts.size() == 1);
 
-    parts = split(spec, '-');
-    assert(parts.size() >= 1 && parts.size() <= 2);
-    u32 sizeFrom = parseInt(parts[0]);
-    u32 sizeTo = parts.size() == 2 ? parseInt(parts[1]) : sizeFrom;
-    auto shapes = allShapes(sizeFrom, sizeTo);
+    // Parse the size range from the part after the type prefix: splitting the whole spec read "1:8M" as the size 1
+    // (scaled by the trailing M), and dropped the prefix, so "4:2M" became an FFT3161 of 4M.
+    auto range = split(parts[0], '-');
+    assert(range.size() >= 1 && range.size() <= 2);
+    u32 sizeFrom = parseInt(range[0]);
+    u32 sizeTo = range.size() == 2 ? parseInt(range[1]) : sizeFrom;
+    auto shapes = shapesOfType(fft_type, sizeFrom, sizeTo);
     if (shapes.empty()) {
       log("Could not find a FFT config for '%s'\n", spec.c_str());
       throw "Invalid FFT spec";
@@ -102,31 +135,13 @@ vector<FFTShape> FFTShape::multiSpec(const string& iniSpec) {
   return ret;
 }
 
+// The automatic enumeration (and an unprefixed size or range): FFT3161 shapes only.
 vector<FFTShape> FFTShape::allShapes(u32 sizeFrom, u32 sizeTo) {
   vector<FFTShape> configs;
   for (enum FFT_TYPES type : {FFT3161}) {
-    for (u32 width : {256, 512, 1024, 4096}) {
-      for (u32 height : {256, 512, 1024}) {
-        if (width == 256 && height == 1024) { continue; } // Skip because we prefer width >= height
-        for (u32 middle : {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}) {
-          if (type != FFT64 && (middle & (middle - 1))) continue;   // Reject non-power-of-two NTTs
-          u32 sz = width * height * middle * 2;
-          if (sizeFrom <= sz && sz <= sizeTo) {
-            configs.push_back({type, width, middle, height});
-          }
-        }
-      }
-    }
+    vector<FFTShape> shapes = shapesOfType(type, sizeFrom, sizeTo);
+    configs.insert(configs.end(), shapes.begin(), shapes.end());
   }
-  std::sort(configs.begin(), configs.end(),
-            [](const FFTShape &a, const FFTShape &b) {
-              if (a.size() != b.size()) { return (a.size() < b.size()); }
-              if (a.width != b.width) {
-                if (a.width == 1024 || b.width == 1024) { return a.width == 1024; }
-                return a.width < b.width;
-              }
-              return a.height < b.height;
-            });
   return configs;
 }
 
@@ -754,6 +769,19 @@ FFTConfig FFTConfig::bestFit(const Args& args, u64 E, const string& spec) {
     // fits, execute the same requested shape/variant without the redundant
     // FP32 plane.  Use pfa9full:4 only for the true three-plane diagnostic path.
     if (fft.adaptive_type4_request) {
+      // Adaptive Type-4 PFA9 can return the paired FFT3161 plan before the
+      // common explicit-plan capacity checks below.  Enforce the same
+      // minimum-bits-per-word gate before that early return.
+      const double adaptive_bpw = E / double(fft.size());
+      if (adaptive_bpw < fft.minBpw()) {
+        throw std::runtime_error(
+            "Aevum FFT plan " + fft.spec() +
+            " is too large for exponent " + std::to_string(E) +
+            " (" + std::to_string(adaptive_bpw) + " bits/word < " +
+            std::to_string(fft.minBpw()) +
+            "); use AUTO or a smaller plan");
+      }
+
       FFTConfig paired{FFTShape{FFT3161, fft.shape.width, fft.shape.middle, fft.shape.height},
                        fft.variant, fft.carry};
       paired.pfa_radix = fft.pfa_radix;
@@ -800,6 +828,15 @@ throw "Aevum FFT type";
           static_cast<int>(fft.shape.fft_type));
     }
 #endif
+    const double explicit_bpw = E / double(fft.size());
+    if (explicit_bpw < fft.minBpw()) {
+      throw std::runtime_error(
+          "Aevum FFT plan " + fft.spec() +
+          " is too large for exponent " + std::to_string(E) +
+          " (" + std::to_string(explicit_bpw) + " bits/word < " +
+          std::to_string(fft.minBpw()) +
+          "); use AUTO or a smaller plan");
+    }
     if (fft.maxExp() * args.fftOverdrive < E) {
       // An explicit plan past its measured capacity would compute a silently wrong residue (and an LL run has
       // no Gerbicz check to notice), so refuse it.  -od raises the allowed exponent for the standalone program;

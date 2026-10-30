@@ -27,7 +27,9 @@ extern std::map<CUdeviceptr, CUcontext> allocations;  // live device memory and 
 extern std::vector<Call> calls;                       // every free / destroy, with the context current at the time
 extern std::vector<Call> uses;                        // every module load, launch and stream operation, with the
                                                       // context current at the time and the object's own context
-extern std::map<std::string, CUresult> failNext;      // make the next call of "cuMemFree", "cuMemAlloc" or
+extern std::map<std::string, CUresult> failNext;
+extern std::string pciBusId;                         // value returned by cuDeviceGetPCIBusId
+extern CUresult pciBusIdResult;                    // injected result for cuDeviceGetPCIBusId      // make the next call of "cuMemFree", "cuMemAlloc" or
                                                       // "cuMemcpyHtoD" fail with this
 
 CUcontext current();
