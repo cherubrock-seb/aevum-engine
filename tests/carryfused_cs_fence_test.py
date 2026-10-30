@@ -70,7 +70,7 @@ TYPES = {  # name: (FFT_TYPE, FP64, FP32, GF31, GF61, WordSize, carry64 values)
     "FFT31": (52, 0, 0, 1, 0, 4, (0,)),
     "FFT32": (53, 0, 1, 0, 0, 4, (0,)),
 }
-COMMON = ["-Xclang", "-cl-ext=+cl_khr_fp64", "-Dcl_khr_fp64=1", "-I", str(CL_DIR), "-DNO_ASM=1",
+COMMON = ["-Dcl_khr_fp64=1", "-I", str(CL_DIR), "-DNO_ASM=1",
           "-DEXP=1700023u", "-DWIDTH=512u", "-DSMALL_HEIGHT=256u", "-DMIDDLE=2u", "-DNW=8u", "-DNH=4u", "-DCARRY_LEN=8u",
           "-DPFA_RADIX=0u", "-DMAXBPW=3998u", "-DFFT_VARIANT=202u",
           "-DDISTGF31=0", "-DDISTWTRIGGF31=0", "-DDISTMTRIGGF31=0", "-DDISTHTRIGGF31=0",
@@ -79,9 +79,11 @@ COMMON = ["-Xclang", "-cl-ext=+cl_khr_fp64", "-Dcl_khr_fp64=1", "-I", str(CL_DIR
           "-DTAILT=U2(1.0,0.0)", "-DTAILTGF31=U2(269176336u,500380354u)", "-DTAILTGF61=U2(807738046998073027ul,30095103403839256ul)",
           "-DTRIG_SIN={1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0}", "-DTRIG_COS={1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0}"]
 STDS = {
-    "CL2.0": ["-cl-std=CL2.0"],
-    "CL3.0": ["-cl-std=CL3.0", "-D__opencl_c_atomic_scope_device=1"],
-    "CL1.2-apple": ["-cl-std=CL1.2", "-DAEVUM_APPLE_OPENCL12=1"],
+    "CL2.0": ["-cl-std=CL2.0", "-Xclang", "-cl-ext=+cl_khr_fp64"],
+    "CL3.0": ["-cl-std=CL3.0", "-Xclang", "-cl-ext=+cl_khr_fp64,+__opencl_c_fp64",
+              "-D__opencl_c_atomic_scope_device=1"],
+    "CL1.2-apple": ["-cl-std=CL1.2", "-Xclang", "-cl-ext=+cl_khr_fp64",
+                    "-DAEVUM_APPLE_OPENCL12=1"],
 }
 VENDORS = {"other": [], "amd": ["-DAMDGPU=1", "-DWAVEFRONT=64"], "nvidia": ["-DNVIDIAGPU=1", "-DCC=860"]}
 CS = {"default": [], "off": ["-DCS_FENCE=0", "-DCS_ATOMIC=0"], "on": ["-DCS_FENCE=1", "-DCS_ATOMIC=1"],
