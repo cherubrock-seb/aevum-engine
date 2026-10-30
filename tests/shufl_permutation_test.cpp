@@ -273,6 +273,26 @@ int main(int argc, char** argv) {
   }
 
   cl_device_id dev = devices[deviceIndex];
+
+  // The release Linux runner installs PoCL only to provide OpenCL headers and a
+  // loader for host/API coverage.  The shuffle permutation matrix exercises
+  // GPU-specific LDS layouts and is validated on real AMD/NVIDIA GPUs.  Keep
+  // the default behavior unchanged, but allow release CI to skip only a CPU
+  // OpenCL device explicitly.
+  constexpr cl_device_info kDeviceType = 0x1000;
+  constexpr cl_device_type kCpuDeviceType = static_cast<cl_device_type>(1u << 1);
+  cl_device_type deviceType = 0;
+  if (clGetDeviceInfo(dev, kDeviceType, sizeof(deviceType), &deviceType, nullptr) != CL_SUCCESS) {
+    std::fprintf(stderr, "cannot query OpenCL device type\n");
+    return 2;
+  }
+  if (const char* skipCpu = std::getenv("AEVUM_SHUFL_PERMUTATION_SKIP_CPU");
+      skipCpu && *skipCpu && std::strcmp(skipCpu, "0") != 0 &&
+      (deviceType & kCpuDeviceType) != 0) {
+    std::printf("SKIP: shuffle permutation matrix requires a GPU OpenCL device; release CI exposed CPU-only OpenCL\n");
+    return 0;
+  }
+
   std::printf("device %u: %s\n", deviceIndex, getDeviceName(dev).c_str());
   char ext[8192] = {};
   clGetDeviceInfo(dev, 0x1030 /* CL_DEVICE_EXTENSIONS */, sizeof(ext) - 1, ext, nullptr);
