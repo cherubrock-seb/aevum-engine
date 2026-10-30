@@ -7,7 +7,7 @@
 #include <cstdio>
 #include <iterator>
 
-bool prpll_verbose = false;
+int prpll_verbose = 0;
 std::string NvrtcProgram::preprocessOpenCL(const std::string& source) { return source; }
 std::string NvrtcProgram::compile(const std::string&, const std::string&, const std::vector<std::string>&,
                                   const std::vector<std::pair<std::string, std::string>>&) { return {}; }
