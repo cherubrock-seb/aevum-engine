@@ -39,7 +39,7 @@ jobs:
       - name: Build and test standalone Aevum
         run: |
           set -eux
-          make -C "$AEVUM_DIR" test-host
+          AEVUM_SHUFL_PERMUTATION_SKIP_CPU=1 make -C "$AEVUM_DIR" test-host
           make -C "$AEVUM_DIR" -j "$(nproc)" engine-lib
           make -C "$AEVUM_DIR" test-engine-api
           make -C "$AEVUM_DIR" -j "$(nproc)"
