@@ -19,7 +19,7 @@ SRC="$ROOT/build-tests/carryfused-no-generic-as.cl"
 (cd "$ROOT" && "$DUMPER" --dump-root carryfused.cl "$SRC") >/dev/null
 
 defs=(
-  -Xclang -cl-ext=-__opencl_c_generic_address_space,-__opencl_c_device_enqueue,-__opencl_c_pipes
+  -Xclang -cl-ext=+cl_khr_fp64,+__opencl_c_fp64,-__opencl_c_generic_address_space,-__opencl_c_device_enqueue,-__opencl_c_pipes
   # Older clang (e.g. 18) also drops these feature macros with the generic address space, and its headers then hide
   # atomic_store/atomic_load. Keep them so the only missing feature is the generic address space.
   -D__opencl_c_atomic_order_seq_cst=1 -D__opencl_c_atomic_scope_device=1
