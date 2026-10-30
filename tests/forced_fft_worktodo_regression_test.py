@@ -94,7 +94,7 @@ static Task selectLocal(
   fs::current_path(dir);
 
   {
-    std::ofstream file("worktodo-0.txt");
+    std::ofstream file("worktodo-0.txt", std::ios::binary);
     file << lines;
   }
 
