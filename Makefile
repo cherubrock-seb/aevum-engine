@@ -832,3 +832,9 @@ test-time-reentrant:
 test-host: test-main-exit-code
 test-main-exit-code: aevum
 	python3 tests/main_exit_code_test.py $(BIN)/aevum
+
+# Opt-in NVIDIA GF61 sm120 reduction pair source contract.
+.PHONY: test-gf61-sm120-source
+test-host: test-gf61-sm120-source
+test-gf61-sm120-source:
+	python3 tests/gf61_sm120_source_test.py
