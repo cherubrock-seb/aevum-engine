@@ -60,7 +60,7 @@ int main(int argc, char** argv) {
   int failures = 0;
   for (const Type& t : types) {
     Program prog = loadSource(ctx, HARNESS);
-    std::string opts = std::string("-cl-std=CL3.0 -I ") + dir + " -DNO_ASM=1 -DCARRY64=1 -DCARRY_LEN=8u -DPFA_RADIX=0u -DMAXBPW=3000u "
+    // This focused harness uses only OpenCL 1.2 features; forcing CL3.0 rejects otherwise valid AMD runtimes.\n    std::string opts = std::string("-cl-std=CL1.2 -I ") + dir + " -DNO_ASM=1 -DCARRY64=1 -DCARRY_LEN=8u -DPFA_RADIX=0u -DMAXBPW=3000u "
       "-DEXP=20000033u -DWIDTH=256u -DSMALL_HEIGHT=256u -DMIDDLE=2u -DNW=4u -DNH=4u -DFFT_VARIANT=101u "
       "-DDISTGF31=0 -DDISTWTRIGGF31=0 -DDISTMTRIGGF31=0 -DDISTHTRIGGF31=0 -DDISTGF61=0ul -DDISTWTRIGGF61=0ul -DDISTMTRIGGF61=0ul -DDISTHTRIGGF61=0ul "
       "-DFRAC_BPW_HI=0u -DFRAC_BPW_LO=0u -DTAILT=U2(1.0f,0.0f) -DTAILTGF31=U2(1u,1u) -DTAILTGF61=U2(1ul,1ul) " + std::string(t.defs);
