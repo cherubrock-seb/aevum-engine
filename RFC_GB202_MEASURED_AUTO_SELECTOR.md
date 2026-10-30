@@ -1,7 +1,7 @@
 # RFC: Measured RTX 5090 / GB202 FFT profile selection
 
-**Status:** Proposal only — implementation and real GB202 validation pending.  
-**Canonical owner:** Aevum; PrMers must consume the validated engine behavior without duplicating FFT policy.  
+**Status:** Host policy scaffold implemented; production wiring and real GB202 validation pending.
+**Canonical owner:** Aevum; PrMers must consume the validated engine behavior without duplicating FFT policy.
 **Related:** PrMers issue [#36](https://github.com/cherubrock-seb/PrMers/issues/36), `README_RTX5090_GB202_TUNE.md`, Pass-4 shape and Pass-5 implementation tuning.
 
 ## Existing behavior (verified on Aevum main at `d9cedb424525008b6c9a404ba1ab54ff03acb6b5`)
@@ -18,6 +18,8 @@ The original external RTX 5090 OpenCL report measured approximately 236 us/iter 
 These are historical measurements on a different software baseline, not an accepted speedup for current Aevum. The FFT *shape* and the complete `-use` *implementation vector* are distinct candidates and must not be conflated.
 
 ## Proposed behavior
+
+A pure host-testable policy scaffold now codifies GB202 scope, override precedence, fail-closed measurement handling, and the >=3% acceptance threshold. It is deliberately not wired into `EngineApi.cpp`; current production behavior is unchanged until real current-source GB202 A/B evidence exists.
 
 1. **Scope precisely.** Evaluate only PRP on a positively identified NVIDIA GB202/RTX 5090, the supported 146M–150M range, and a supported matching backend. Do not modify LL, P-1, ECM, Radeon, or older NVIDIA defaults. Reject ambiguous device mapping. Preserve `AEVUM_GB202_TUNE=0`, explicit FFT, explicit implementation flags, user-supplied tune data, and other existing override precedence. Document `AEVUM_AUTOTUNE=off` semantics before changing them.
 2. **Treat the historical shape as a candidate, not an unconditional winner.** Obtain a legal current native AUTO reference before applying the GB202 built-in shape. Compare the **actual instantiated FFT plans** under the same physical device, backend, exponent, register count, driver, runtime, and source. Check FFT capacity, known-unsafe plan restrictions, PRP factor-3 headroom, and allocation feasibility before measurement. Do not insert the built-in GB202 plan into a generic cross-device tuning table.

@@ -206,6 +206,7 @@ FFT8_SKIP1_TEST := build-tests/aevum-fft8-skip1-test
 WMUL_LIMIT_TEST := build-tests/aevum-wmul-limit-test
 FFT_VARIANT0_1K_TEST := build-tests/aevum-fft-variant0-1k-test
 AUTOTUNE_CACHE_TEST := build-tests/aevum-runtime-autotune-cache-test
+GB202_MEASURED_POLICY_TEST := build-tests/aevum-gb202-measured-policy-test
 
 .PHONY: test test-host test-fft-variant0-1k test-gpu test-pfa9-lead-bridge-gpu
 
@@ -215,7 +216,7 @@ $(MONOLITHIC_SOURCE_TEST): tests/opencl_monolithic_source_test.cpp src/OpenCLSou
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra tests/opencl_monolithic_source_test.cpp src/OpenCLSourceBuilder.cpp -o $@
 
-test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST) $(FFT_EXPLICIT_CAPACITY_TEST) $(ARGS_VALUE_FOR_TEST) $(FFT_SIZE_ONLY_SPEC_TEST) $(FFT_SPEC_ROBUSTNESS_TEST) $(AUTOTUNE_CACHE_TEST) $(EVENT_STATUS_TEST) $(FFT8_SKIP1_TEST) $(FFT_VARIANT0_1K_TEST) $(WMUL_LIMIT_TEST)
+test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDARD_TEST) $(TYPE4_PLAN_TEST) $(FFT_EXPLICIT_CAPACITY_TEST) $(ARGS_VALUE_FOR_TEST) $(FFT_SIZE_ONLY_SPEC_TEST) $(FFT_SPEC_ROBUSTNESS_TEST) $(AUTOTUNE_CACHE_TEST) $(GB202_MEASURED_POLICY_TEST) $(EVENT_STATUS_TEST) $(FFT8_SKIP1_TEST) $(FFT_VARIANT0_1K_TEST) $(WMUL_LIMIT_TEST)
 	$(MONOLITHIC_SOURCE_TEST)
 	bash tests/opencl12_syntax_test.sh
 	bash tests/pow2_type4_opencl_syntax.sh
@@ -317,6 +318,10 @@ $(EVENT_STATUS_TEST): tests/event_status_test.cpp src/Queue.cpp src/Event.cpp sr
 $(AUTOTUNE_CACHE_TEST): tests/runtime_autotune_cache_test.cpp src/RuntimeAutotune.cpp src/RuntimeAutotune.h
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/runtime_autotune_cache_test.cpp src/RuntimeAutotune.cpp -o $@
+
+$(GB202_MEASURED_POLICY_TEST): tests/gb202_measured_policy_test.cpp src/Gb202MeasuredPolicy.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/gb202_measured_policy_test.cpp -o $@
 
 # tune.txt / config.txt: accept a last line with no final newline (worktodo stays strict)
 UNTERMINATED_LINE_TEST := build-tests/aevum-unterminated-last-line-test
