@@ -15,6 +15,11 @@ HARNESS = r'''
 #include "Worktodo.h"
 #include "Args.h"
 #include "FFTConfig.h"
+#include "CycleFile.h"
+#include "Proof.h"
+#include "clwrap.h"
+#include "gpuid.h"
+#include "version.h"
 
 #include <cstdarg>
 #include <cstdlib>
@@ -38,6 +43,31 @@ return _putenv_s(name, "");
 #endif
 
 void log(const char*, ...) {}
+
+const char *VERSION = "forced-fft-regression-test";
+
+CycleFile::CycleFile(const fs::path& path) : name(path), f{} {}
+CycleFile::~CycleFile() = default;
+File* CycleFile::operator->() { return nullptr; }
+File& CycleFile::operator*() {
+  throw std::runtime_error("unused CycleFile stub");
+}
+void CycleFile::reset() { f.reset(); }
+
+u32 ProofSet::bestPower(u64) { return 0; }
+double ProofSet::diskUsageGB(u64, u32) { return 0.0; }
+
+std::vector<cl_device_id> getAllDeviceIDs() { return {}; }
+std::string getBdfFromDevice(cl_device_id) { return {}; }
+std::string getBoardName(cl_device_id) { return {}; }
+std::string getDeviceName(cl_device_id) { return {}; }
+std::string getDriverVersion(cl_device_id) { return {}; }
+std::string getDriverVersionByPos(int) { return {}; }
+
+std::string getUidFromBdf(const std::string&) { return {}; }
+std::string getUidFromPos(int) { return {}; }
+int getPosFromBdf(const std::string&) { return -1; }
+int getPosFromUid(const std::string&) { return -1; }
 
 std::vector<std::string> split(
     const std::string& text, char delimiter) {
@@ -64,7 +94,7 @@ static Task selectLocal(
   fs::current_path(dir);
 
   {
-    std::ofstream file("worktodo-0.txt");
+    std::ofstream file("worktodo-0.txt", std::ios::binary);
     file << lines;
   }
 
