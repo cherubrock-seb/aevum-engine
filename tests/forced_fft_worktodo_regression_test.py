@@ -28,6 +28,15 @@ HARNESS = r'''
 
 namespace fs = std::filesystem;
 
+#ifdef _WIN32
+static int setenv(const char* name, const char* value, int) {
+return _putenv_s(name, value);
+}
+static int unsetenv(const char* name) {
+return _putenv_s(name, "");
+}
+#endif
+
 void log(const char*, ...) {}
 
 std::vector<std::string> split(
