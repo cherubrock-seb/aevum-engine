@@ -43,7 +43,7 @@ A pure host-testable policy scaffold now codifies GB202 scope, override preceden
 
 ## Suggested autonomous follow-through
 
-- **Current state: NEEDS_IMPLEMENTATION / NEEDS_GB202_HARDWARE**, not MERGE_CANDIDATE or validated KEEP.
+- **Current state: HOST_POLICY_SCAFFOLD_COMPLETE / NEEDS_GB202_HARDWARE**, not MERGE_CANDIDATE or validated KEEP.
 - Inspect current Aevum and PrMers HEADs and existing PRs before any changes; do not create duplicate proposals.
 - Implement the smallest focused reusable change on **this PR branch**, or explicitly supersede it with a traceable implementation PR if a different branch is technically required.
 - Use connected GitHub identity `cherubrock-seb` for persistent writes. Run host/synthetic tests first, preserve negative results, and obtain real hardware confirmation before changing production defaults.
