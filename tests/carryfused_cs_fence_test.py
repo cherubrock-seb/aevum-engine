@@ -80,7 +80,7 @@ COMMON = ["-Dcl_khr_fp64=1", "-I", str(CL_DIR), "-DNO_ASM=1",
           "-DTRIG_SIN={1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0}", "-DTRIG_COS={1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0}"]
 STDS = {
     "CL2.0": ["-cl-std=CL2.0", "-Xclang", "-cl-ext=+cl_khr_fp64"],
-    "CL3.0": ["-cl-std=CL3.0", "-Xclang", "-cl-ext=+cl_khr_fp64,+__opencl_c_fp64",
+    "CL3.0": ["-cl-std=CL3.0", "--target=spir64", "-Xclang", "-cl-ext=+cl_khr_fp64,+__opencl_c_fp64",
               "-D__opencl_c_atomic_scope_device=1"],
     "CL1.2-apple": ["-cl-std=CL1.2", "-Xclang", "-cl-ext=+cl_khr_fp64",
                     "-DAEVUM_APPLE_OPENCL12=1"],
