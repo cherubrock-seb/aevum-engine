@@ -49,6 +49,29 @@ jobs:
       run: shopt -s globstar; shellcheck -o avoid-nullary-conditions,check-extra-masked-returns,check-set-e-suppressed,deprecate-which,quote-safe-variables,require-double-brackets -s bash **/*.sh
       continue-on-error: true
 
+
+  Linux-CUDA-NVRTC:
+    name: Linux CUDA NVRTC (no GPU)
+
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v6
+    - name: Install CUDA toolkit
+      run: |
+        sudo apt-get update -y
+        sudo apt-get install -y nvidia-cuda-toolkit
+        c++ --version
+        nvcc --version
+    - name: Build CUDA backend
+      run: make CUDA=1 -O -j "$(nproc)"
+    - name: Compile CUDA kernels with NVRTC
+      # CUDA kernels are compiled lazily at runtime. The harness preloads a
+      # fake CUDA driver, so the toolkit's real NVRTC compiles the selected
+      # kernels for recent and minimum-supported architectures without
+      # requiring or executing on a physical GPU.
+      timeout-minutes: 30
+      run: python3 tools/nvrtc-check/nvrtc-check.py build-cuda/aevum
+
   Windows:
     name: Windows
 
