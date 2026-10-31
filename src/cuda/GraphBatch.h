@@ -137,9 +137,9 @@ public:
         std::array<void*, _cl_kernel::MAX_ARGS> pointers{};
         auto p = pending_[i].params(pointers);
         check(cuGraphExecKernelNodeSetParams(selected->exec, selected->nodes[i], &p));
-        // Record only successful updates, immediately. If a later node fails,
-        // this remains the actual executable state; no graph is launched.
-        selected->shape[i] = pending_[i];
+        // In reuse mode record successful updates immediately. If a later
+        // node fails, this still describes the actual executable; no launch.
+        if (reuseParams_) selected->shape[i] = pending_[i];
       }
     }
     check(cuGraphLaunch(selected->exec, stream));
