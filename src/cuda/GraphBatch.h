@@ -3,6 +3,7 @@
 // stream capture: host slot allocation still runs on every square.
 #include <array>
 #include <cstring>
+#include <cstdlib>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -15,6 +16,17 @@ class AevumCudaGraphBatch {
     int count{};
     alignas(16) std::array<char, _cl_kernel::MAX_ARG_BYTES> data{};
     std::array<size_t, _cl_kernel::MAX_ARGS> offsets{};
+    std::array<size_t, _cl_kernel::MAX_ARGS> sizes{};
+    bool sameArguments(const Launch& other) const {
+      if (!sameShape(other)) return false;
+      for (int i = 0; i < count; ++i) {
+        if (sizes[i] != other.sizes[i] ||
+            std::memcmp(data.data() + offsets[i],
+                        other.data.data() + other.offsets[i], sizes[i]) != 0)
+          return false;
+      }
+      return true;
+    }
     bool sameShape(const Launch& other) const {
       return function == other.function && blocks == other.blocks &&
              threads == other.threads && count == other.count;
@@ -39,7 +51,14 @@ class AevumCudaGraphBatch {
       if (graph) cuGraphDestroy(graph);
     }
   };
+  static bool readReuseOption() {
+    const char* value = std::getenv("AEVUM_CUDA_GRAPH_REUSE_PARAMS");
+    if (!value || std::strcmp(value, "0") == 0) return false;
+    if (std::strcmp(value, "1") == 0) return true;
+    throw std::runtime_error("AEVUM_CUDA_GRAPH_REUSE_PARAMS must be 0 or 1");
+  }
   bool active_{false};
+  const bool reuseParams_;
   std::vector<Launch> pending_;
   std::vector<std::unique_ptr<Cached>> cache_;
   static void check(CUresult r) {
@@ -47,7 +66,11 @@ class AevumCudaGraphBatch {
       throw std::runtime_error("CUDA square graph API failure: " + std::to_string(int(r)));
   }
 public:
-  AevumCudaGraphBatch() { pending_.reserve(16); cache_.reserve(2); }
+  AevumCudaGraphBatch() : AevumCudaGraphBatch(readReuseOption()) {}
+  explicit AevumCudaGraphBatch(bool reuseParams) : reuseParams_(reuseParams) {
+    pending_.reserve(16);
+    cache_.reserve(2);
+  }
   bool active() const { return active_; }
   void begin() {
     if (active_) throw std::runtime_error("nested CUDA square graph");
@@ -70,6 +93,7 @@ public:
           k->argSizes[i] > launch.data.size() - k->argOffsets[i])
         throw std::runtime_error("invalid CUDA square graph argument span");
       launch.offsets[i] = k->argOffsets[i];
+      launch.sizes[i] = k->argSizes[i];
     }
     pending_.push_back(launch); // Snapshot now: later setArg calls may reuse k.
   }
@@ -105,12 +129,17 @@ public:
       selected = fresh.get();
       cache_.push_back(std::move(fresh));
     } else {
-      // Every parameter of every node is refreshed, including all buffers,
-      // ROE positions and carry sample slots. Never replay frozen arguments.
+      // Snapshot every launch as before. Reuse only nodes whose complete live
+      // argument bytes match the executable, including ROE/carry sample slots.
+      // Packing offsets and unused padding are not kernel parameter values.
       for (size_t i = 0; i < pending_.size(); ++i) {
+        if (reuseParams_ && pending_[i].sameArguments(selected->shape[i])) continue;
         std::array<void*, _cl_kernel::MAX_ARGS> pointers{};
         auto p = pending_[i].params(pointers);
         check(cuGraphExecKernelNodeSetParams(selected->exec, selected->nodes[i], &p));
+        // Record only successful updates, immediately. If a later node fails,
+        // this remains the actual executable state; no graph is launched.
+        selected->shape[i] = pending_[i];
       }
     }
     check(cuGraphLaunch(selected->exec, stream));
