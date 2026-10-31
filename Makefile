@@ -838,3 +838,17 @@ test-main-exit-code: aevum
 test-host: test-gf61-sm120-source
 test-gf61-sm120-source:
 	python3 tests/gf61_sm120_source_test.py
+# Host regression for per-FFT config parsing. Link against the production engine
+# objects so Args::parse is exercised with its real dependencies.
+PER_FFT_CONFIG_PARSE_TEST := build-tests/aevum-per-fft-config-parse-test
+
+.PHONY: test-per-fft-config-parse
+test-host: test-per-fft-config-parse
+test-per-fft-config-parse: $(PER_FFT_CONFIG_PARSE_TEST)
+	$(PER_FFT_CONFIG_PARSE_TEST)
+
+$(PER_FFT_CONFIG_PARSE_TEST): tests/per_fft_config_parse_test.cpp $(ENGINE_OBJS)
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc \
+		tests/per_fft_config_parse_test.cpp $(ENGINE_OBJS) \
+		$(OPENCL_LIBS) $(DL_LIBS) -o $@
