@@ -10,7 +10,7 @@
 #include "File.h"
 #include "TuneEntry.h"
 
-#include <numeric>
+#include <algorithm>\n#include <numeric>
 #include <string>
 #include <vector>
 #include <cassert>
@@ -409,12 +409,39 @@ void Tune::tune() {
     else {
       log("Checking whether this GPU is better suited for double-precision FFTs or integer NTTs.\n");
       defaultFFTShape = FFTShape(FFT64, 512, 16, 512);
-      FFTConfig fft{defaultFFTShape, 101, CARRY_32};
-      double fp64_time = Gpu::make(141000001, shared, fft, {}, false)->timePRP(quick);
-      log("Time for FP64 FFT %12s is %6.1f\n", fft.spec().c_str(), fp64_time);
       defaultNTTShape = FFTShape(FFT3161, 512, 8, 512);
+      FFTConfig fft{defaultFFTShape, 101, CARRY_32};
       FFTConfig ntt{defaultNTTShape, 202, CARRY_AUTO};
-      double ntt_time = Gpu::make(141000001, shared, ntt, {}, false)->timePRP(quick);
+      u64 probe_exponent = 141000001;
+
+      // If the requested exponent window excludes the historical 141M probe,
+      // compare the families where the user actually asked us to tune.  Use
+      // the smallest favored shapes that safely cover the midpoint so cache
+      // footprint and launch overhead reflect that range.  The default shapes
+      // used for the later option sweeps remain unchanged.
+      if (probe_exponent < min_exponent || probe_exponent > max_exponent) {
+        probe_exponent = primes.prevPrime(min_exponent / 2 + max_exponent / 2);
+        vector<FFTShape> sizes = FFTShape::allShapes();
+        stable_sort(sizes.begin(), sizes.end(),
+                    [](const FFTShape& a, const FFTShape& b) { return a.size() < b.size(); });
+
+        auto smallest = [&](enum FFT_TYPES type, u32 variant, FFTConfig current) {
+          for (const FFTShape& shape : sizes) {
+            if (shape.fft_type != type || !shape.isFavoredShape()) continue;
+            FFTConfig candidate{shape, variant, CARRY_AUTO};
+            if (candidate.maxExp() >= probe_exponent) return candidate;
+          }
+          return current;
+        };
+
+        fft = smallest(FFT64, 101, fft);
+        ntt = smallest(FFT3161, 202, ntt);
+        log("Timing family choice at %" PRIu64 ", the middle of the requested exponent range.\n", probe_exponent);
+      }
+
+      double fp64_time = Gpu::make(probe_exponent, shared, fft, {}, false)->timePRP(quick);
+      log("Time for FP64 FFT %12s is %6.1f\n", fft.spec().c_str(), fp64_time);
+      double ntt_time = Gpu::make(probe_exponent, shared, ntt, {}, false)->timePRP(quick);
       log("Time for M31*M61 NTT %12s is %6.1f\n", ntt.spec().c_str(), ntt_time);
       if (fp64_time < ntt_time) {
         defaultShape = &defaultFFTShape;
