@@ -482,7 +482,7 @@ KERNEL(256) fftMiddleIn(P(T2) out, P(T2) in, Trig trig) {
   u32 N = WIDTH / 16;
   u32 startx = g % N * 16;
   u32 starty = g / N * 16;
-  u32 zerohack = (MIDDLE >= 16) ? 0 : g / 131072;  // Rocm optimizer goes bonkers if zerohack used when MIDDLE=16
+  u32 zerohack = (MIDDLE >= 16) ? g / 131072 : 0;  // Rocm optimizer goes bonkers if zerohack used when MIDDLE=16
 #endif
 
   u32 me = get_local_id(0);
@@ -657,7 +657,7 @@ KERNEL(256) fftMiddleInGF61(P(T2) out, P(T2) in, Trig trig) {
   u32 N = WIDTH / 16;
   u32 startx = g % N * 16;
   u32 starty = g / N * 16;
-  u32 zerohack = (MIDDLE >= 16) ? 0 : g / 131072;  // Rocm optimizer goes bonkers if zerohack used when MIDDLE=16 (for FP64, GF61 untimed)
+  u32 zerohack = g / 131072;                       // Keep write addresses distinct from reads at MIDDLE=16
 #endif
 
   u32 me = get_local_id(0);
