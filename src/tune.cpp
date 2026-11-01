@@ -422,13 +422,14 @@ void Tune::tune() {
       // used for the later option sweeps remain unchanged.
       if (probe_exponent < min_exponent || probe_exponent > max_exponent) {
         probe_exponent = primes.prevPrime(min_exponent / 2 + max_exponent / 2);
-        vector<FFTShape> sizes = FFTShape::allShapes();
-        stable_sort(sizes.begin(), sizes.end(),
-                    [](const FFTShape& a, const FFTShape& b) { return a.size() < b.size(); });
-
         auto smallest = [&](enum FFT_TYPES type, u32 variant, FFTConfig current) {
+          // allShapes() intentionally enumerates only FFT3161 in Aevum.
+          // multiSpec with an explicit type prefix reaches the shared
+          // type-specific shape enumerator without changing global AUTO.
+          vector<FFTShape> sizes =
+              FFTShape::multiSpec(to_string((u32) type) + ":256K-128M");
           for (const FFTShape& shape : sizes) {
-            if (shape.fft_type != type || !shape.isFavoredShape()) continue;
+            if (!shape.isFavoredShape()) continue;
             FFTConfig candidate{shape, variant, CARRY_AUTO};
             const double bpw = probe_exponent / double(candidate.size());
             if (bpw >= candidate.minBpw() &&
