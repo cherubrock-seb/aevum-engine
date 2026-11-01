@@ -468,7 +468,7 @@ KERNEL(IN_WG) fftMiddleInGF61TransposeApple(P(T2) out, CP(T2) in) {
 
 #if FFT_FP64
 
-KERNEL(256) fftMiddleIn(P(T2) out, P(T2) in, Trig trig) {
+KERNEL_CAP(256) fftMiddleIn(P(T2) out, P(T2) in, Trig trig) {
   assert(out == in);
   T2 u[MIDDLE];
 
