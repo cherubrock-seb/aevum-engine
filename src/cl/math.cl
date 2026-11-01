@@ -805,7 +805,12 @@ GF31 OVERLOAD foo(GF31 a) { return foo2(a, a); }
 #elif 1                                                               // This version is a little sloppy.  Returns values in 0..M31 range.
 
 // Internal routines to return value in 0..M31 range
-#if MODM31 == 0
+#if MODM31 == 3
+// Mersenne-31 reduction via one subtract and an unsigned min.  If a < M31,
+// a - M31 wraps above a; otherwise a - M31 is the reduced representative.
+Z31 OVERLOAD modM31(Z31 a) { return min(a, a - M31); }                                 // Assumes a is not 0xFFFFFFFF
+Z31 OVERLOAD modM31(i32 a) { return min((u32) a, (u32) a + M31); }                     // Assumes a is not 0x80000000
+#elif MODM31 == 0
 Z31 OVERLOAD modM31(Z31 a) { return (a & M31) + (a >> 31); }                          // Assumes a is not 0xFFFFFFFF (which would return 0x80000000)
 Z31 OVERLOAD modM31(i32 a) { return (a & M31) + (a >> 31); }                          // Assumes a is not 0x80000000 (which would return 0xFFFFFFFF)
 #elif MODM31 == 1
