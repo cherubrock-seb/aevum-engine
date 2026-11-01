@@ -599,6 +599,13 @@ jobs:
           set -eux
           test "$(git cat-file -t "refs/tags/${GITHUB_REF_NAME}")" = tag
 
+      - name: Require release tag matches AEVUM_VERSION
+        run: |
+          set -eux
+          AEVUM_VERSION="$(awk '$1 == "AEVUM_VERSION" { print $3; exit }' Makefile)"
+          test -n "$AEVUM_VERSION"
+          test "$GITHUB_REF_NAME" = "$AEVUM_VERSION"
+
       - name: Download all platform packages
         uses: actions/download-artifact@v4
         with:
