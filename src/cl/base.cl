@@ -350,6 +350,17 @@ ulong2 OVERLOAD U2(unsigned long long a, unsigned long long b) { return (ulong2)
 
 #define KERNEL(x) kernel __attribute__((reqd_work_group_size(x, 1, 1))) void
 
+// AMD OpenCL only: a per-kernel register profile may request a minimum number
+// of waves per SIMD or an explicit VGPR cap.  Kernels remain unchanged unless
+// their declaration uses KERNEL_CAP and the host passes one of these defines.
+#if AMDGPU && defined(AMD_NUM_VGPR)
+#define KERNEL_CAP(x) kernel __attribute__((reqd_work_group_size(x, 1, 1), amdgpu_num_vgpr(AMD_NUM_VGPR))) void
+#elif AMDGPU && defined(AMD_WAVES_PER_EU)
+#define KERNEL_CAP(x) kernel __attribute__((reqd_work_group_size(x, 1, 1), amdgpu_waves_per_eu(AMD_WAVES_PER_EU))) void
+#else
+#define KERNEL_CAP(x) KERNEL(x)
+#endif
+
 
 // For reasons unknown, loading trig values into nVidia's constant cache has terrible performance
 #if AMDGPU
