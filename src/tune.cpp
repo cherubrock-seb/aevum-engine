@@ -10,7 +10,8 @@
 #include "File.h"
 #include "TuneEntry.h"
 
-#include <algorithm>\n#include <numeric>
+#include <algorithm>
+#include <numeric>
 #include <string>
 #include <vector>
 #include <cassert>
