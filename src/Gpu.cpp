@@ -2,6 +2,7 @@
 
 #include "Gpu.h"
 #include "StatsSlot.h"
+#include "PrpGraphBatch.h"
 #include "AppleTailZero.h"
 #include "UseOptions.h"
 #include "WmulLimit.h"
@@ -305,7 +306,7 @@ static u32 aevumHeightRadix(const Args& args, cl_device_id id, const FFTConfig& 
 
 string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadix, u32 heightRadix, const vector<KeyVal>& extraConf, u64 E, bool doLog,
                  bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul,
-                 bool &cuda_graph_squares, bool &cuda_reg_ptx_cache, u32 &in_wg, u32 &in_sizex, u32 &out_wg, u32 &out_sizex) {
+                 bool &cuda_graph_squares, u32 &cuda_graph_batch, bool &cuda_reg_ptx_cache, u32 &in_wg, u32 &in_sizex, u32 &out_wg, u32 &out_sizex) {
   map<string, string> config;
 
   // Highest priority is the requested "extra" conf
@@ -375,6 +376,23 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
       log("AEVUM_CUDA_GRAPH_SQUARES=1: retained-width squares, fresh arguments for every graph node.\n");
   }
   config.erase("AEVUM_CUDA_GRAPH_SQUARES"); // Host-only: identical kernel source/cache and arithmetic.
+
+  cuda_graph_batch = 1;
+  if (const char* value = std::getenv("AEVUM_CUDA_GRAPH_BATCH")) {
+    const auto it = config.find("AEVUM_CUDA_GRAPH_BATCH");
+    if (it != config.end() && it->second != value)
+      throw std::runtime_error("conflicting AEVUM_CUDA_GRAPH_BATCH selections");
+    config["AEVUM_CUDA_GRAPH_BATCH"] = value;
+  }
+  if (const auto it = config.find("AEVUM_CUDA_GRAPH_BATCH"); it != config.end())
+    cuda_graph_batch = parsePrpGraphBatch(it->second);
+  if (cuda_graph_batch > 1) {
+    if (!cuda_graph_squares)
+      throw std::runtime_error("AEVUM_CUDA_GRAPH_BATCH requires AEVUM_CUDA_GRAPH_SQUARES=1");
+    if (doLog)
+      log("AEVUM_CUDA_GRAPH_BATCH=%u: unsampled production PRP iterations only.\n", cuda_graph_batch);
+  }
+  config.erase("AEVUM_CUDA_GRAPH_BATCH"); // Host-only; preserve kernel cache keys.
 
   cuda_reg_ptx_cache = false;
   if (const char* value = std::getenv("AEVUM_CUDA_REG_PTX_CACHE")) {
@@ -1310,7 +1328,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   queue{*shared.context, args.profile},
   auxQueues{},    
   compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, nW, nH, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul,
-                                          cuda_graph_squares_, cuda_reg_ptx_cache_, in_wg, in_sizex, out_wg, out_sizex)},
+                                          cuda_graph_squares_, cuda_graph_batch_, cuda_reg_ptx_cache_, in_wg, in_sizex, out_wg, out_sizex)},
 
 #define K(name, ...) name(#name, &compiler, profile.make(#name), &queue, __VA_ARGS__)
 
@@ -3527,14 +3545,20 @@ void Gpu::doCarry(Buffer<double>& in, Buffer<Word>& wordBuf) {
 }
 
 // Use buf1 (and buf23 if not in place) to do a single squaring.
-void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut, bool doMul3, bool doLL, bool prp) {
+void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut, bool doMul3, bool doLL, bool prp, u32 repeat) {
   // leadOut = LEAD_MIDDLE is not supported (slower than LEAD_WIDTH)
   assert(leadOut != LEAD_MIDDLE);
   // LL does not do Mul3
   assert(!(doMul3 && doLL));
+  if (repeat != 1 && (!cuda_graph_squares_ || !prp || useLongCarry ||
+      leadIn != LEAD_WIDTH || leadOut != LEAD_WIDTH || doMul3 || doLL ||
+      roePos < wantROE || (statsBits & 1)))
+    throw std::runtime_error("CUDA graph repetition requires an unsampled retained-width PRP square");
 #if defined(CUDA_BACKEND)
   Queue::GraphSquareScope graph(queue, cuda_graph_squares_ && prp &&
-      leadIn == LEAD_WIDTH && leadOut == LEAD_WIDTH && !doMul3 && !doLL);
+      leadIn == LEAD_WIDTH && leadOut == LEAD_WIDTH && !doMul3 && !doLL, repeat);
+#else
+  if (repeat != 1) throw std::runtime_error("CUDA graph repetition requires the CUDA backend");
 #endif
 
   // In place FFTs use buf1.  Not in place FFTs also use buf3.
@@ -4253,6 +4277,21 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
     assert(k < kEndEnd);
 
     if (!wantROE && k - startK > 30) { wantROE = args.logROE ? ROE_SIZE : 2'000; }
+
+#if defined(CUDA_BACKEND)
+    // Only stationary, unsampled squares may share a captured argument set.
+    // A fixed batch size bounds graph-cache growth. Short tails use the normal
+    // loop, which owns all Gerbicz, log, proof, final-residue and stop boundaries.
+    if (cuda_graph_batch_ > 1 && cuda_graph_squares_ && !useLongCarry &&
+        leadIn == LEAD_WIDTH && !skipNextCheckUpdate && wantROE && roePos >= wantROE &&
+        !(statsBits & 1) &&
+        prpGraphBatchFits(k, cuda_graph_batch_, blockSize, persistK, kEnd, startK, args.iters) &&
+        !Signal::stopRequested()) {
+      square(bufData, bufData, LEAD_WIDTH, LEAD_WIDTH, false, false, true, cuda_graph_batch_);
+      k += cuda_graph_batch_;
+      continue;
+    }
+#endif
 
     if (skipNextCheckUpdate) {
       skipNextCheckUpdate = false;

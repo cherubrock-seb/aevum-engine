@@ -37,6 +37,7 @@ struct _cl_kernel {
 using cl_kernel = _cl_kernel*;
 static int creates=0, updates=0, launches=0;
 static bool rejectUpdate=false;
+static int failAfter=-1; // Number of successful updates before an injected failure.
 static std::vector<std::vector<Node>> submitted;
 Node copyParams(const CUDA_KERNEL_NODE_PARAMS* p) {
   assert(p->gridDimY==1 && p->gridDimZ==1 && p->blockDimY==1 && p->blockDimZ==1);
@@ -56,7 +57,8 @@ CUresult cuGraphInstantiateWithFlags(CUgraphExec* out,CUgraph g,unsigned long lo
   return 0;
 }
 CUresult cuGraphExecKernelNodeSetParams(CUgraphExec e,CUgraphNode n,const CUDA_KERNEL_NODE_PARAMS* p) {
-  if(rejectUpdate) return 1;
+  if(rejectUpdate || failAfter==0) return 1;
+  if(failAfter>0) --failAfter;
   for(size_t i=0;i<e->nodes.size();++i)
     if(e->identity[i]==n) { e->nodes[i]=copyParams(p); ++updates; return 0; }
   return 1;
@@ -116,5 +118,77 @@ int main() {
     assert(last[1].args[1]==uint64_t(40+repeat));
   }
   assert(creates==3 && launches==5);
-  std::cout<<"argument snapshots, fresh slots, repeated handles, cache, edges and rejection checked\n";
+  AevumCudaGraphBatch batched;
+  auto record = [&](unsigned repeat, uint64_t buffer, uint64_t slot) {
+    batched.begin(repeat);
+    set(middle,buffer,0); batched.add(&middle,4096,64);
+    set(carry,buffer,slot); batched.add(&carry,1024,256);
+  };
+  auto checkCopies = [&](unsigned repeat, uint64_t buffer, uint64_t slot) {
+    const auto& nodes = submitted.back();
+    assert(nodes.size()==2*repeat);
+    for(unsigned i=0;i<repeat;++i) {
+      assert(nodes[2*i].f==middle.func && nodes[2*i+1].f==carry.func);
+      assert(nodes[2*i].args[0]==buffer && nodes[2*i+1].args[0]==buffer);
+      assert(nodes[2*i].args[1]==0 && nodes[2*i+1].args[1]==slot);
+    }
+  };
+  int beforeCreates=creates, beforeUpdates=updates, beforeLaunches=launches;
+  record(4,500,42);
+  set(middle,999,999); set(carry,999,999);
+  batched.launch(0);
+  assert(creates==beforeCreates+1 && updates==beforeUpdates && launches==beforeLaunches+1);
+  checkCopies(4,500,42); // Serial dependencies are checked by cuGraphAddKernelNode.
+
+  record(4,500,42); batched.launch(0);
+  assert(updates==beforeUpdates && creates==beforeCreates+1);
+  // Moving argument storage and changing dead padding must preserve live values.
+  batched.begin(4);
+  set(middle,500,0);
+  middle.argOffsets[0]=32; middle.argOffsets[1]=48;
+  uint64_t buffer=500, slot=0;
+  std::memcpy(middle.argData+32,&buffer,8); std::memcpy(middle.argData+48,&slot,8);
+  middle.argData[100]=17;
+  batched.add(&middle,4096,64);
+  set(carry,500,42); batched.add(&carry,1024,256);
+  batched.launch(0);
+  assert(updates==beforeUpdates);
+  checkCopies(4,500,42);
+
+  record(4,600,43); batched.launch(0);
+  assert(updates==beforeUpdates+8);
+  checkCopies(4,600,43); // Every copy receives changed buffers and slots.
+
+  record(4,700,44);
+  failAfter=3;
+  beforeLaunches=launches;
+  rejected=false;
+  try { batched.launch(0); } catch(const std::runtime_error&) { rejected=true; batched.abort(); }
+  assert(rejected && launches==beforeLaunches && updates==beforeUpdates+11);
+  failAfter=-1;
+  // Return to the old snapshot after a partial update: it must not be reused.
+  record(4,600,43); batched.launch(0);
+  assert(updates==beforeUpdates+19);
+  checkCopies(4,600,43);
+  record(4,600,43); batched.launch(0);
+  assert(updates==beforeUpdates+19);
+
+  // A single square has a distinct topology and keeps unconditional refresh.
+  record(1,600,43); batched.launch(0);
+  beforeUpdates=updates;
+  record(1,600,43); batched.launch(0);
+  assert(updates==beforeUpdates+2);
+  checkCopies(1,600,43);
+  record(4,800,45); batched.abort();
+  record(4,600,43); batched.launch(0);
+  checkCopies(4,600,43);
+
+  for(unsigned repeat : {0u,129u}) {
+    rejected=false;
+    try { batched.begin(repeat); } catch(const std::runtime_error&) { rejected=true; }
+    assert(rejected && !batched.active());
+  }
+  record(128,900,46); batched.launch(0);
+  checkCopies(128,900,46);
+  std::cout<<"argument snapshots, repeated squares, serial edges, cache refresh and failure recovery checked\n";
 }

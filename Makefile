@@ -847,3 +847,20 @@ $(PER_FFT_CONFIG_PARSE_TEST): tests/per_fft_config_parse_test.cpp $(ENGINE_OBJS)
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc \
 		tests/per_fft_config_parse_test.cpp $(ENGINE_OBJS) \
 		$(OPENCL_LIBS) $(DL_LIBS) -o $@
+
+# Host-only gates for CUDA graph submission and PRP boundary selection.
+CUDA_GRAPH_BATCH_TEST := build-tests/aevum-cuda-graph-batch-test
+PRP_GRAPH_BATCH_POLICY_TEST := build-tests/aevum-prp-graph-batch-policy-test
+.PHONY: test-cuda-graph-batch
+test-cuda-graph-batch: $(CUDA_GRAPH_BATCH_TEST) $(PRP_GRAPH_BATCH_POLICY_TEST)
+	$(CUDA_GRAPH_BATCH_TEST)
+	$(PRP_GRAPH_BATCH_POLICY_TEST)
+	python3 tests/cuda_graph_prp_source_test.py
+
+$(CUDA_GRAPH_BATCH_TEST): tests/cuda_graph_batch_host_test.cpp src/cuda/GraphBatch.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $< -o $@
+
+$(PRP_GRAPH_BATCH_POLICY_TEST): tests/prp_graph_batch_policy_test.cpp src/PrpGraphBatch.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $< -o $@

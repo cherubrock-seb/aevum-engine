@@ -123,6 +123,7 @@ private:
   u32 out_wg{128}, out_sizex{16};        // OUT_WG, OUT_SIZEX: the same for fftMiddleOut.
 
   bool cuda_graph_squares_{false};       // Resolved before compiler creation
+  u32 cuda_graph_batch_{1};              // Opt-in unsampled PRP squares per graph
   bool cuda_reg_ptx_cache_{false};       // Apply register limits after neutral PTX caching
 
   Queue queue;
@@ -385,7 +386,7 @@ private:
 
   enum LEAD_TYPE {LEAD_NONE = 0, LEAD_WIDTH = 1, LEAD_MIDDLE = 2};
 
-  void square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut, bool doMul3 = false, bool doLL = false, bool prp = false);
+  void square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut, bool doMul3 = false, bool doLL = false, bool prp = false, u32 repeat = 1);
   void square(Buffer<Word>& io) { square(io, io, LEAD_NONE, LEAD_NONE, false, false); }
   void squareCERT(Buffer<Word>& io, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut) { square(io, io, leadIn, leadOut, false, false); }
   void squareLL(Buffer<Word>& io, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut) { square(io, io, leadIn, leadOut, false, true); }

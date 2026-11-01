@@ -26,6 +26,7 @@ class Queue : public QueueHolder {
   bool isAuxQueue;
 #ifdef CUDA_BACKEND
   int graphQueueCount_{0};
+  unsigned graphRepeat_{1};
   bool graphSquareActive_{false};
 #endif
 
@@ -60,14 +61,14 @@ public:
   void waitForSyncEvent(EventHolder* e) { enqueueMarkerWithWaits(get(), {e->get()}); }   // Wait for a synchronization event to complete.
 
 #ifdef CUDA_BACKEND
-  void beginCudaGraphSquare();
+  void beginCudaGraphSquare(unsigned repeat = 1);
   void endCudaGraphSquare();
   void abortCudaGraphSquare() noexcept;
   class GraphSquareScope {
     Queue* queue_;
   public:
-    GraphSquareScope(Queue& q, bool enabled) : queue_(enabled ? &q : nullptr) {
-      if (queue_) queue_->beginCudaGraphSquare();
+    GraphSquareScope(Queue& q, bool enabled, unsigned repeat = 1) : queue_(enabled ? &q : nullptr) {
+      if (queue_) queue_->beginCudaGraphSquare(repeat);
     }
     GraphSquareScope(const GraphSquareScope&) = delete;
     GraphSquareScope& operator=(const GraphSquareScope&) = delete;

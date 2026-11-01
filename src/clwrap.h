@@ -196,7 +196,7 @@ cl_context getQueueContext(cl_command_queue q);
 bool cudaLoadRegLimitedKernel(cl_program program, const char* kernelName, int maxRegs, int minBlocks);
 
 // Native one-stream square batching. No CUDA stream capture or frozen slots.
-void cudaGraphBatchBegin(cl_command_queue q);
+void cudaGraphBatchBegin(cl_command_queue q, unsigned repeat = 1);
 void cudaGraphBatchEnd(cl_command_queue q);
 void cudaGraphBatchAbort(cl_command_queue q) noexcept;
 

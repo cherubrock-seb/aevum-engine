@@ -1439,11 +1439,11 @@ bool cudaLoadRegLimitedKernel(cl_program prog, const char* kernelName, int maxRe
   return true;
 }
 
-void cudaGraphBatchBegin(cl_command_queue q) {
+void cudaGraphBatchBegin(cl_command_queue q, unsigned repeat) {
   if (!q || q->profiling) throw std::runtime_error("CUDA square graph requires an unprofiled queue");
   if (makeCurrent(q->owner) != CUDA_SUCCESS) throw std::runtime_error("CUDA square graph: queue context is gone");
   if (!q->squareGraph) q->squareGraph = new AevumCudaGraphBatch;
-  q->squareGraph->begin();
+  q->squareGraph->begin(repeat);
 }
 void cudaGraphBatchEnd(cl_command_queue q) {
   if (!q || !q->squareGraph) throw std::runtime_error("CUDA square graph not begun");

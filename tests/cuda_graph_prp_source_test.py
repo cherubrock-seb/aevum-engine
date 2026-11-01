@@ -12,4 +12,12 @@ assert "cuda_graph_squares_ && prp &&" in src
 assert "leadIn == LEAD_WIDTH && leadOut == LEAD_WIDTH" in src
 assert "!doMul3 && !doLL" in src
 
+# Repeated graphs have a separate production-only call site and must retain
+# the original scalar call for every boundary or sampled iteration.
+assert src.count("true, cuda_graph_batch_);") == 1
+assert "wantROE && roePos >= wantROE" in src
+assert "!(statsBits & 1)" in src
+assert "prpGraphBatchFits(k, cuda_graph_batch_, blockSize, persistK, kEnd, startK, args.iters)" in src
+assert 'config.erase("AEVUM_CUDA_GRAPH_BATCH")' in src
+
 print("cuda graph PRP eligibility source gate: PASS")

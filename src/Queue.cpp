@@ -174,14 +174,17 @@ void Queue::setSquareTime(int time) {
 }
 
 #ifdef CUDA_BACKEND
-void Queue::beginCudaGraphSquare() {
+void Queue::beginCudaGraphSquare(unsigned repeat) {
   if (hasEvents || isAuxQueue) throw std::runtime_error("CUDA square graph requires one unprofiled main queue");
   graphQueueCount_ = queueCount;
-  cudaGraphBatchBegin(get());
+  cudaGraphBatchBegin(get(), repeat);
+  graphRepeat_ = repeat;
   graphSquareActive_ = true;
 }
 void Queue::endCudaGraphSquare() {
   cudaGraphBatchEnd(get());
+  // run() counted the recorded square; pacing must include every executed copy.
+  queueCount = graphQueueCount_ + (queueCount - graphQueueCount_) * int(graphRepeat_);
   graphSquareActive_ = false;
   if (queueCount >= MAX_QUEUE_COUNT) queueMarkerEvent();
 }
