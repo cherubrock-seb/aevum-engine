@@ -1,6 +1,8 @@
 // Copyright (C) 2017-2024 Mihai Preda.
 
 #include "gpuid.h"
+#include <algorithm>
+#include <vector>
 #include "clwrap.h"
 #include "File.h"
 
@@ -92,4 +94,58 @@ int getPosFromUid(const string& uid) {
 
 string getUidFromPos(int pos) {
   return getUidFromBdf(getBdfFromPos(pos));
+}
+
+
+namespace {
+
+std::vector<std::vector<cl_device_id>> getGpusByPlatform() {
+  cl_platform_id platforms[16];
+  cl_uint nPlatforms = 0;
+  if (clGetPlatformIDs(16, platforms, &nPlatforms) != CL_SUCCESS) { nPlatforms = 0; }
+  nPlatforms = std::min(nPlatforms, cl_uint(16));
+
+  std::vector<std::vector<cl_device_id>> result(nPlatforms);
+  for (cl_uint p = 0; p < nPlatforms; ++p) {
+    cl_device_id devices[64];
+    cl_uint nDevices = 0;
+    if (clGetDeviceIDs(platforms[p], CL_DEVICE_TYPE_GPU, 64, devices, &nDevices) != CL_SUCCESS) { continue; }
+    nDevices = std::min(nDevices, cl_uint(64));
+    result[p].assign(devices, devices + nDevices);
+  }
+  return result;
+}
+
+}
+
+int getPosFromPlatformDevice(int platform, int device) {
+  auto const gpus = getGpusByPlatform();
+  if (platform < 0 || size_t(platform) >= gpus.size()) {
+    log("OpenCL platform %d not found (%u platforms)\n", platform, unsigned(gpus.size()));
+    return -1;
+  }
+
+  auto const& devices = gpus[platform];
+  if (device < 0 || size_t(device) >= devices.size()) {
+    log("OpenCL platform %d has no GPU %d (%u GPUs)\n", platform, device, unsigned(devices.size()));
+    return -1;
+  }
+
+  auto const all = getAllDeviceIDs();
+  auto const it = std::find(all.begin(), all.end(), devices[device]);
+  return it == all.end() ? -1 : int(it - all.begin());
+}
+
+string getPlatformDeviceFromPos(int pos) {
+  auto const all = getAllDeviceIDs();
+  if (pos < 0 || size_t(pos) >= all.size()) { return ""; }
+
+  auto const gpus = getGpusByPlatform();
+  for (size_t platform = 0; platform < gpus.size(); ++platform) {
+    auto const it = std::find(gpus[platform].begin(), gpus[platform].end(), all[pos]);
+    if (it != gpus[platform].end()) {
+      return to_string(platform) + ":" + to_string(it - gpus[platform].begin());
+    }
+  }
+  return "";
 }
