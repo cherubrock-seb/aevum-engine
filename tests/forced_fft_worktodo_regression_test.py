@@ -68,6 +68,7 @@ std::string getUidFromBdf(const std::string&) { return {}; }
 std::string getUidFromPos(int) { return {}; }
 int getPosFromBdf(const std::string&) { return -1; }
 int getPosFromUid(const std::string&) { return -1; }
+int getPosFromPlatformDevice(int, int) { return -1; }
 
 std::vector<std::string> split(
     const std::string& text, char delimiter) {
