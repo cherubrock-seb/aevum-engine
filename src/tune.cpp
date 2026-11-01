@@ -430,7 +430,9 @@ void Tune::tune() {
           for (const FFTShape& shape : sizes) {
             if (shape.fft_type != type || !shape.isFavoredShape()) continue;
             FFTConfig candidate{shape, variant, CARRY_AUTO};
-            if (candidate.maxExp() >= probe_exponent) return candidate;
+            const double bpw = probe_exponent / double(candidate.size());
+            if (bpw >= candidate.minBpw() &&
+                candidate.maxExp() >= probe_exponent) return candidate;
           }
           return current;
         };
