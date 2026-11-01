@@ -1220,6 +1220,29 @@ string Gpu::numCudaRegisters(enum WHICH_KERNEL which_kernel) {
 #endif
 }
 
+string Gpu::amdRegisterOption(enum WHICH_KERNEL which_kernel) {
+#ifndef CUDA_BACKEND
+  cl_device_id const id = shared.context->deviceId();
+  if (!isAmdGpu(id)) return string("");
+  if (const auto noReg = registerProfile_.find("NOREG");
+      noReg != registerProfile_.end() && noReg->second) return string("");
+
+  const char* key = "";
+  if (which_kernel == MIDIN && fft.FFT_FP64) key = "REGMI64";
+  else if (which_kernel == MIDOUT && fft.FFT_FP64) key = "REGMO64";
+  else return string("");
+
+  const auto it = registerProfile_.find(key);
+  if (it == registerProfile_.end() || it->second <= 0) return string("");
+  const int value = it->second;
+  if (value <= 16) return string("-DAMD_WAVES_PER_EU=") + to_string(value) + " ";
+  return string("-DAMD_NUM_VGPR=") + to_string(value) + " ";
+#else
+  (void) which_kernel;
+  return string("");
+#endif
+}
+
 // Kernels are compiled one at a time, but OpenCL source files contain multiple kernels.  This routine set the #defines necessary so that only one kernel is compiled.
 // While not strictly necessary, startup speed will be a bit faster if we do less compilations.
 string Gpu::kernelDefines(enum WHICH_KERNEL_TYPE which_kernel) {
@@ -1317,7 +1340,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   K(kprpMiddle1, "tailsquare.cl", "tailSquare", hN / nH, (kernelDefines(KFP) + " -DAEVUM_PRP_MIDDLE1=1").c_str()),
   K(kprpMiddle1GF31, "tailsquare.cl", "tailSquareGF31", hN / nH, (kernelDefines(K31) + " -DAEVUM_PRP_MIDDLE1=1").c_str()),
   K(kprpMiddle1GF61, "tailsquare.cl", "tailSquareGF61", hN / nH, (kernelDefines(K61) + " -DAEVUM_PRP_MIDDLE1=1").c_str()),
-  K(kfftMidIn,             "fftmiddlein.cl",  "fftMiddleIn",  hN / (BIG_H / SMALL_H), (kernelDefines(KFP) + numCudaRegisters(MIDIN)).c_str()),
+  K(kfftMidIn,             "fftmiddlein.cl",  "fftMiddleIn",  hN / (BIG_H / SMALL_H), (kernelDefines(KFP) + numCudaRegisters(MIDIN) + amdRegisterOption(MIDIN)).c_str()),
   K(kfftHin,               "ffthin.cl",  "fftHin",  hN / nH, kernelDefines(KFP).c_str()),
   // FP32 PFA: row 0's two self-paired lines plus the (PFA_RADIX-1)/2 conjugate
   // row pairs, each with lines 0 and WIDTH/2, i.e. PFA_RADIX + 1 workgroups.
@@ -1329,7 +1352,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
                                                hN / nH / 2, (kernelDefines(KFP) + numCudaRegisters(TAIL)).c_str()),    // Single-wide tailSquare with one kernel
   K(ktailMul,              "tailmul.cl", "tailMul", hN / nH / 2, kernelDefines(KFP).c_str()),
   K(ktailMulLow,           "tailmul.cl", "tailMul", hN / nH / 2, (kernelDefines(KFP) + "-DMUL_LOW=1").c_str()),
-  K(kfftMidOut,            "fftmiddleout.cl", "fftMiddleOut", hN / (BIG_H / SMALL_H), (kernelDefines(KFP) + numCudaRegisters(MIDOUT)).c_str()),
+  K(kfftMidOut,            "fftmiddleout.cl", "fftMiddleOut", hN / (BIG_H / SMALL_H), (kernelDefines(KFP) + numCudaRegisters(MIDOUT) + amdRegisterOption(MIDOUT)).c_str()),
   K(kfftW,                 "fftw.cl", "fftW", hN / nW, kernelDefines(KFP).c_str()),
 
   K(kfftMidInGF31,         "fftmiddlein.cl",  "fftMiddleInGF31",  hN / (BIG_H / SMALL_H), (kernelDefines(K31) + numCudaRegisters(MIDIN31)).c_str()),
