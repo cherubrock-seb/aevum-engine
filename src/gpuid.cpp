@@ -135,17 +135,3 @@ int getPosFromPlatformDevice(int platform, int device) {
   auto const it = std::find(all.begin(), all.end(), devices[device]);
   return it == all.end() ? -1 : int(it - all.begin());
 }
-
-string getPlatformDeviceFromPos(int pos) {
-  auto const all = getAllDeviceIDs();
-  if (pos < 0 || size_t(pos) >= all.size()) { return ""; }
-
-  auto const gpus = getGpusByPlatform();
-  for (size_t platform = 0; platform < gpus.size(); ++platform) {
-    auto const it = std::find(gpus[platform].begin(), gpus[platform].end(), all[pos]);
-    if (it != gpus[platform].end()) {
-      return to_string(platform) + ":" + to_string(it - gpus[platform].begin());
-    }
-  }
-  return "";
-}
