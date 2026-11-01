@@ -1531,6 +1531,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   K(kernIsEqual, "etc.cl", "isEqual", 256 * 256, "-DISEQUAL=1"),
   K(sum64,       "etc.cl", "sum64",   256 * 256, "-DSUM64=1"),
   K(regAdd,      "etc.cl", "regAdd",      256 * 256, "-DREGADD=1"),
+  K(regTriple,   "etc.cl", "regTriple",   256 * 256, "-DREGTRIPLE=1"),
   K(regSub,      "etc.cl", "regSub",      256 * 256, "-DREGSUB=1"),
   K(regSubValue, "etc.cl", "regSubValue", 1,         "-DREGSUBVALUE=1"),
 
@@ -3081,6 +3082,10 @@ void Gpu::regWrite(Buffer<Word>& dst, const Words& words) { writeIn(dst, words);
 Words Gpu::regRead(Buffer<Word>& src) { return readAndCompress(src); }
 
 void Gpu::regAddWords(Buffer<Word>& dst, const Buffer<Word>& src) { regAdd(dst, src); }
+
+// EngineApi checks small-factor headroom before dispatch. No carry or
+// normalization: preserve exactly the digits produced by 0 + x + (x + x).
+void Gpu::regScale3(Buffer<Word>& dst) { regTriple(dst); }
 
 void Gpu::regSubWords(Buffer<Word>& dst, const Buffer<Word>& src) { regSub(dst, src); }
 
