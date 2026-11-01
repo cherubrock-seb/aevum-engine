@@ -688,7 +688,7 @@ void OVERLOAD shufl_and_fft2(local T2 *lds2, T2 *u,
   for (u32 i = 0; i < RADIX; ++i) {
     T2 a = lds[i*(WG/2) + lowMe%(WG/2)];
     T2 b = lds[4*WG + i*(WG/2) + lowMe%(WG/2)];
-    u[i] = lowMe < WG/2 ? a+b : a-b;
+    u[i] = addsubq(a, b, lowMe, WG/2);
   }
 
 #elif SHUFL_BYTES == 8
@@ -704,7 +704,7 @@ void OVERLOAD shufl_and_fft2(local T2 *lds2, T2 *u,
   for (u32 i=0; i<RADIX; ++i) {
     T a=lds[i*(WG/2)+lowMe%(WG/2)];
     T b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
-    u[i].x = lowMe < WG/2 ? a+b : a-b;
+    u[i].x = addsubq(a, b, lowMe, WG/2);
   }
 
   bar(WG);
@@ -715,7 +715,7 @@ void OVERLOAD shufl_and_fft2(local T2 *lds2, T2 *u,
   for (u32 i=0; i<RADIX; ++i) {
     T a=lds[i*(WG/2)+lowMe%(WG/2)];
     T b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
-    u[i].y = lowMe < WG/2 ? a+b : a-b;
+    u[i].y = addsubq(a, b, lowMe, WG/2);
   }
 #else
 #error Unsupported FP64 SHUFL_BYTES
@@ -747,7 +747,7 @@ void OVERLOAD shufl_and_fft2(local F2 *lds2, F2 *u,
   for (u32 i=0; i<RADIX; ++i) {
     F2 a=lds[i*(WG/2)+lowMe%(WG/2)];
     F2 b=lds[4*WG+i*(WG/2)+lowMe%(WG/2)];
-    u[i] = lowMe < WG/2 ? a+b : a-b;
+    u[i] = addsubq(a, b, lowMe, WG/2);
   }
 #else
 #error Unsupported FP32 SHUFL_BYTES
