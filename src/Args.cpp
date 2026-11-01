@@ -240,14 +240,13 @@ Device selection : use one of -uid <UID>, -pci <BDF>, -device <N>, -device <P>:<
 
   vector<cl_device_id> deviceIds = getAllDeviceIDs();
   if (!deviceIds.empty()) {
-    printf(" N  :  P:D  : PCI BDF |   UID            |   Driver                 |    Device\n");
+    printf(" N  : PCI BDF |   UID            |   Driver                 |    Device\n");
   }
   for (unsigned i = 0; i < deviceIds.size(); ++i) {
     cl_device_id id = deviceIds[i];
     string bdf = getBdfFromDevice(id);
-    printf("%2u  : %5s : %7s | %16s | %-24s | %s | %s\n",
+    printf("%2u  : %7s | %16s | %-24s | %s | %s\n",
            i,
-           getPlatformDeviceFromPos(i).c_str(),
            bdf.c_str(),
            getUidFromBdf(bdf).c_str(),
            getDriverVersion(id).c_str(),
@@ -444,6 +443,8 @@ void Args::parse(const string& line) {
       auto const colon = s.find(':');
       if (colon == string::npos) {
         device = stoi(s);
+        platformDevicePlatform = -1;
+        platformDeviceIndex = -1;
       } else {
         int platform = -1;
         int platformDevice = -1;
@@ -458,12 +459,20 @@ void Args::parse(const string& line) {
           log("-device expects <N> or <platform>:<device>, got '%s'\n", s.c_str());
           throw "-device syntax";
         }
-        device = getPosFromPlatformDevice(platform, platformDevice);
-        if (device < 0) { throw "-device: no such platform:device"; }
+        platformDevicePlatform = platform;
+        platformDeviceIndex = platformDevice;
       }
     }
-    else if (key == "-uid") { device = getPosFromUid(s); }
-    else if (key == "-pci") { device = getPosFromBdf(s); }
+    else if (key == "-uid") {
+      device = getPosFromUid(s);
+      platformDevicePlatform = -1;
+      platformDeviceIndex = -1;
+    }
+    else if (key == "-pci") {
+      device = getPosFromBdf(s);
+      platformDevicePlatform = -1;
+      platformDeviceIndex = -1;
+    }
     else if (key == "-dir") { dir = s; }
     else if (key == "-carry") {
       if (s == "short" || s == "long") {
@@ -504,6 +513,10 @@ void Args::parse(const string& line) {
 }
 
 void Args::setDefaults() {
+  if (platformDevicePlatform >= 0) {
+    device = getPosFromPlatformDevice(platformDevicePlatform, platformDeviceIndex);
+    if (device < 0) { throw "-device: no such platform:device"; }
+  }
   uid = getUidFromPos(device);
   log("device %d, OpenCL %s, unique id '%s'\n", device, getDriverVersionByPos(device).c_str(), uid.c_str());
   
