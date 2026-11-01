@@ -451,7 +451,7 @@ KERNEL(OUT_WG) fftMiddleOutGF61ApplePlaceholder(P(T2) out,
 
 #if FFT_FP64
 
-KERNEL(256) fftMiddleOut(P(T2) out, P(T2) in, Trig trig) {
+KERNEL_CAP(256) fftMiddleOut(P(T2) out, P(T2) in, Trig trig) {
   assert(out == in);
   T2 u[MIDDLE];
 
