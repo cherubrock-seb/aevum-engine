@@ -101,16 +101,16 @@ namespace {
 
 std::vector<std::vector<cl_device_id>> getGpusByPlatform() {
   cl_platform_id platforms[16];
-  cl_uint nPlatforms = 0;
+  unsigned nPlatforms = 0;
   if (clGetPlatformIDs(16, platforms, &nPlatforms) != CL_SUCCESS) { nPlatforms = 0; }
-  nPlatforms = std::min(nPlatforms, cl_uint(16));
+  nPlatforms = std::min(nPlatforms, unsigned(16));
 
   std::vector<std::vector<cl_device_id>> result(nPlatforms);
-  for (cl_uint p = 0; p < nPlatforms; ++p) {
+  for (unsigned p = 0; p < nPlatforms; ++p) {
     cl_device_id devices[64];
-    cl_uint nDevices = 0;
+    unsigned nDevices = 0;
     if (clGetDeviceIDs(platforms[p], CL_DEVICE_TYPE_GPU, 64, devices, &nDevices) != CL_SUCCESS) { continue; }
-    nDevices = std::min(nDevices, cl_uint(64));
+    nDevices = std::min(nDevices, unsigned(64));
     result[p].assign(devices, devices + nDevices);
   }
   return result;
