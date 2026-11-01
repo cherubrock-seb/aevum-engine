@@ -60,4 +60,3 @@ std::string getUidFromPos(int pos);
 // Platform is the clGetPlatformIDs index; device is the GPU index within that platform.
 // Returns -1 when the pair does not identify a GPU in the flat enumeration.
 int getPosFromPlatformDevice(int platform, int device);
-
