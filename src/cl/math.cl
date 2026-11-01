@@ -409,6 +409,21 @@ u128 OVERLOAD mad64(u64 a, u64 b, u128 c) {
 #define X2t4ad(a, b, d)       X2t4ad_internal(&(a), &(b), d)          // b = mul_t4(b), b = d * b, X2(a, b)
 #define X2ad_mul_t4(a, b, d)  X2ad_mul_t4_internal(&(a), &(b), d)     // b = d * b, X2(a, b), b = mul_t4(b)
 
+// shufl_and_fft2's final radix-2 step chooses add/sub by half-workgroup.
+// For the fused 1K radix-8 path, WG/2 is a whole number of AMD wavefronts,
+// so every lane in a wave takes the same choice.  Make that uniformity visible
+// to clang on AMD; FP add/sub becomes an exact fma with a scalar +/-1 sign.
+bool lowHalf(u32 lowMe, u32 halfWG) {
+#if AMDGPU
+#if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_readfirstlane)
+  if (halfWG % WAVEFRONT == 0) {
+    return (u32) __builtin_amdgcn_readfirstlane((int) lowMe) < halfWG;
+  }
+#endif
+#endif
+  return lowMe < halfWG;
+}
+
 #if FFT_FP64
 
 T OVERLOAD add(T a, T b) { return a + b; }
@@ -550,6 +565,17 @@ T OVERLOAD addq(T a, T b) { return add(a, b); }
 T OVERLOAD subq(T a, T b) { return sub(a, b); }
 T2 OVERLOAD addq(T2 a, T2 b) { return add(a, b); }
 T2 OVERLOAD subq(T2 a, T2 b) { return sub(a, b); }
+T OVERLOAD addsubq(T a, T b, u32 lowMe, u32 halfWG) {
+#if AMDGPU
+  return fma(b, lowHalf(lowMe, halfWG) ? 1.0 : -1.0, a);
+#else
+  return lowMe < halfWG ? addq(a, b) : subq(a, b);
+#endif
+}
+T2 OVERLOAD addsubq(T2 a, T2 b, u32 lowMe, u32 halfWG) {
+  return U2(addsubq(a.x, b.x, lowMe, halfWG),
+            addsubq(a.y, b.y, lowMe, halfWG));
+}
 
 #endif
 
@@ -699,6 +725,17 @@ F OVERLOAD addq(F a, F b) { return add(a, b); }
 F OVERLOAD subq(F a, F b) { return sub(a, b); }
 F2 OVERLOAD addq(F2 a, F2 b) { return add(a, b); }
 F2 OVERLOAD subq(F2 a, F2 b) { return sub(a, b); }
+F OVERLOAD addsubq(F a, F b, u32 lowMe, u32 halfWG) {
+#if AMDGPU
+  return fma(b, lowHalf(lowMe, halfWG) ? 1.0f : -1.0f, a);
+#else
+  return lowMe < halfWG ? addq(a, b) : subq(a, b);
+#endif
+}
+F2 OVERLOAD addsubq(F2 a, F2 b, u32 lowMe, u32 halfWG) {
+  return U2(addsubq(a.x, b.x, lowMe, halfWG),
+            addsubq(a.y, b.y, lowMe, halfWG));
+}
 
 #endif
 
