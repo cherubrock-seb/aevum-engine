@@ -61,6 +61,3 @@ std::string getUidFromPos(int pos);
 // Returns -1 when the pair does not identify a GPU in the flat enumeration.
 int getPosFromPlatformDevice(int platform, int device);
 
-// Return "<platform>:<device>" for a flat OpenCL position, or an empty string
-// when the position does not identify a GPU.
-std::string getPlatformDeviceFromPos(int pos);
