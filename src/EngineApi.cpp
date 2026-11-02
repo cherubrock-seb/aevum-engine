@@ -1314,6 +1314,11 @@ public:
     args_.setDefaults();
     args_.profile = std::getenv("AEVUM_PROFILE_KERNELS") && std::strcmp(std::getenv("AEVUM_PROFILE_KERNELS"), "1") == 0;
     timing_enabled_ = envExactly("AEVUM_TIMING_DECOMP", "1");
+    if (const char* value = std::getenv("AEVUM_PREPARE_KEEP_LEAD")) {
+      if (std::strcmp(value, "0") && std::strcmp(value, "1"))
+        throw std::runtime_error("AEVUM_PREPARE_KEEP_LEAD must be 0 or 1");
+      prepare_keep_lead_enabled_ = std::strcmp(value, "1") == 0;
+    }
     if (const char* value = std::getenv("AEVUM_REG_SCALE3")) {
       if (std::strcmp(value, "0") && std::strcmp(value, "1"))
         throw std::runtime_error("AEVUM_REG_SCALE3 must be 0 or 1");
@@ -1322,6 +1327,8 @@ public:
 #if defined(__APPLE__)
     if (scale3_enabled_)
       throw std::runtime_error("AEVUM_REG_SCALE3 is not supported on Apple");
+    if (prepare_keep_lead_enabled_)
+      throw std::runtime_error("AEVUM_PREPARE_KEEP_LEAD is not supported on Apple");
 #endif
 
     // Device-scoped tuning must use the actual OpenCL device selected by -d.
@@ -2167,6 +2174,11 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
         throw std::runtime_error("AEVUM_PREPARED_ALIAS_REUSE must be 0 or 1");
       prepared_alias_reuse_enabled_ = std::strcmp(alias_value, "1") == 0;
     }
+    if (prepare_keep_lead_enabled_ &&
+        (!prepared_alias_reuse_enabled_ || !prepared_mul_lead_enabled_))
+      throw std::runtime_error("AEVUM_PREPARE_KEEP_LEAD requires prepared alias reuse and the prepared-multiply lead bridge");
+    if (verbose && prepare_keep_lead_enabled_)
+      log("Aevum cached preparation retains disjoint pending arithmetic; redundant alias copies are skipped.\n");
     size_t prepared_count = std::min<size_t>(register_count_, 2);
     if (const char* value = std::getenv("AEVUM_PREPARED_CACHE")) {
       char* end = nullptr;
@@ -2293,10 +2305,20 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
   void prepare(size_t dst, size_t src) {
     check_reg(dst);
     check_reg(src);
-    flush_pending_square();
+    // A cache hit needs no transform scratch. A disjoint canonical register
+    // copy can therefore run while buf1/buf3 retain the pending operation's
+    // input. Misses and either register touching that operation still flush
+    // before a copy, cache eviction or regPrepare can overwrite live data.
+    const bool keep_lead = prepare_keep_lead_enabled_ &&
+        (pending_kind_ == PendingKind::None || (pending_reg_ != src && pending_reg_ != dst)) &&
+        find_prepared(src, false) != no_prepared;
+    if (!keep_lead) flush_pending_square();
     const size_t source_slot =
         prepared_alias_reuse_enabled_ ? find_prepared(src, true) : no_prepared;
     if (dst != src) {
+      // Both aliases already name the same immutable prepared value. Keep the
+      // existing canonical destination and the LRU touch above.
+      if (keep_lead && find_prepared(dst, false) == source_slot) return;
       invalidate_if(dst);
       gpu_->regCopy(reg(dst), reg(src));
     }
@@ -2591,6 +2613,7 @@ private:
   bool lead_cache_enabled_ = false;
   bool prepared_mul_lead_enabled_ = false;
   bool prepared_alias_reuse_enabled_ = false;
+  bool prepare_keep_lead_enabled_ = false;
   PendingKind pending_kind_ = PendingKind::None;
   size_t pending_reg_ = no_prepared;
   size_t pending_prepared_slot_ = no_prepared;
