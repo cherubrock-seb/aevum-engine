@@ -1310,9 +1310,15 @@ static string tailGF61KernelDefines(const Args& args,
         if (key == "SHUFL_BYTES_H") { explicit_shufl_bytes_h = true; break; }
   }
 
+  // The validated H512 LDS path is gfx906-specific, not AMD-vendor-wide.
+  // Other AMD families retain the canonical reverse path until independently
+  // validated; explicit SHUFL_BYTES_H always takes precedence.
   if (!explicit_shufl_bytes_h && isAmdGpu(deviceId) &&
-      fft.isPfa() && fft.NTT_GF61 && fft.shape.height == 512)
-    defines += " -DTAIL_GF61_REVERSE16=1";
+      fft.isPfa() && fft.NTT_GF61 && fft.shape.height == 512) {
+    const string name = getDeviceName(deviceId);
+    if (name == "gfx906" || name.rfind("gfx906:", 0) == 0)
+      defines += " -DTAIL_GF61_REVERSE16=1";
+  }
 
   return defines;
 }
