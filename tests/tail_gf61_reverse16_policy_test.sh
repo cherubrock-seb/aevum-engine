@@ -17,6 +17,7 @@ test -f "$SQUARE"
 
 grep -Fq 'tailGF61KernelDefines(args, shared.context->deviceId(), fft,' "$GPU"
 grep -Fq '#if TAIL_GF61_REVERSE16' "$SQUARE"
+grep -Fq 'name == "gfx906" || name.rfind("gfx906:", 0) == 0' "$GPU"
 grep -Fq 'local GF61 lds[SMALL_HEIGHT];' "$SQUARE"
 grep -Fq 'local GF61 lds[LDS_BYTES / sizeof(GF61)];' "$SQUARE"
 grep -Fq '#define TAIL_GF61_REVERSE16 0' "$TAIL"
@@ -52,7 +53,19 @@ struct Args {
 };
 
 bool isAmdGpu(cl_device_id id) {
-  return id == 0x1002u;
+  return id != 0x10deu;
+}
+
+string getDeviceName(cl_device_id id) {
+  switch (id) {
+    case 0x1002u: return "gfx906:sramecc+:xnack-";
+    case 0x1003u: return "gfx906";
+    case 0x1004u: return "gfx1103";
+    case 0x1005u: return "gfx9060";
+    case 0x1006u: return "Radeon VII";
+    case 0x10deu: return "NVIDIA GeForce RTX 3080";
+    default: throw runtime_error("unexpected fake device");
+  }
 }
 CPP
 
@@ -94,9 +107,21 @@ void verify(string label,
 int main() {
   constexpr cl_device_id AMD = 0x1002u;
   constexpr cl_device_id NVIDIA = 0x10deu;
+  constexpr cl_device_id AMD_GFX906_BARE = 0x1003u;
+  constexpr cl_device_id AMD_GFX1103 = 0x1004u;
+  constexpr cl_device_id AMD_GFX9060 = 0x1005u;
+  constexpr cl_device_id AMD_RADEON_ALIAS = 0x1006u;
 
   verify("AMD PFA7 GF61 H512 default", true, AMD, true, true, 512);
   verify("AMD PFA9 GF61 H512 default", true, AMD, true, true, 512);
+  verify("AMD gfx906 bare name default", true,
+         AMD_GFX906_BARE, true, true, 512);
+  verify("AMD gfx1103 canonical path", false,
+         AMD_GFX1103, true, true, 512);
+  verify("AMD gfx9060 prefix collision rejected", false,
+         AMD_GFX9060, true, true, 512);
+  verify("AMD Radeon alias unverified canonical path", false,
+         AMD_RADEON_ALIAS, true, true, 512);
 
   verify("extraConf explicit zero", false, AMD, true, true, 512,
          {{"SHUFL_BYTES_H", "0"}});
@@ -129,7 +154,7 @@ int main() {
   verify("H256 non-target", false, AMD, true, true, 256);
   verify("H1024 non-target", false, AMD, true, true, 1024);
 
-  if (checked != 18) {
+  if (checked != 22) {
     throw runtime_error("Unexpected policy case count");
   }
 
