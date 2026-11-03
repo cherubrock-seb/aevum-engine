@@ -281,6 +281,8 @@ private:
   Kernel kCarryFusedMul;
   Kernel kCarryFusedMulROE;
   Kernel kCarryFusedLL;
+  Kernel kCarryFusedPostScale3;
+  Kernel kCarryFusedPostScale3ROE;
 
   Kernel carryB;
   Kernel transpIn, transpOut;
@@ -376,6 +378,7 @@ private:
   void carryFused(Buffer<double>& buf);
   void carryFusedMul(Buffer<double>& buf);
   void carryFusedLL(Buffer<double>& buf);
+  void carryFusedPostScale3(Buffer<double>& buf);
 
   vector<Word> readWords(Buffer<Word> &buf);
   void writeWords(Buffer<Word>& buf, vector<Word> &words);
@@ -385,7 +388,7 @@ private:
 
   enum LEAD_TYPE {LEAD_NONE = 0, LEAD_WIDTH = 1, LEAD_MIDDLE = 2};
 
-  void square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut, bool doMul3 = false, bool doLL = false, bool prp = false);
+  void square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut, bool doMul3 = false, bool doLL = false, bool prp = false, bool postScale3 = false);
   void square(Buffer<Word>& io) { square(io, io, LEAD_NONE, LEAD_NONE, false, false); }
   void squareCERT(Buffer<Word>& io, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut) { square(io, io, leadIn, leadOut, false, false); }
   void squareLL(Buffer<Word>& io, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut) { square(io, io, leadIn, leadOut, false, true); }
@@ -480,7 +483,8 @@ public:
   std::chrono::steady_clock::duration kernelLoadTime() const { return compiler.loadTime(); }
   bool regSupportsFusedLL() const;
   bool regSupportsPreparedMulLead() const;
-  void regSquareStep(Buffer<Word>& io, bool lead_in, bool lead_out, bool ll = false);
+  bool regSupportsPostScale3() const;
+  void regSquareStep(Buffer<Word>& io, bool lead_in, bool lead_out, bool ll = false, bool post_scale3 = false);
   void regMulPreparedStep(Buffer<Word>& dst, Buffer<double>& prepared, bool lead_in, bool lead_out);
   void regCopy(Buffer<Word>& dst, const Buffer<Word>& src);
   void regWrite(Buffer<Word>& dst, const Words& words);

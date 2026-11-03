@@ -6,6 +6,20 @@
 #include "weight.cl"
 #include "middle.cl"
 
+// This specialization scales completed integer digits, not CRT coefficients.
+// It is compiled only for the explicitly enabled register lead bridge.
+#if AEVUM_POST_SCALE3
+#if FFT_TYPE != FFT3161 || PFA_RADIX || MUL3 || LL || WordSize != 8 || MIDDLE != 8
+#error "Post-carry factor-three requires an ordinary Type1 square"
+#endif
+#if EXP / NWORDS < 10 || EXP / NWORDS > 42
+#error "Post-carry factor-three requires 10..42 integer bits per word"
+#endif
+#if (WIDTH != 256 && WIDTH != 512) || (SMALL_HEIGHT != 256 && SMALL_HEIGHT != 512)
+#error "Post-carry factor-three requires a 256/512 x 8 x 256/512 plan"
+#endif
+#endif
+
 void spin() {
 #if defined(__has_builtin) && __has_builtin(__builtin_amdgcn_s_sleep)
   __builtin_amdgcn_s_sleep(0);
@@ -2351,6 +2365,11 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     // Generate big-word/little-word flag, propagate final carry
     bool biglit0 = frac_bits <= FRAC_BPW_HI;
     wu[i] = carryFinal(wu[i], carry[i], biglit0);
+#if AEVUM_POST_SCALE3
+    // Exactly the regTriple digit map, after both incoming carries.  The
+    // next square consumes its weighted transform without a global pass.
+    wu[i] = wu[i] + (wu[i] + wu[i]);
+#endif
     u31[i] = U2(shl(make_Z31(wu[i].x), m31_weight_shift0), shl(make_Z31(wu[i].y), m31_weight_shift1));
     u61[i] = U2(shl(make_Z61(wu[i].x), m61_weight_shift0), shl(make_Z61(wu[i].y), m61_weight_shift1));
 

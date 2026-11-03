@@ -1544,6 +1544,8 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   K(kCarryFusedMul,        "carryfused.cl", "carryFused", WIDTH * (BIG_H + wmul) / nW, (kernelDefines(KALL) + numCudaRegisters(CARRYFUSED) + "-DMUL3=1").c_str()),
   K(kCarryFusedMulROE,     "carryfused.cl", "carryFused", WIDTH * (BIG_H + wmul) / nW, (kernelDefines(KALL) + numCudaRegisters(CARRYFUSED) + "-DMUL3=1 -DROE=1").c_str()),
   K(kCarryFusedLL,         "carryfused.cl", "carryFused", WIDTH * (BIG_H + wmul) / nW, (kernelDefines(KALL) + numCudaRegisters(CARRYFUSED) + "-DLL=1").c_str()),
+  K(kCarryFusedPostScale3,  "carryfused.cl", "carryFused", WIDTH * (BIG_H + wmul) / nW, (kernelDefines(KALL) + numCudaRegisters(CARRYFUSED) + "-DAEVUM_POST_SCALE3=1").c_str()),
+  K(kCarryFusedPostScale3ROE, "carryfused.cl", "carryFused", WIDTH * (BIG_H + wmul) / nW, (kernelDefines(KALL) + numCudaRegisters(CARRYFUSED) + "-DAEVUM_POST_SCALE3=1 -DROE=1").c_str()),
 
   K(carryB,                "carryb.cl", "carryB",   hN / CARRY_LEN, kernelDefines(KALL).c_str()),
 
@@ -1966,6 +1968,13 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
     }
     for (Kernel* k : {&kCarryFusedROE, &kCarryFusedMulROE}) { k->setFixedArgs(6, bufROE); }
     for (Kernel* k : {&kCarryFused, &kCarryFusedMul, &kCarryFusedLL}) { k->setFixedArgs(6, bufStatsCarry); }
+  }
+
+  if (regSupportsPostScale3()) {
+    for (Kernel* k : {&kCarryFusedPostScale3, &kCarryFusedPostScale3ROE})
+      k->setFixedArgs(3, bufCarry, bufReady, bufTrigW);
+    kCarryFusedPostScale3.setFixedArgs(6, bufStatsCarry);
+    kCarryFusedPostScale3ROE.setFixedArgs(6, bufROE);
   }
 
   carryB.setFixedArgs(1, bufCarry);
@@ -2930,6 +2939,16 @@ void Gpu::carryFusedMul(Buffer<double>& buf) {
                    : kCarryFusedMul(*out, *in, updateCarryPos(1 << 1));
 }
 
+void Gpu::carryFusedPostScale3(Buffer<double>& buf) {
+  replay();
+  assert(roePos <= ROE_SIZE);
+  Buffer<double>* out = in_place ? &buf : &buf3;
+  // CRT and carry statistics are those of the ordinary square.  Scaling
+  // happens only after the incoming carry has reached both integer digits.
+  roePos < wantROE ? kCarryFusedPostScale3ROE(*out, buf, roePos++)
+                   : kCarryFusedPostScale3(*out, buf, updateCarryPos(1 << 0));
+}
+
 void Gpu::carryFusedLL(Buffer<double>& buf) {
   // This kernel always ends the "bottom half".  Replay the recorded kernel calls.
   replay();
@@ -3073,13 +3092,23 @@ bool Gpu::regSupportsPreparedMulLead() const {
 #endif
 }
 
-void Gpu::regSquareStep(Buffer<Word>& io, bool lead_in, bool lead_out, bool ll) {
+bool Gpu::regSupportsPostScale3() const {
+  return regSupportsPreparedMulLead() && fft.shape.fft_type == FFT3161 &&
+         E / N >= 10 && E / N <= 42 &&
+         fft.shape.middle == 8 &&
+         (fft.shape.width == 256 || fft.shape.width == 512) &&
+         (fft.shape.height == 256 || fft.shape.height == 512);
+}
+
+void Gpu::regSquareStep(Buffer<Word>& io, bool lead_in, bool lead_out, bool ll, bool post_scale3) {
+  if (post_scale3 && (!lead_out || ll || !regSupportsPostScale3()))
+    throw std::runtime_error("Aevum post-carry factor-three requires a supported retained-width square");
   if ((lead_in || lead_out) && !regSupportsLeadCache())
     throw std::runtime_error("Aevum register lead cache requires a supported short-carry plan");
   square(io, io,
          lead_in ? LEAD_WIDTH : LEAD_NONE,
          lead_out ? LEAD_WIDTH : LEAD_NONE,
-         false, ll, true);
+         false, ll, true, post_scale3);
 }
 
 void Gpu::regMulPreparedStep(Buffer<Word>& dst, Buffer<double>& prepared, bool lead_in, bool lead_out) {
@@ -3561,14 +3590,15 @@ void Gpu::doCarry(Buffer<double>& in, Buffer<Word>& wordBuf) {
 }
 
 // Use buf1 (and buf23 if not in place) to do a single squaring.
-void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut, bool doMul3, bool doLL, bool prp) {
+void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enum LEAD_TYPE leadOut, bool doMul3, bool doLL, bool prp, bool postScale3) {
   // leadOut = LEAD_MIDDLE is not supported (slower than LEAD_WIDTH)
   assert(leadOut != LEAD_MIDDLE);
   // LL does not do Mul3
   assert(!(doMul3 && doLL));
+  assert(!postScale3 || (leadOut == LEAD_WIDTH && !doMul3 && !doLL && regSupportsPostScale3()));
 #if defined(CUDA_BACKEND)
   Queue::GraphSquareScope graph(queue, cuda_graph_squares_ && prp &&
-      leadIn == LEAD_WIDTH && leadOut == LEAD_WIDTH && !doMul3 && !doLL);
+      leadIn == LEAD_WIDTH && leadOut == LEAD_WIDTH && !doMul3 && !doLL && !postScale3);
 #endif
 
   // In place FFTs use buf1.  Not in place FFTs also use buf3.
@@ -3636,6 +3666,8 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
       } else {
         fftPCarryB(buf1, out);
       }
+    } else if (postScale3) {
+      carryFusedPostScale3(buf1);
     } else if (doLL) {
       carryFusedLL(buf1);
     } else {

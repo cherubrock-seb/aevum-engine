@@ -1314,12 +1314,21 @@ public:
     args_.setDefaults();
     args_.profile = std::getenv("AEVUM_PROFILE_KERNELS") && std::strcmp(std::getenv("AEVUM_PROFILE_KERNELS"), "1") == 0;
     timing_enabled_ = envExactly("AEVUM_TIMING_DECOMP", "1");
+    if (const char* value = std::getenv("AEVUM_REG_POST_SCALE3")) {
+      if (std::strcmp(value, "0") && std::strcmp(value, "1"))
+        throw std::runtime_error("AEVUM_REG_POST_SCALE3 must be 0 or 1");
+      post_scale3_enabled_ = std::strcmp(value, "1") == 0;
+    }
+    if (post_scale3_enabled_ && (!fft_spec || std::strncmp(fft_spec, "1:", 2) != 0))
+      throw std::runtime_error("AEVUM_REG_POST_SCALE3 requires an explicit Type1 FFT plan");
     if (const char* value = std::getenv("AEVUM_REG_SCALE3")) {
       if (std::strcmp(value, "0") && std::strcmp(value, "1"))
         throw std::runtime_error("AEVUM_REG_SCALE3 must be 0 or 1");
       scale3_enabled_ = std::strcmp(value, "1") == 0;
     }
 #if defined(__APPLE__)
+    if (post_scale3_enabled_)
+      throw std::runtime_error("AEVUM_REG_POST_SCALE3 is not supported on Apple");
     if (scale3_enabled_)
       throw std::runtime_error("AEVUM_REG_SCALE3 is not supported on Apple");
 #endif
@@ -2070,6 +2079,12 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     const RegPaths reg_paths = productionRegPaths(*gpu_, fft, device_name);
     fused_ll_enabled_ = reg_paths.fused_ll;
     lead_cache_enabled_ = reg_paths.lead_cache;
+    if (post_scale3_enabled_ && (device_vendor != "4098" && device_vendor != "4318"))
+      throw std::runtime_error("AEVUM_REG_POST_SCALE3 requires an AMD or NVIDIA device");
+    if (post_scale3_enabled_ && (!lead_cache_enabled_ || !gpu_->regSupportsPostScale3()))
+      throw std::runtime_error("AEVUM_REG_POST_SCALE3 requires a short-carry Type1 256/512 x 8 x 256/512 plan with lead cache enabled");
+    if (verbose && post_scale3_enabled_)
+      log("Aevum post-carry factor-three lead bridge enabled; canonical boundaries keep the existing scaling path.\n");
     if (verbose) {
       if (lead_cache_enabled_) {
         if (fft.isPfa())
@@ -2320,7 +2335,10 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     // operation executes the previous one with leadOut=WIDTH, so the hot
     // square/prepared-multiply chain stays transformed.  Every observable
     // API boundary flushes the final pending operation to canonical words.
-    if (lead_cache_enabled_ && factor == 1) {
+    const bool post_scale3 = post_scale3_enabled_ && factor == 3;
+    // Reject insufficient headroom before executing or replacing pending work.
+    if (post_scale3) check_small_factor(factor);
+    if (lead_cache_enabled_ && (factor == 1 || post_scale3)) {
       if (pending_kind_ != PendingKind::None && pending_reg_ != index) flush_pending_square();
       invalidate_if(index);
       if (pending_kind_ != PendingKind::None) {
@@ -2331,6 +2349,7 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
       }
       pending_kind_ = PendingKind::Square;
       pending_reg_ = index;
+      pending_post_scale3_ = post_scale3;
       return;
     }
 
@@ -2409,7 +2428,7 @@ if (workload_ == aevum_autotune::Workload::Prp && !fft.isPfa()) {
     check_reg(dst);
     // Fold precisely one adjacent square-minus-two into the existing LL carry.
     // A second subtraction or any observable boundary must materialize first.
-    if (fused_ll_enabled_ && pending_kind_ == PendingKind::Square && pending_reg_ == dst && !pending_ll_ && value == 2) {
+    if (fused_ll_enabled_ && pending_kind_ == PendingKind::Square && pending_reg_ == dst && !pending_ll_ && !pending_post_scale3_ && value == 2) {
       pending_ll_ = true;
       return;
     }
@@ -2456,6 +2475,7 @@ private:
     const size_t prepared_slot = pending_prepared_slot_;
     const bool lead_in = pending_lead_width_;
     const bool ll = pending_ll_;
+    const bool post_scale3 = pending_post_scale3_;
 
     // Clear first so an exception cannot leave a stale transformed-state tag.
     pending_kind_ = PendingKind::None;
@@ -2463,9 +2483,13 @@ private:
     pending_prepared_slot_ = no_prepared;
     pending_lead_width_ = false;
     pending_ll_ = false;
+    pending_post_scale3_ = false;
 
     if (kind == PendingKind::Square) {
-      gpu_->regSquareStep(reg(index), lead_in, lead_out, ll);
+      gpu_->regSquareStep(reg(index), lead_in, lead_out, ll, post_scale3 && lead_out);
+      // An observable boundary must leave canonical words.  Use the original
+      // integer scaling helper after the ordinary square; never use carryM.
+      if (post_scale3 && !lead_out) multiply_small(index, 3);
       return;
     }
     if (prepared_slot >= prepared_buffers_.size())
@@ -2516,9 +2540,7 @@ private:
     }
   }
 
-  void multiply_small(size_t index, uint32_t factor) {
-    if (factor == 1) return;
-
+  void check_small_factor(uint32_t factor) const {
     const double required_bits = std::log2(double(factor));
     if (required_bits > small_factor_headroom_bits_ + 1.0e-9) {
       throw std::runtime_error(
@@ -2528,6 +2550,11 @@ private:
           " bits of FFT headroom, available=" +
           std::to_string(small_factor_headroom_bits_));
     }
+  }
+
+  void multiply_small(size_t index, uint32_t factor) {
+    if (factor == 1) return;
+    check_small_factor(factor);
 
     // Preserve the capacity check above and the existing canonical boundary.
     // This scales balanced digits; it deliberately does not use carryM.
@@ -2598,6 +2625,8 @@ private:
   double small_factor_headroom_bits_ = 0.0;
   bool timing_enabled_ = false;
   bool scale3_enabled_ = false;
+  bool post_scale3_enabled_ = false;
+  bool pending_post_scale3_ = false;
   aevum_engine_timing_stats timing_{};
 };
 
