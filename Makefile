@@ -850,3 +850,13 @@ $(PER_FFT_CONFIG_PARSE_TEST): tests/per_fft_config_parse_test.cpp $(ENGINE_OBJS)
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc \
 		tests/per_fft_config_parse_test.cpp $(ENGINE_OBJS) \
 		$(OPENCL_LIBS) $(DL_LIBS) -o $@
+
+# Pure host algebra: include the actual bounded PFA3/PFA7 helper.
+PFA_LAZY61_TEST := build-tests/aevum-pfa-lazy61-test
+.PHONY: test-pfa-lazy61
+test-host: test-pfa-lazy61
+test-pfa-lazy61: $(PFA_LAZY61_TEST)
+	$(PFA_LAZY61_TEST)
+$(PFA_LAZY61_TEST): tests/pfa_lazy61_host_test.cpp src/cl/pfa-lazy61.cl src/UseOptions.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/pfa_lazy61_host_test.cpp -o $@

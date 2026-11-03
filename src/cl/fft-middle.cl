@@ -23,6 +23,30 @@
 #error AEVUM_PFA7_NUSS8 requires PFA7
 #endif
 
+#ifndef AEVUM_PFA_LAZY61
+#define AEVUM_PFA_LAZY61 0
+#endif
+#define AEVUM_PFA_LAZY61_VALID_0 1
+#define AEVUM_PFA_LAZY61_VALID_1 1
+#define AEVUM_PFA_LAZY61_VALID_IMPL(x) AEVUM_PFA_LAZY61_VALID_##x
+#define AEVUM_PFA_LAZY61_VALID(x) AEVUM_PFA_LAZY61_VALID_IMPL(x)
+#if !AEVUM_PFA_LAZY61_VALID(AEVUM_PFA_LAZY61)
+#error AEVUM_PFA_LAZY61 must be 0 or 1
+#endif
+#if AEVUM_PFA_LAZY61
+#if FFT_TYPE != FFT3161 && FFT_TYPE != FFT3261 && FFT_TYPE != FFT61 && FFT_TYPE != FFT323161
+#error AEVUM_PFA_LAZY61 requires a transform containing GF61
+#endif
+#if PFA_RADIX != 3 && PFA_RADIX != 7
+#error AEVUM_PFA_LAZY61 requires PFA3 or PFA7
+#endif
+#if AEVUM_GF61_LIMB32 || defined(AEVUM_APPLE_OPENCL12)
+#error AEVUM_PFA_LAZY61 requires native non-Apple GF61 arithmetic
+#endif
+#if PFA_RADIX == 7 && !AEVUM_PFA7_NUSS8
+#error AEVUM_PFA_LAZY61 requires AEVUM_PFA7_NUSS8 for PFA7
+#endif
+#endif
 
 #if MIDDLE == 3
 #include "fft3.cl"
@@ -1160,14 +1184,21 @@ void OVERLOAD middleShuffle(local GF31 *lds, GF31 *u) {
 #endif
 
 #if PFA_RADIX
+#if AEVUM_PFA_LAZY61
+#include "pfa-lazy61.cl"
+#endif
 GF61 OVERLOAD pfaMulScalar(GF61 a, Z61 s) { return U2(mul(a.x, s), mul(a.y, s)); }
 
 // Same one-multiply radix-3 identity as the GF31 path above.
 void OVERLOAD pfaDft3(GF61 a0, GF61 a1, GF61 a2, Z61 w, GF61 *o0, GF61 *o1, GF61 *o2) {
+#if AEVUM_PFA_LAZY61
+  aevumPfa3Lazy61(a0, a1, a2, w, o0, o1, o2);
+#else
   const GF61 wd = pfaMulScalar(sub(a1, a2), w);
   *o0 = add(add(a0, a1), a2);
   *o1 = add(sub(a0, a2), wd);
   *o2 = sub(sub(a0, a1), wd);
+#endif
 }
 
 #if PFA_RADIX == 7
@@ -1176,6 +1207,9 @@ void OVERLOAD pfaDft3(GF61 a0, GF61 a1, GF61 a2, Z61 w, GF61 *o0, GF61 *o1, GF61
 // S already represents (root^k-root^-k)/2 in the prime field; unlike the
 // FP64 schedule, no multiplication by the complex unit i is needed.
 void OVERLOAD aevum_pfa7_nuss8(GF61 *u, Z61 w) {
+#if AEVUM_PFA_LAZY61
+  aevumPfa7Lazy61(u, w);
+#else
   const GF61 x0 = u[0];
   const GF61 a1 = add(u[1], u[6]), a2 = add(u[2], u[5]), a3 = add(u[3], u[4]);
   const GF61 b1 = sub(u[1], u[6]), b2 = sub(u[2], u[5]), b3 = sub(u[3], u[4]);
@@ -1202,6 +1236,7 @@ void OVERLOAD aevum_pfa7_nuss8(GF61 *u, Z61 w) {
   u[6] = sub(u[1], q1); u[1] = add(u[1], q1);
   u[5] = sub(u[2], q2); u[2] = add(u[2], q2);
   u[4] = sub(u[3], q3); u[3] = add(u[3], q3);
+#endif
 }
 #endif
 
