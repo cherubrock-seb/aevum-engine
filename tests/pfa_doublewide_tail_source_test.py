@@ -215,6 +215,20 @@ if not (0 <= policy_pos < generic_pos):
 
 policy_block = gpu[policy_pos:generic_pos]
 
+combined_policy_tokens = (
+    'config.try_emplace("OUT_WG", "256")',
+    'config.try_emplace("OUT_SIZEX", "8")',
+    'config.try_emplace("MIDDLE_OUT_LDS_TRANSPOSE", "1")',
+    'config.try_emplace("LOADS", "1")',
+    'config.try_emplace("STORES", "1")',
+    "explicit per-key settings retain priority",
+)
+
+for token in combined_policy_tokens:
+    if token not in policy_block:
+        print("FAIL: gfx906 PFA3 combined policy missing", token)
+        sys.exit(1)
+
 for forbidden in (
     "fft.pfa_radix == 7",
     "fft.shape.middle == 7",
@@ -271,4 +285,97 @@ assert policy_model("gfx906", 3, 256, 3, 512, 202) == 1
 print(
     "ok: gfx906 automatic double-wide policy is restricted to "
     "production-qualified PFA3 and preserves explicit PFA7 TAIL_KERNELS"
+)
+
+
+def production_policy_model(device, radix, width, middle, height, variant,
+                            fft_type="FFT3161", gf31=True, gf61=True,
+                            explicit=None):
+    config = dict(explicit or {})
+
+    geometry = (
+        fft_type == "FFT3161"
+        and gf31 and gf61
+        and (radix, width, middle, height, variant)
+            == (3, 256, 3, 512, 101)
+    )
+
+    auto = (
+        geometry
+        and device.startswith("gfx906")
+        and "TAIL_KERNELS" not in config
+    )
+
+    if auto:
+        config["TAIL_KERNELS"] = "3"
+        for key, value in (
+            ("OUT_WG", "256"),
+            ("OUT_SIZEX", "8"),
+            ("MIDDLE_OUT_LDS_TRANSPOSE", "1"),
+            ("LOADS", "1"),
+            ("STORES", "1"),
+        ):
+            config.setdefault(key, value)
+    else:
+        config.setdefault("TAIL_KERNELS", "1")
+
+    return config
+
+
+qualified = production_policy_model(
+    "gfx906:sramecc+:xnack-",
+    3, 256, 3, 512, 101,
+)
+
+assert qualified["TAIL_KERNELS"] == "3"
+assert qualified["OUT_WG"] == "256"
+assert qualified["OUT_SIZEX"] == "8"
+assert qualified["MIDDLE_OUT_LDS_TRANSPOSE"] == "1"
+assert qualified["LOADS"] == "1"
+assert qualified["STORES"] == "1"
+
+# Explicit per-key settings retain priority while the remaining qualified
+# defaults are still supplied.
+explicit_layout = production_policy_model(
+    "gfx906",
+    3, 256, 3, 512, 101,
+    explicit={
+        "OUT_WG": "128",
+        "OUT_SIZEX": "16",
+        "LOADS": "0",
+        "STORES": "0",
+    },
+)
+
+assert explicit_layout["TAIL_KERNELS"] == "3"
+assert explicit_layout["OUT_WG"] == "128"
+assert explicit_layout["OUT_SIZEX"] == "16"
+assert explicit_layout["LOADS"] == "0"
+assert explicit_layout["STORES"] == "0"
+assert explicit_layout["MIDDLE_OUT_LDS_TRANSPOSE"] == "1"
+
+# An explicit tail selection disables the formally validated combined
+# automatic policy because its performance evidence includes automatic TK3.
+explicit_tail = production_policy_model(
+    "gfx906",
+    3, 256, 3, 512, 101,
+    explicit={"TAIL_KERNELS": "1"},
+)
+
+assert explicit_tail == {"TAIL_KERNELS": "1"}
+
+# Negative scope: PFA7, other AMD architectures, and other PFA3 geometries
+# retain the generic safe tail default and receive no companion policy.
+for cfg in (
+    production_policy_model("gfx906", 7, 512, 7, 512, 202),
+    production_policy_model("gfx1100", 3, 256, 3, 512, 101),
+    production_policy_model("gfx906", 3, 256, 3, 256, 101),
+    production_policy_model("gfx906", 3, 512, 3, 512, 101),
+    production_policy_model("gfx906", 3, 256, 3, 512, 202),
+):
+    assert cfg == {"TAIL_KERNELS": "1"}
+
+print(
+    "ok: formally validated gfx906 PFA3 companion defaults are exact-scope "
+    "and preserve explicit per-key configuration"
 )

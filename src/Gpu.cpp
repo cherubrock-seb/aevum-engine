@@ -545,14 +545,14 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
   config.try_emplace("PAD", "0");
 #endif
 
-  // Radeon VII/gfx906: automatically select the row-aware double-wide
-  // two-kernel GF31/GF61 square tail only for the production-qualified PFA3
-  // FFT3161 geometry.  PFA7 remains available through an explicit
-  // TAIL_KERNELS=3 selection, but is not auto-enabled because matched PrMers
-  // production-path validation did not retain the standalone performance gain.
+  // Radeon VII/gfx906: automatically select the formally validated PFA3
+  // production policy only for the qualified FFT3161 geometry.  This combines
+  // the row-aware double-wide GF31/GF61 square tail with the validated
+  // WG256/SIZEX8 middle-out layout and non-temporal FFT loads/stores.
+  // PFA7 remains available through explicit settings but is not auto-enabled.
   //
-  // Keeping this before the generic PFA try_emplace preserves explicit
-  // TAIL_KERNELS and companion-policy precedence.
+  // Keeping this before the generic PFA defaults preserves explicit
+  // per-key configuration and companion-policy precedence.
   const bool pfa3_doublewide_gfx906_geometry =
       fft.isPfa() &&
       fft.pfa_radix == 3 &&
@@ -568,11 +568,17 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
       !config.count("TAIL_KERNELS") &&
       getDeviceName(id).rfind("gfx906", 0) == 0;
 
-  if (pfa3_doublewide_gfx906_default)
+  if (pfa3_doublewide_gfx906_default) {
     config["TAIL_KERNELS"] = "3";
+    config.try_emplace("OUT_WG", "256");
+    config.try_emplace("OUT_SIZEX", "8");
+    config.try_emplace("MIDDLE_OUT_LDS_TRANSPOSE", "1");
+    config.try_emplace("LOADS", "1");
+    config.try_emplace("STORES", "1");
+  }
 
   if (doLog && pfa3_doublewide_gfx906_default)
-    log("Validated gfx906 PFA3 double-wide tail default: TAIL_KERNELS=3, plan=%s; explicit TAIL_KERNELS retains priority.\n",
+    log("Validated gfx906 PFA3 production defaults: TAIL_KERNELS=3, OUT_WG=256, OUT_SIZEX=8, MIDDLE_OUT_LDS_TRANSPOSE=1, LOADS=1, STORES=1, plan=%s; explicit per-key settings retain priority.\n",
         fft.spec().c_str());
 
   // Correctness-first PFA defaults.  Explicit engine configuration (for
