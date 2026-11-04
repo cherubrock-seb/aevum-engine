@@ -1112,7 +1112,7 @@ void Tune::tune() {
       double current_cost = -1.0;
       // Use the same WMUL eligibility rules as Gpu::make so the tuner never times a request that runtime
       // silently clamps to a different effective WMUL and then reports the timing under the wrong value.
-      u32 const device_id = shared.context->deviceId();
+      cl_device_id const device_id = shared.context->deviceId();
       u32 const shufl_bytes_w = args->value("SHUFL_BYTES_W", 8);
       u32 const big_h = fft.shape.height * fft.shape.middle;
       u32 const max_wmul = wmul_limit::maxWmul(
