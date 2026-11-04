@@ -9,6 +9,7 @@
 #include "log.h"
 #include "File.h"
 #include "TuneEntry.h"
+#include "WmulLimit.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1109,11 +1110,15 @@ void Tune::tune() {
       u32 current_wmul = args->value("WMUL", 2);
       double best_cost = -1.0;
       double current_cost = -1.0;
-      // carryFused runs G_W * WMUL threads per workgroup.  Gpu::make would clamp a larger WMUL to what the device
-      // supports, so skip those rather than time the same kernel twice and report it under the wrong WMUL.
-      u32 const max_group = getMaxWorkGroupSize(shared.context->deviceId());
+      // Use the same WMUL eligibility rules as Gpu::make so the tuner never times a request that runtime
+      // silently clamps to a different effective WMUL and then reports the timing under the wrong value.
+      u32 const device_id = shared.context->deviceId();
+      u32 const shufl_bytes_w = args->value("SHUFL_BYTES_W", 8);
+      u32 const big_h = fft.shape.height * fft.shape.middle;
+      u32 const max_wmul = wmul_limit::maxWmul(
+          fft.shape.width, fft.shape.nW(), shufl_bytes_w, getLocalMemSize(device_id), getMaxWorkGroupSize(device_id));
       for (u32 wmul : {1, 2, 4}) {
-        if (wmul > 1 && u64(wmul) * (fft.shape.width / fft.shape.nW()) > max_group) continue;
+        if (wmul_limit::clampWmul(wmul, max_wmul, big_h) != wmul) continue;
         args->flags["WMUL"] = to_string(wmul);
         double cost = Gpu::make(exponent, shared, fft, {}, false)->timePRP(quick);
         log("Time for %12s using WMUL=%u is %6.1f\n", fft.spec().c_str(), wmul, cost);
