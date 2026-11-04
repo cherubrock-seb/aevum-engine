@@ -545,38 +545,34 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
   config.try_emplace("PAD", "0");
 #endif
 
-  // Radeon VII/gfx906: the row-aware double-wide two-kernel GF31/GF61
-  // square tail has been validated on the exact production PFA3/PFA7 FFT3161
-  // geometries below.  Only supply this as a default when the user/tuner or
-  // another validated policy has not already selected TAIL_KERNELS.
+  // Radeon VII/gfx906: automatically select the row-aware double-wide
+  // two-kernel GF31/GF61 square tail only for the production-qualified PFA3
+  // FFT3161 geometry.  PFA7 remains available through an explicit
+  // TAIL_KERNELS=3 selection, but is not auto-enabled because matched PrMers
+  // production-path validation did not retain the standalone performance gain.
   //
   // Keeping this before the generic PFA try_emplace preserves explicit
-  // TAIL_KERNELS and companion-policy precedence (notably NVIDIA PFA7
-  // in-place, which pins TAIL_KERNELS=1 earlier in this function).
-  const bool pfa_doublewide_gfx906_geometry =
+  // TAIL_KERNELS and companion-policy precedence.
+  const bool pfa3_doublewide_gfx906_geometry =
       fft.isPfa() &&
+      fft.pfa_radix == 3 &&
       fft.shape.fft_type == FFT3161 &&
       fft.NTT_GF31 && fft.NTT_GF61 &&
+      fft.shape.width == 256 &&
+      fft.shape.middle == 3 &&
       fft.shape.height == 512 &&
-      ((fft.pfa_radix == 3 &&
-        fft.shape.width == 256 &&
-        fft.shape.middle == 3 &&
-        fft.variant == 101) ||
-       (fft.pfa_radix == 7 &&
-        fft.shape.width == 512 &&
-        fft.shape.middle == 7 &&
-        fft.variant == 202));
+      fft.variant == 101;
 
-  const bool pfa_doublewide_gfx906_default =
-      pfa_doublewide_gfx906_geometry &&
+  const bool pfa3_doublewide_gfx906_default =
+      pfa3_doublewide_gfx906_geometry &&
       !config.count("TAIL_KERNELS") &&
       getDeviceName(id).rfind("gfx906", 0) == 0;
 
-  if (pfa_doublewide_gfx906_default)
+  if (pfa3_doublewide_gfx906_default)
     config["TAIL_KERNELS"] = "3";
 
-  if (doLog && pfa_doublewide_gfx906_default)
-    log("Validated gfx906 PFA double-wide tail default: TAIL_KERNELS=3, plan=%s; explicit TAIL_KERNELS retains priority.\n",
+  if (doLog && pfa3_doublewide_gfx906_default)
+    log("Validated gfx906 PFA3 double-wide tail default: TAIL_KERNELS=3, plan=%s; explicit TAIL_KERNELS retains priority.\n",
         fft.spec().c_str());
 
   // Correctness-first PFA defaults.  Explicit engine configuration (for

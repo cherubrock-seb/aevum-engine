@@ -183,20 +183,18 @@ print(
 )
 
 # Production policy is deliberately narrower than the generic row-aware
-# implementation: gfx906 plus the two empirically validated FFT3161 plans.
+# implementation: only the production-qualified gfx906 PFA3 FFT3161 plan is
+# auto-enabled. PFA7 keeps the row-aware implementation and may be selected
+# explicitly, but the generic safe default remains TAIL_KERNELS=1.
 policy_tokens = (
-    "const bool pfa_doublewide_gfx906_geometry =",
+    "const bool pfa3_doublewide_gfx906_geometry =",
+    "fft.pfa_radix == 3",
     "fft.shape.fft_type == FFT3161",
     "fft.NTT_GF31 && fft.NTT_GF61",
-    "fft.shape.height == 512",
-    "fft.pfa_radix == 3",
     "fft.shape.width == 256",
     "fft.shape.middle == 3",
+    "fft.shape.height == 512",
     "fft.variant == 101",
-    "fft.pfa_radix == 7",
-    "fft.shape.width == 512",
-    "fft.shape.middle == 7",
-    "fft.variant == 202",
     "!config.count(\"TAIL_KERNELS\")",
     "getDeviceName(id).rfind(\"gfx906\", 0) == 0",
     "config[\"TAIL_KERNELS\"] = \"3\"",
@@ -208,12 +206,22 @@ for token in policy_tokens:
         print("FAIL: production policy missing", token)
         sys.exit(1)
 
-policy_pos = gpu.find("const bool pfa_doublewide_gfx906_geometry =")
+policy_pos = gpu.find("const bool pfa3_doublewide_gfx906_geometry =")
 generic_pos = gpu.find('config.try_emplace("TAIL_KERNELS", "1")')
 
 if not (0 <= policy_pos < generic_pos):
-    print("FAIL: gfx906 double-wide default must precede generic PFA default")
+    print("FAIL: gfx906 PFA3 double-wide default must precede generic PFA default")
     sys.exit(1)
+
+policy_block = gpu[policy_pos:generic_pos]
+
+for forbidden in (
+    "fft.pfa_radix == 7",
+    "fft.shape.middle == 7",
+):
+    if forbidden in policy_block:
+        print("FAIL: PFA7 must not be part of the automatic TK3 policy", forbidden)
+        sys.exit(1)
 
 
 def policy_model(device, radix, width, middle, height, variant,
@@ -222,12 +230,8 @@ def policy_model(device, radix, width, middle, height, variant,
     geometry = (
         fft_type == "FFT3161"
         and gf31 and gf61
-        and height == 512
-        and (
-            (radix, width, middle, variant) == (3, 256, 3, 101)
-            or
-            (radix, width, middle, variant) == (7, 512, 7, 202)
-        )
+        and (radix, width, middle, height, variant)
+            == (3, 256, 3, 512, 101)
     )
 
     if explicit_tail is not None:
@@ -240,22 +244,31 @@ def policy_model(device, radix, width, middle, height, variant,
 
 
 assert policy_model("gfx906", 3, 256, 3, 512, 101) == 3
-assert policy_model("gfx906:sramecc+", 7, 512, 7, 512, 202) == 3
+assert policy_model("gfx906:sramecc+", 3, 256, 3, 512, 101) == 3
+
+# PFA7 remains correctness-qualified for an explicit TK3 selection but is not
+# automatically enabled.
+assert policy_model("gfx906", 7, 512, 7, 512, 202) == 1
+assert policy_model(
+    "gfx906", 7, 512, 7, 512, 202, explicit_tail=3
+) == 3
 
 # Explicit user/tuner selections retain priority.
-assert policy_model("gfx906", 3, 256, 3, 512, 101, explicit_tail=1) == 1
-assert policy_model("gfx906", 7, 512, 7, 512, 202, explicit_tail=0) == 0
+assert policy_model(
+    "gfx906", 3, 256, 3, 512, 101, explicit_tail=1
+) == 1
+assert policy_model(
+    "gfx906", 7, 512, 7, 512, 202, explicit_tail=0
+) == 0
 
-# Negative scope: other device families, radix, width, height and variants
-# remain on the generic safe PFA default.
-assert policy_model("gfx1100", 7, 512, 7, 512, 202) == 1
+# Negative scope.
+assert policy_model("gfx1100", 3, 256, 3, 512, 101) == 1
 assert policy_model("gfx906", 9, 512, 9, 512, 202) == 1
-assert policy_model("gfx906", 7, 256, 7, 512, 202) == 1
-assert policy_model("gfx906", 7, 512, 7, 256, 202) == 1
-assert policy_model("gfx906", 7, 512, 7, 512, 201) == 1
+assert policy_model("gfx906", 3, 512, 3, 512, 101) == 1
+assert policy_model("gfx906", 3, 256, 3, 256, 101) == 1
 assert policy_model("gfx906", 3, 256, 3, 512, 202) == 1
 
 print(
-    "ok: gfx906 production policy is restricted to validated "
-    "PFA3/PFA7 FFT3161 geometries and preserves explicit TAIL_KERNELS"
+    "ok: gfx906 automatic double-wide policy is restricted to "
+    "production-qualified PFA3 and preserves explicit PFA7 TAIL_KERNELS"
 )
