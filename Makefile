@@ -261,6 +261,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	python3 tests/asm_string_braces_test.py
 	python3 tests/pfa7_separate_carryb_source_test.py
 	python3 tests/pfa7_nuss8_model_test.py
+	python3 tests/pfa_doublewide_tail_source_test.py
 	$(HOST_TEST)
 	$(STATE_TEST)
 	$(OPENCL_STANDARD_TEST)
@@ -862,3 +863,11 @@ test-pfa-scatter-recurrence-model: $(PFA_SCATTER_RECURRENCE_MODEL_TEST)
 $(PFA_SCATTER_RECURRENCE_MODEL_TEST): tests/pfa_scatter_recurrence_model_test.cpp src/cl/fftw.cl src/Gpu.cpp
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra tests/pfa_scatter_recurrence_model_test.cpp -o $@
+
+# PR260: compile the production GF61 tail reverse16 selection helper with
+# lightweight device/config stubs, covering explicit overrides and non-targets.
+# No GPU or OpenCL runtime is required.
+.PHONY: test-tail-gf61-reverse16-policy
+test-host: test-tail-gf61-reverse16-policy
+test-tail-gf61-reverse16-policy:
+	CXX="$(CXX)" bash tests/tail_gf61_reverse16_policy_test.sh .
