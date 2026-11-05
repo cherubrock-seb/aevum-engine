@@ -933,6 +933,20 @@ static inline uint2 pfaWeightShifts3161(u32 logical, u32 step31, u32 step61) {
   return U2(c31.a[1] % 31u, c61.a[1] % 61u);
 }
 
+#ifndef AEVUM_PFA7_FFTP_WEIGHT_RECURRENCE
+#define AEVUM_PFA7_FFTP_WEIGHT_RECURRENCE 0
+#endif
+
+#if AEVUM_PFA7_FFTP_WEIGHT_RECURRENCE
+static inline uint2 pfaWeightShifts3161Weighted(u32 logical, uint2 weighted) {
+  const u64 frac = comboFracBits(logical);
+  union { uint2 a; u64 b; } c31, c61;
+  c31.b = frac + make_u64(weighted.x, 0xFFFFFFFFu);
+  c61.b = frac + make_u64(weighted.y, 0xFFFFFFFFu);
+  return U2(c31.a[1] % 31u, c61.a[1] % 61u);
+}
+#endif
+
 #if PFA_RADIX == 7
 // PFA7 paired noinline carried-load helper: keep one copy of the branch-heavy
 // lazy carry walk while serving both logical scalars with one function call.
@@ -972,6 +986,18 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
   const u32 first_binary_pair = me * SMALL_HEIGHT + y;
   u32 n0 = pfaLogicalIndex(row, first_binary_pair * 2u);
   u32 n1 = pfaLogicalIndex(row, first_binary_pair * 2u + 1u);
+#if AEVUM_PFA7_FFTP_WEIGHT_RECURRENCE
+  uint2 weighted0 = U2(((n0 % 31u) * m31_step) % 31u,
+                       ((n0 % 61u) * m61_step) % 61u);
+  uint2 weighted1 = U2(((n1 % 31u) * m31_step) % 31u,
+                       ((n1 % 61u) * m61_step) % 61u);
+  const uint2 weightedAdvance =
+      U2(((PFA_LOGICAL_STEP % 31u) * m31_step) % 31u,
+         ((PFA_LOGICAL_STEP % 61u) * m61_step) % 61u);
+  const uint2 weightedWrapCorrection =
+      U2((((31u - (NWORDS % 31u)) % 31u) * m31_step) % 31u,
+         (((61u - (NWORDS % 61u)) % 61u) * m61_step) % 61u);
+#endif
 #if PFA_RADIX == 7 && ((PFA_LOGICAL_STEP % (2 * BIG_HEIGHT)) == 0)
   // PFA7 fftP canonical-load recurrence: this exact plan keeps the canonical
   // line fixed while x advances by one compile-time step modulo WIDTH.
@@ -996,12 +1022,41 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
     const Word word0 = pfaLoadCanonicalWord(in, n0);
     const Word word1 = pfaLoadCanonicalWord(in, n1);
 #endif
+#if AEVUM_PFA7_FFTP_WEIGHT_RECURRENCE
+    const uint2 shifts0 = pfaWeightShifts3161Weighted(n0, weighted0);
+    const uint2 shifts1 = pfaWeightShifts3161Weighted(n1, weighted1);
+#else
     const uint2 shifts0 = pfaWeightShifts3161(n0, m31_step, m61_step);
     const uint2 shifts1 = pfaWeightShifts3161(n1, m31_step, m61_step);
+#endif
     u31[i] = U2(shl(make_Z31(word0), shifts0.x), shl(make_Z31(word1), shifts1.x));
     u61[i] = U2(shl(make_Z61(word0), shifts0.y), shl(make_Z61(word1), shifts1.y));
+#if AEVUM_PFA7_FFTP_WEIGHT_RECURRENCE
+    n0 += PFA_LOGICAL_STEP;
+    weighted0 += weightedAdvance;
+    if (weighted0.x >= 31u) weighted0.x -= 31u;
+    if (weighted0.y >= 61u) weighted0.y -= 61u;
+    if (n0 >= NWORDS) {
+      n0 -= NWORDS;
+      weighted0 += weightedWrapCorrection;
+      if (weighted0.x >= 31u) weighted0.x -= 31u;
+      if (weighted0.y >= 61u) weighted0.y -= 61u;
+    }
+
+    n1 += PFA_LOGICAL_STEP;
+    weighted1 += weightedAdvance;
+    if (weighted1.x >= 31u) weighted1.x -= 31u;
+    if (weighted1.y >= 61u) weighted1.y -= 61u;
+    if (n1 >= NWORDS) {
+      n1 -= NWORDS;
+      weighted1 += weightedWrapCorrection;
+      if (weighted1.x >= 31u) weighted1.x -= 31u;
+      if (weighted1.y >= 61u) weighted1.y -= 61u;
+    }
+#else
     n0 += PFA_LOGICAL_STEP; if (n0 >= NWORDS) n0 -= NWORDS;
     n1 += PFA_LOGICAL_STEP; if (n1 >= NWORDS) n1 -= NWORDS;
+#endif
 #if PFA_RADIX == 7 && ((PFA_LOGICAL_STEP % (2 * BIG_HEIGHT)) == 0)
     x0 += canonicalStep; if (x0 >= WIDTH) x0 -= WIDTH;
     x1 += canonicalStep; if (x1 >= WIDTH) x1 -= WIDTH;
