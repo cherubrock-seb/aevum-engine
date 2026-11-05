@@ -434,6 +434,25 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
     if (doLog) log("AEVUM_PFA7_INPLACE=1: in-place transform interior, separate canonical fftW scatter.\n");
   }
 
+  bool pfa7_fftp_weight_recurrence = false;
+  if (const char* value = std::getenv("AEVUM_PFA7_FFTP_WEIGHT_RECURRENCE")) {
+    const string selected = value;
+    if (selected != "0" && selected != "1")
+      throw std::runtime_error("AEVUM_PFA7_FFTP_WEIGHT_RECURRENCE must be 0 or 1");
+    pfa7_fftp_weight_recurrence = selected == "1";
+  }
+  if (pfa7_fftp_weight_recurrence) {
+#if defined(__APPLE__)
+    throw std::runtime_error("AEVUM_PFA7_FFTP_WEIGHT_RECURRENCE does not support Apple staged kernels");
+#endif
+    if (!isNvidiaGpu(id) || fft.shape.fft_type != FFT3161 ||
+        !fft.isPfa() || fft.pfa_radix != 7 || fft.shape.width != 512 ||
+        fft.shape.middle != 7 || fft.shape.height != 512 || fft.variant != 202)
+      throw std::runtime_error("AEVUM_PFA7_FFTP_WEIGHT_RECURRENCE requires NVIDIA pfa7:1:512:7:512:202");
+    if (doLog)
+      log("AEVUM_PFA7_FFTP_WEIGHT_RECURRENCE=1: recur PFA7 fftP CRT weight residues.\n");
+  }
+
   if (const char* value = std::getenv("AEVUM_PFA_GF31_COSBASE")) {
     const auto it = config.find("AEVUM_PFA_GF31_COSBASE");
     if (it != config.end() && it->second != value)
@@ -767,6 +786,8 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
     else ++it;
   }
   string defines = toDefine(config);
+  if (pfa7_fftp_weight_recurrence)
+    defines += toDefine("AEVUM_PFA7_FFTP_WEIGHT_RECURRENCE", 1);
   if (doLog) { log("config: %s\n", defines.c_str()); }
 
   defines += toDefine(initializer_list<pair<string, u32>>{
