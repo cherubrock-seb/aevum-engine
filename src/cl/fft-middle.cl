@@ -715,6 +715,29 @@ void OVERLOAD middleShuffle(local F2 *lds, F2 *u) {
 /*          Similar to above, but for an NTT based on GF(M31^2)           */
 /**************************************************************************/
 
+#ifndef AEVUM_PFA7_FOLD_INV7
+#define AEVUM_PFA7_FOLD_INV7 0
+#endif
+#define AEVUM_PFA7_FOLD_INV7_VALID_0 1
+#define AEVUM_PFA7_FOLD_INV7_VALID_1 1
+#define AEVUM_PFA7_FOLD_INV7_VALID_IMPL(x) AEVUM_PFA7_FOLD_INV7_VALID_##x
+#define AEVUM_PFA7_FOLD_INV7_VALID(x) AEVUM_PFA7_FOLD_INV7_VALID_IMPL(x)
+#if !AEVUM_PFA7_FOLD_INV7_VALID(AEVUM_PFA7_FOLD_INV7)
+#error AEVUM_PFA7_FOLD_INV7 must be 0 or 1
+#endif
+#if AEVUM_PFA7_FOLD_INV7
+#if PFA_RADIX != 7 || FFT_TYPE != FFT3161 || !AEVUM_PFA7_NUSS8
+#error AEVUM_PFA7_FOLD_INV7 requires Type1 PFA7 with AEVUM_PFA7_NUSS8=1
+#endif
+#if AEVUM_PFA_GF31_COSBASE || AEVUM_GF61_LIMB32 || defined(AEVUM_APPLE_OPENCL12)
+#error AEVUM_PFA7_FOLD_INV7 requires native NUSS8 arithmetic without COSBASE or Apple staging
+#endif
+#if defined(AEVUM_PFA_LAZY61) && AEVUM_PFA_LAZY61
+#error AEVUM_PFA7_FOLD_INV7 and AEVUM_PFA_LAZY61 require separate validation
+#endif
+#include "pfa7-normalized.cl"
+#endif
+
 #if NTT_GF31
 
 #if PFA_RADIX
@@ -957,9 +980,13 @@ void OVERLOAD pfaInverseMiddle(GF31 *u) {
   u[0] = pfaMulScalar(o0, inv); u[1] = pfaMulScalar(o1, inv); u[2] = pfaMulScalar(o2, inv);
 #endif
 #elif PFA_RADIX == 7
+#if AEVUM_PFA7_FOLD_INV7
+  aevumPfa7InverseNormalized(u);
+#else
   pfaDft7(u, (Z31)PFA7_INVROOT31);
 #pragma unroll
   for (u32 i = 0; i < 7; ++i) u[i] = pfaMulScalar(u[i], (Z31)PFA7_INV7_31);
+#endif
 #elif PFA_RADIX == 9
 #if AEVUM_PFA_GF31_COSBASE
   aevumPfa31CosBase(u, true);
@@ -1310,6 +1337,8 @@ void OVERLOAD pfaInverseMiddle(GF61 *u) {
 #elif PFA_RADIX == 7
 #ifdef AEVUM_PFA7_MIDOUT_TWIDDLE_PRESCALE
   pfaDft7(u, (Z61)PFA7_INVROOT61);
+#elif AEVUM_PFA7_FOLD_INV7
+  aevumPfa7InverseNormalized(u);
 #else
   pfaDft7(u, (Z61)PFA7_INVROOT61);
 #pragma unroll
