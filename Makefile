@@ -576,6 +576,17 @@ $(GF61_MIDDLE_BASE_TABLE_TEST): tests/gf61_middle_base_table_kernel_test.cpp $(G
 	@mkdir -p build-tests
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra $(TEST_SECTION_FLAGS) -Isrc tests/gf61_middle_base_table_kernel_test.cpp $(GF61_MIDDLE_BASE_TABLE_SRCS) $(TEST_GC_LINK) $(OPENCL_LIBS) -o $@
 
+# Host-only PFA7 normalized inverse arithmetic and option-policy gates.
+PFA7_INVERSE_NORMALIZED_TEST := build-tests/aevum-pfa7-inverse-normalized-test
+.PHONY: test-pfa7-inverse-normalized
+test-host: test-pfa7-inverse-normalized
+test-pfa7-inverse-normalized: $(PFA7_INVERSE_NORMALIZED_TEST)
+	CXX="$(CXX)" python3 tests/pfa7_inverse_normalized_source_test.py
+	$(PFA7_INVERSE_NORMALIZED_TEST)
+$(PFA7_INVERSE_NORMALIZED_TEST): tests/pfa7_inverse_normalized_host_test.cpp src/cl/pfa7-normalized.cl src/UseOptions.h
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc tests/pfa7_inverse_normalized_host_test.cpp -o $@
+
 # CUDA clEnqueueFillBuffer planning for all OpenCL pattern sizes.
 CUDA_FILL_TEST := build-tests/aevum-cuda-fill-test
 .PHONY: test-cuda-fill
