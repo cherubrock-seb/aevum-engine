@@ -613,11 +613,18 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
       pfa7_doublewide_rtx3080_opencl_default &&
       !config.count("SHUFL_BYTES_W");
 
+  const bool pfa7_height_shufl16_rtx3080_opencl_default =
+      pfa7_doublewide_rtx3080_opencl_default &&
+      !config.count("SHUFL_BYTES_H");
+
   if (pfa7_doublewide_gfx906_default || pfa7_doublewide_rtx3080_opencl_default)
     config["TAIL_KERNELS"] = "3";
 
   if (pfa7_shufl16_rtx3080_opencl_default)
     config["SHUFL_BYTES_W"] = "16";
+
+  if (pfa7_height_shufl16_rtx3080_opencl_default)
+    config["SHUFL_BYTES_H"] = "16";
 
   if (doLog && pfa7_doublewide_gfx906_default)
     log("Validated gfx906 PFA7 production default: TAIL_KERNELS=3, plan=%s; explicit TAIL_KERNELS retains priority.\n",
@@ -629,6 +636,10 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
 
   if (doLog && pfa7_shufl16_rtx3080_opencl_default)
     log("Validated RTX 3080 OpenCL PFA7 production default: SHUFL_BYTES_W=16, plan=%s; explicit SHUFL_BYTES_W retains priority.\n",
+        fft.spec().c_str());
+
+  if (doLog && pfa7_height_shufl16_rtx3080_opencl_default)
+    log("Validated RTX 3080 OpenCL PFA7 production default: SHUFL_BYTES_H=16, plan=%s; explicit SHUFL_BYTES_H retains priority.\n",
         fft.spec().c_str());
 
   // Correctness-first PFA defaults.  Explicit engine configuration (for
