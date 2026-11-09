@@ -971,7 +971,15 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
 
   const u32 first_binary_pair = me * SMALL_HEIGHT + y;
   u32 n0 = pfaLogicalIndex(row, first_binary_pair * 2u);
+#if PFA_RADIX == 7 && NWORDS == 3670016u && PFA_BINARY_LENGTH == 524288u && PFA_L_INV == 4u
+  // Exact PFA7 geometry: consecutive binary scalars have a fixed logical
+  // delta. Preserve the existing n1 recurrence while avoiding a second
+  // pfaLogicalIndex calculation during fftP setup.
+  u32 n1 = n0 + (3u * PFA_BINARY_LENGTH + 1u);
+  if (n1 >= NWORDS) n1 -= NWORDS;
+#else
   u32 n1 = pfaLogicalIndex(row, first_binary_pair * 2u + 1u);
+#endif
 #if PFA_RADIX == 7 && ((PFA_LOGICAL_STEP % (2 * BIG_HEIGHT)) == 0)
   // PFA7 fftP canonical-load recurrence: this exact plan keeps the canonical
   // line fixed while x advances by one compile-time step modulo WIDTH.
