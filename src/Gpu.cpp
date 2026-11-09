@@ -34,6 +34,8 @@
 #include <atomic>
 #include <cstring>
 #include <cstdlib>
+#include <chrono>
+#include <thread>
 #include <cinttypes>
 
 #define _USE_MATH_DEFINES
@@ -1394,6 +1396,9 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   nH(aevumHeightRadix(args, shared.context->deviceId(), fft, extraConf)),
   useLongCarry{args.carry == CARRY_64},
   queue{*shared.context, args.profile},
+#ifndef CUDA_BACKEND
+  copyQueue{*shared.context, false, true},
+#endif
   auxQueues{},    
   compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, nW, nH, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul,
                                           cuda_graph_squares_, cuda_reg_ptx_cache_, in_wg, in_sizex, out_wg, out_sizex)},
@@ -1674,6 +1679,30 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   recorded_kernels{},
   recorded_kernel_args{}
 {    
+#ifndef CUDA_BACKEND
+  if (const char* value = std::getenv("AEVUM_ASYNC_PRP_LOG_READ")) {
+    if (std::strcmp(value, "0") != 0 && std::strcmp(value, "1") != 0)
+      throw std::runtime_error("AEVUM_ASYNC_PRP_LOG_READ must be 0 or 1");
+    async_prp_log_read_ = std::strcmp(value, "1") == 0;
+  }
+  if (async_prp_log_read_) {
+#if defined(__APPLE__)
+    throw std::runtime_error("AEVUM_ASYNC_PRP_LOG_READ does not support Apple OpenCL");
+#else
+    if (!isNvidiaGpu(shared.context->deviceId()) || fft.isPfa() ||
+        fft.shape.fft_type != FFT3161 || fft.shape.width != 1024 ||
+        fft.shape.middle != 8 || fft.shape.height != 256 || fft.variant != 101 ||
+        fft.WordSize != 8)
+      throw std::runtime_error("AEVUM_ASYNC_PRP_LOG_READ requires NVIDIA OpenCL 1:1K:8:256:101 with 64-bit words");
+    const size_t stageWords = N * fft.WordSize / sizeof(Word);
+    bufStage_ = std::make_unique<Buffer<Word>>(profile.make("asyncPrpStage"), &queue, stageWords);
+    bufStageSum_ = std::make_unique<Buffer<u64>>(profile.make("asyncPrpStageSum"), &queue, 1);
+    hostStage_ = std::make_unique<HostBuffer<Word>>(copyQueue, stageWords);
+    hostStageSum_ = std::make_unique<HostBuffer<u64>>(copyQueue, 1);
+    log("AEVUM_ASYNC_PRP_LOG_READ=1: overlap unverified PRP log-buffer DMA on an auxiliary queue.\n");
+#endif
+  }
+#endif
 
 #if defined(__APPLE__)
   apple_fused_tailsquare_gf61 = fft.shape.fft_type == FFT3161 && fft.NTT_GF61 && nH > 1;
@@ -3387,6 +3416,59 @@ vector<Word> Gpu::readChecked(Buffer<Word>& buf) {
 #endif
 }
 
+#ifndef CUDA_BACKEND
+void Gpu::startStageRead(Buffer<Word>& buf) {
+  assert(async_prp_log_read_ && !stageReadPending_);
+  assert(bufStage_ && bufStageSum_ && hostStage_ && hostStageSum_);
+  bufStageSum_->zero();
+  sum64(*bufStageSum_, N, buf);
+  transpOut(*bufStage_, buf);
+  EventHolder snapshot = queue.createSyncEvent();
+  copyQueue.waitForSyncEvent(&snapshot);
+  copyQueue.readAsync(bufStage_->get(), bufStage_->size * sizeof(Word), hostStage_->data(), nullptr);
+  copyQueue.readAsync(bufStageSum_->get(), sizeof(u64), hostStageSum_->data(), nullptr);
+  stageRead_ = copyQueue.createSyncEvent();
+  ::flush(queue.get());
+  ::flush(copyQueue.get());
+  stageReadPending_ = true;
+}
+
+void Gpu::waitStageRead() {
+  if (!stageReadPending_) return;
+  while (true) {
+    const int status = getEventInfo(stageRead_.get());
+    if (status == CL_COMPLETE) break;
+    if (status < 0) CHECK1(status);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  stageRead_.reset();
+  stageReadPending_ = false;
+}
+
+vector<Word> Gpu::finishStageRead() {
+  assert(stageReadPending_ && fft.WordSize == 8);
+  for (int nRetry = 0; nRetry < 3; ++nRetry) {
+    waitStageRead();
+    vector<Word> data(hostStage_->data(), hostStage_->data() + hostStage_->size);
+    u64 hostSum = 0;
+    for (Word word : data) hostSum += u64(word);
+    const u64 gpuSum = *hostStageSum_->data();
+    if (hostSum == gpuSum) {
+      if (gpuSum == 0 && isAllZero(data)) { log("Read ZERO\n"); return {}; }
+      return data;
+    }
+    log("GPU asynchronous read failed: %016" PRIx64 " (gpu) != %016" PRIx64 " (host)\n", gpuSum, hostSum);
+    copyQueue.readAsync(bufStage_->get(), bufStage_->size * sizeof(Word), hostStage_->data(), nullptr);
+    copyQueue.readAsync(bufStageSum_->get(), sizeof(u64), hostStageSum_->data(), nullptr);
+    stageRead_ = copyQueue.createSyncEvent();
+    ::flush(copyQueue.get());
+    stageReadPending_ = true;
+  }
+  waitStageRead();
+  throw "GPU persistent asynchronous read errors";
+}
+#endif
+
 Words Gpu::readAndCompress(Buffer<Word>& buf)  { return compactBits(readChecked(buf), E); }
 vector<u32> Gpu::readCheck() { return readAndCompress(bufCheck); }
 vector<u32> Gpu::readData() { return readAndCompress(bufData); }
@@ -4283,8 +4365,30 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
   int nSeqErrors = 0;
   u64 lastFailedRes64 = 0;
   u32 logStep = args.logStep;
+#ifndef CUDA_BACKEND
+  struct PendingAsyncLog { u64 k{}; u32 blockSize{}; u64 res{}; u32 nErrors{}; double elapsed{}; };
+  std::optional<PendingAsyncLog> pendingAsyncLog;
+  auto finishAsyncLog = [&]() -> bool {
+    if (!pendingAsyncLog) return true;
+    PendingAsyncLog const p = *pendingAsyncLog;
+    pendingAsyncLog.reset();
+    vector<Word> raw = finishStageRead();
+    if (raw.empty()) {
+      ++nErrors;
+      log("%9" PRIu64 " %016" PRIx64 " read NULL asynchronous check\n", p.k, p.res);
+      return false;
+    }
+    (*background)([=, this, raw = std::move(raw)] {
+      getSaver()->saveUnverified({E, p.k, p.blockSize, p.res, compactBits(raw, E), p.nErrors, p.elapsed});
+    });
+    return true;
+  };
+#endif
 
  reload:
+#ifndef CUDA_BACKEND
+  if (pendingAsyncLog) { waitStageRead(); pendingAsyncLog.reset(); }
+#endif
   elapsedTimer.reset();
   u32 blockSize{};
   u64 k{};
@@ -4309,6 +4413,13 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
   // does not accept 0, so only construct one when there is a proof to make.
   std::optional<ProofSet> proofSet;
   if (power) { proofSet.emplace(E, power); }
+#ifndef CUDA_BACKEND
+  if (async_prp_log_read_) {
+    if (proofSet) throw std::runtime_error("AEVUM_ASYNC_PRP_LOG_READ discovery mode requires proof disabled");
+    if (logStep != 10000 || blockSize != 1000)
+      throw std::runtime_error("AEVUM_ASYNC_PRP_LOG_READ discovery mode requires -log 10000 -block 1000");
+  }
+#endif
 
   bool isPrime = false;
 
@@ -4387,24 +4498,47 @@ PRPResult Gpu::isPrimePRP(const Task& task) {
     }
 
     if (!doCheck && !doLog) continue;
+#ifndef CUDA_BACKEND
+    if (async_prp_log_read_ && pendingAsyncLog && !finishAsyncLog()) {
+      if (++nSeqErrors > 2) throw "sequential errors";
+      goto reload;
+    }
+#endif
 
     u64 res = dataResidue();
     float secsPerIt = iterationTimer.reset(k);
     queue.setSquareTime((int) (secsPerIt * 1'000'000));
 
-    vector<Word> rawCheck = readChecked(bufCheck);
-    if (rawCheck.empty()) {
-      ++nErrors;
-      log("%9" PRIu64 " %016" PRIx64 " read NULL check\n", k, res);
-      if (++nSeqErrors > 2) { throw "sequential errors"; }
-      goto reload;
+    vector<Word> rawCheck;
+#ifndef CUDA_BACKEND
+    const bool asyncThisLog = async_prp_log_read_ && !doCheck;
+    if (!asyncThisLog) {
+#endif
+      rawCheck = readChecked(bufCheck);
+      if (rawCheck.empty()) {
+        ++nErrors;
+        log("%9" PRIu64 " %016" PRIx64 " read NULL check\n", k, res);
+        if (++nSeqErrors > 2) { throw "sequential errors"; }
+        goto reload;
+      }
+#ifndef CUDA_BACKEND
     }
+#endif
 
     if (!doCheck) {
-      (*background)([=, this] {
-        getSaver()->saveUnverified({E, k, blockSize, res, compactBits(rawCheck, E), nErrors,
-                                    elapsedBefore + elapsedTimer.at()});
-      });
+#ifndef CUDA_BACKEND
+      if (async_prp_log_read_) {
+        startStageRead(bufCheck);
+        pendingAsyncLog = PendingAsyncLog{.k=k, .blockSize=blockSize, .res=res, .nErrors=nErrors,
+                                          .elapsed=elapsedBefore + elapsedTimer.at()};
+      } else
+#endif
+      {
+        (*background)([=, this] {
+          getSaver()->saveUnverified({E, k, blockSize, res, compactBits(rawCheck, E), nErrors,
+                                      elapsedBefore + elapsedTimer.at()});
+        });
+      }
 
       log("   %9" PRIu64 " %016" PRIx64 " %s\n", k, res, formatSecsPerIter(secsPerIt).c_str());
       RoeInfo carryStats = readCarryStats();

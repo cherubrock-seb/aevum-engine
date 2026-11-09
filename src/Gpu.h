@@ -126,6 +126,16 @@ private:
   bool cuda_reg_ptx_cache_{false};       // Apply register limits after neutral PTX caching
 
   Queue queue;
+#ifndef CUDA_BACKEND
+  Queue copyQueue;
+  bool async_prp_log_read_{false};
+  std::unique_ptr<Buffer<Word>> bufStage_;
+  std::unique_ptr<Buffer<u64>> bufStageSum_;
+  std::unique_ptr<HostBuffer<Word>> hostStage_;
+  std::unique_ptr<HostBuffer<u64>> hostStageSum_;
+  EventHolder stageRead_;
+  bool stageReadPending_{false};
+#endif
   vector<Queue> auxQueues;
   KernelCompiler compiler;
 
@@ -419,6 +429,11 @@ private:
   PRPState loadPRP(Saver<PRPState>& saver);
 
   vector<Word> readChecked(Buffer<Word>& buf);
+#ifndef CUDA_BACKEND
+  void startStageRead(Buffer<Word>& buf);
+  vector<Word> finishStageRead();
+  void waitStageRead();
+#endif
 
   // void measureTransferSpeed();
 
