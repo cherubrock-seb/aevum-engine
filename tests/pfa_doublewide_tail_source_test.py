@@ -191,7 +191,9 @@ policy_tokens = (
     "const bool pfa7_doublewide_geometry =",
     "const bool pfa7_doublewide_gfx906_default =",
     "const bool pfa7_doublewide_rtx3080_opencl_default =",
+    "const bool pfa7_shufl16_rtx3080_opencl_default =",
     'config["TAIL_KERNELS"] = "3"',
+    'config["SHUFL_BYTES_W"] = "16"',
     'config.try_emplace("TAIL_KERNELS", "1")',
 )
 
@@ -244,8 +246,11 @@ for token in (
     'getDeviceName(id) == "NVIDIA GeForce RTX 3080"',
     '#if !defined(CUDA_BACKEND)',
     'config["TAIL_KERNELS"] = "3"',
+    'config["SHUFL_BYTES_W"] = "16"',
+    '!config.count("SHUFL_BYTES_W")',
     "Validated RTX 3080 OpenCL PFA7 production default",
     "explicit TAIL_KERNELS retains priority",
+    "explicit SHUFL_BYTES_W retains priority",
 ):
     if token not in pfa7_block:
         print("FAIL: gfx906 PFA7 TK3 policy missing", token)
@@ -358,6 +363,11 @@ def production_policy_model(device, radix, width, middle, height, variant,
         )
         and "TAIL_KERNELS" not in config
     )
+    pfa7_shufl16_auto = (
+        pfa7_auto
+        and device == "NVIDIA GeForce RTX 3080"
+        and "SHUFL_BYTES_W" not in config
+    )
 
     if pfa3_auto:
         config["TAIL_KERNELS"] = "3"
@@ -371,6 +381,8 @@ def production_policy_model(device, radix, width, middle, height, variant,
             config.setdefault(key, value)
     elif pfa7_auto:
         config["TAIL_KERNELS"] = "3"
+        if pfa7_shufl16_auto:
+            config["SHUFL_BYTES_W"] = "16"
     else:
         config.setdefault("TAIL_KERNELS", "1")
 
@@ -399,7 +411,20 @@ qualified_rtx3080_pfa7 = production_policy_model(
     "NVIDIA GeForce RTX 3080",
     7, 512, 7, 512, 202,
 )
-assert qualified_rtx3080_pfa7 == {"TAIL_KERNELS": "3"}
+assert qualified_rtx3080_pfa7 == {
+    "TAIL_KERNELS": "3",
+    "SHUFL_BYTES_W": "16",
+}
+
+explicit_rtx3080_shufl = production_policy_model(
+    "NVIDIA GeForce RTX 3080",
+    7, 512, 7, 512, 202,
+    explicit={"SHUFL_BYTES_W": "8"},
+)
+assert explicit_rtx3080_shufl == {
+    "SHUFL_BYTES_W": "8",
+    "TAIL_KERNELS": "3",
+}
 
 # Explicit per-key settings retain priority while the remaining PFA3 defaults
 # are still supplied.
@@ -451,6 +476,6 @@ for cfg in (
     assert cfg == {"TAIL_KERNELS": "1"}
 
 print(
-    "ok: validated gfx906 PFA3/PFA7 and RTX 3080 OpenCL PFA7 TK3 defaults are "
+    "ok: validated gfx906 PFA3/PFA7 and RTX 3080 OpenCL PFA7 TK3/SHUFL16 defaults are "
     "exact-scope and preserve explicit configuration"
 )
