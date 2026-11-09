@@ -762,6 +762,25 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
     }
   }
 
+  if (const auto it = config.find("AEVUM_CARRY_REUSE_GF61_WU"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_CARRY_REUSE_GF61_WU must be 0 or 1");
+    if (it->second == "1") {
+#if defined(CUDA_BACKEND)
+      throw std::runtime_error("AEVUM_CARRY_REUSE_GF61_WU is an OpenCL experiment");
+#endif
+#if defined(__APPLE__)
+      throw std::runtime_error("AEVUM_CARRY_REUSE_GF61_WU does not support Apple staged kernels");
+#endif
+      if (!isNvidiaGpu(id) || fft.isPfa() || fft.shape.fft_type != FFT3161 ||
+          fft.shape.width != 1024 || fft.shape.middle != 8 ||
+          fft.shape.height != 256 || fft.variant != 101)
+        throw std::runtime_error("AEVUM_CARRY_REUSE_GF61_WU requires NVIDIA OpenCL 1:1K:8:256:101");
+      if (doLog)
+        log("AEVUM_CARRY_REUSE_GF61_WU=1: reuse consumed GF61 slots for provisional carryFused Word2 payload.\n");
+    }
+  }
+
   // carryFused's !OLD_FENCE carry hand-off coordinates the lanes of a wavefront with sync() and nothing else, from
   // inside a divergent branch, so a workgroup barrier is not a substitute.  sync() is bar.warp.sync on NVIDIA (unless
   // NO_ASM removes the PTX) and free on AMD, where a wavefront advances in lock-step.  Anywhere else (Intel, Apple,
