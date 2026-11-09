@@ -3605,18 +3605,7 @@ void Gpu::exponentiate(Buffer<Word>& bufInOut, u64 exp) {
 // Good-Thomas scatter directly and no longer needs a separate unpack kernel.
 // The stock fused carry remains byte-for-byte selected when PFA is disabled.
 void Gpu::doCarry(Buffer<double>& in, Buffer<Word>& wordBuf) {
-  // Diagnostic-only attempt to reuse the existing FFT3161 carryFused kernel
-  // for the validated RTX 3080 PFA7 geometry. Production remains unchanged
-  // unless the environment gate is explicitly enabled.
-  const char* pfa7_fused = std::getenv("AEVUM_PFA7_FUSED_CARRY");
-  const bool pfa7_fused_diag =
-      pfa7_fused && std::strcmp(pfa7_fused, "1") == 0 &&
-      isNvidiaGpu(shared.context->deviceId()) &&
-      fft.shape.fft_type == FFT3161 && fft.pfa_radix == 7 &&
-      fft.shape.width == 512 && fft.shape.middle == 7 &&
-      fft.shape.height == 512 && fft.variant == 202;
-
-  if (useLongCarry || (fft.isPfa() && !pfa7_fused_diag)) {
+  if (useLongCarry || fft.isPfa()) {
     fftW(buf3, in);
     carryA(wordBuf, buf3);
     carryB(wordBuf);
@@ -3669,38 +3658,52 @@ void Gpu::square(Buffer<Word>& out, Buffer<Word>& in, enum LEAD_TYPE leadIn, enu
   }
 
   // Retain LEAD_WIDTH.  Power-of-two plans use the stock carryFused kernel.
-  // Native PFA cannot use that canonical-order stairway directly; instead,
-  // fftW+carryA produces provisional canonical words and fftPCarryB applies
-  // carryB while gathering those words into the next PFA width transform.
+  // Native PFA normally uses its scatter-aware bridge below.  A default-off
+  // diagnostic can route only the validated RTX 3080 PFA7 geometry through
+  // the existing FFT3161 carryFused kernel to test whether direct fusion is
+  // now representation-compatible; no production selector/default changes.
   else {
     assert(!useLongCarry);
     assert(!doMul3);
     if (fft.isPfa()) {
-      fftW(buf3, buf1);
-      // LL applies its -2 in carryLL; carryA would silently drop it.
-      if (doLL) {
-        carryLL(out, buf3);
+      const char* pfa7_fused = std::getenv("AEVUM_PFA7_FUSED_CARRY");
+      const bool pfa7_fused_diag =
+          !doLL &&
+          pfa7_fused && std::strcmp(pfa7_fused, "1") == 0 &&
+          isNvidiaGpu(shared.context->deviceId()) &&
+          fft.shape.fft_type == FFT3161 && fft.pfa_radix == 7 &&
+          fft.shape.width == 512 && fft.shape.middle == 7 &&
+          fft.shape.height == 512 && fft.variant == 202;
+
+      if (pfa7_fused_diag) {
+        carryFused(buf1);
       } else {
-        carryA(out, buf3);
-      }
+        fftW(buf3, buf1);
+        // LL applies its -2 in carryLL; carryA would silently drop it.
+        if (doLL) {
+          carryLL(out, buf3);
+        } else {
+          carryA(out, buf3);
+        }
 #if defined(__APPLE__)
-      const bool haveCarryBridge = false;  // fftPCarryB is disabled on Apple
+        const bool haveCarryBridge = false;  // fftPCarryB is disabled on Apple
 #else
-      const bool haveCarryBridge = fft.shape.fft_type == FFT3161;  // fftPCarryB's own requirement
+        const bool haveCarryBridge = fft.shape.fft_type == FFT3161;  // fftPCarryB's own requirement
 #endif
-      if (!haveCarryBridge) {
-        // Same retained width-transform state as the bridge, from the
-        // canonical carryB + fftP sequence every PFA plan supports.
-        carryB(out);
-        fftP(buf1, out);
-      } else if (fft.pfa_radix == 7 && args.value("AEVUM_PFA7_SEPARATE_CARRYB", 1)) {
-        // Profiling on RTX 3080 shows the lazy fused gather is substantially
-        // more expensive than the already-existing canonical carryB + fftP
-        // sequence.  Both produce the same retained width-transform state.
-        carryB(out);
-        fftP(buf1, out);
-      } else {
-        fftPCarryB(buf1, out);
+        if (!haveCarryBridge) {
+          // Same retained width-transform state as the bridge, from the
+          // canonical carryB + fftP sequence every PFA plan supports.
+          carryB(out);
+          fftP(buf1, out);
+        } else if (fft.pfa_radix == 7 && args.value("AEVUM_PFA7_SEPARATE_CARRYB", 1)) {
+          // Profiling on RTX 3080 shows the lazy fused gather is substantially
+          // more expensive than the already-existing canonical carryB + fftP
+          // sequence.  Both produce the same retained width-transform state.
+          carryB(out);
+          fftP(buf1, out);
+        } else {
+          fftPCarryB(buf1, out);
+        }
       }
     } else if (doLL) {
       carryFusedLL(buf1);
