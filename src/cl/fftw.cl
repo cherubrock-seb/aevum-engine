@@ -112,6 +112,12 @@ KERNEL(G_W) fftWGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
   readCarryFusedLine(in31, u, g, me);
   fft_WIDTH(lds, u, smallTrig31, 1, me);
 #if (FFT_TYPE == FFT3161 || FFT_TYPE == FFT323161) && PFA_RADIX
+#if AEVUM_PFA7_RAW_CARRY_GATHER
+  // Diagnostic representation: keep fftW in natural contiguous PFA row order.
+  // carry.cl gathers adjacent canonical logical digits directly from these rows.
+  out31 += WIDTH * g;
+  write(G_W, NW, u, out31, 0);
+#else
   // The inverse tail leaves components swapped: y is the even binary digit,
   // x is the odd binary digit.  Scatter scalar stores so adjacent canonical
   // digits may safely originate in different Good-Thomas rows.
@@ -153,6 +159,7 @@ KERNEL(G_W) fftWGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
     nOdd  += PFA_LOGICAL_STEP; if (nOdd  >= NWORDS) nOdd  -= NWORDS;
   }
 #endif
+#endif
 #else
   out31 += WIDTH * g;
   write(G_W, NW, u, out31, 0);
@@ -184,6 +191,10 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
   readCarryFusedLine(in61, u, g, me);
   fft_WIDTH(lds, u, smallTrig61, 1, me);
 #if (FFT_TYPE == FFT3161 || FFT_TYPE == FFT323161) && PFA_RADIX
+#if AEVUM_PFA7_RAW_CARRY_GATHER
+  out61 += WIDTH * g;
+  write(G_W, NW, u, out61, 0);
+#else
   P(Z61) outScalar61 = (P(Z61)) out61;
   const u32 row = g / SMALL_HEIGHT;
   const u32 y = g - row * SMALL_HEIGHT;
@@ -221,6 +232,7 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
     nEven += PFA_LOGICAL_STEP; if (nEven >= NWORDS) nEven -= NWORDS;
     nOdd  += PFA_LOGICAL_STEP; if (nOdd  >= NWORDS) nOdd  -= NWORDS;
   }
+#endif
 #endif
 #else
   out61 += WIDTH * g;

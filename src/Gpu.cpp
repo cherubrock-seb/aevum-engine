@@ -434,6 +434,30 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
     if (doLog) log("AEVUM_PFA7_INPLACE=1: in-place transform interior, separate canonical fftW scatter.\n");
   }
 
+  if (const auto it = config.find("AEVUM_PFA7_RAW_CARRY_GATHER"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_PFA7_RAW_CARRY_GATHER must be 0 or 1");
+    if (it->second == "1") {
+#if defined(__APPLE__)
+      throw std::runtime_error("AEVUM_PFA7_RAW_CARRY_GATHER does not support Apple staged kernels");
+#endif
+      if (!isNvidiaGpu(id) || fft.shape.fft_type != FFT3161 ||
+          !fft.isPfa() || fft.pfa_radix != 7 || fft.shape.width != 512 ||
+          fft.shape.middle != 7 || fft.shape.height != 512 || fft.variant != 202)
+        throw std::runtime_error("AEVUM_PFA7_RAW_CARRY_GATHER requires NVIDIA pfa7:1:512:7:512:202");
+      if (pfa7_inplace)
+        throw std::runtime_error("AEVUM_PFA7_RAW_CARRY_GATHER conflicts with AEVUM_PFA7_INPLACE=1");
+      for (const auto& setting : {KeyVal{"INPLACE", "0"}, KeyVal{"TAIL_KERNELS", "1"}}) {
+        const auto sit = config.find(setting.first);
+        if (sit != config.end() && sit->second != setting.second)
+          throw std::runtime_error("AEVUM_PFA7_RAW_CARRY_GATHER requires " + setting.first + "=" + setting.second);
+        config[setting.first] = setting.second;
+      }
+      if (doLog)
+        log("AEVUM_PFA7_RAW_CARRY_GATHER=1: natural fftW PFA rows, canonical gather inside carryA.\n");
+    }
+  }
+
   if (const char* value = std::getenv("AEVUM_PFA_GF31_COSBASE")) {
     const auto it = config.find("AEVUM_PFA_GF31_COSBASE");
     if (it != config.end() && it->second != value)

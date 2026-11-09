@@ -553,6 +553,20 @@ KERNEL(G_W) carry(P(Word2) out, CP(T2) in, u32 posROE, P(CarryABM) carryOut, P(u
   m31_weight_shift = (m31_weight_shift + log2_NWORDS + 1) % 31;
   m61_weight_shift = (m61_weight_shift + log2_NWORDS + 1) % 61;
 
+#if AEVUM_PFA7_RAW_CARRY_GATHER
+  // word_index/2 is the canonical logical pair at i=0.  Raw PFA fftW stores
+  // one binary row-major transform, so adjacent logical digits are gathered
+  // from two odd-axis rows sharing the same raw (x,y).  All coordinates below
+  // advance by recurrence across CARRY_LEN.
+  const u32 raw_pair0 = word_index >> 1;
+  const u32 raw_binary_pair0 = raw_pair0 % (WIDTH * SMALL_HEIGHT);
+  u32 raw_x = raw_binary_pair0 / SMALL_HEIGHT;
+  u32 raw_y = raw_binary_pair0 - raw_x * SMALL_HEIGHT;
+  u32 raw_row_even = (2u * (raw_pair0 % PFA_RADIX)) % PFA_RADIX;
+  u32 raw_row_odd = raw_row_even + 1u;
+  if (raw_row_odd == PFA_RADIX) raw_row_odd = 0;
+#endif
+
   for (i32 i = 0; i < CARRY_LEN; ++i) {
     u32 p = G_W * gx + WIDTH * (CARRY_LEN * gy + i) + me;
 
@@ -571,8 +585,35 @@ KERNEL(G_W) carry(P(Word2) out, CP(T2) in, u32 posROE, P(CarryABM) carryOut, P(u
     bool biglit1 = frac_bits >= -FRAC_BPW_HI;   // Same as frac_bits + FRAC_BPW_HI <= FRAC_BPW_HI;
 
     // Compute result
+#if AEVUM_PFA7_RAW_CARRY_GATHER
+    const u32 rawEvenIndex = (raw_row_even * SMALL_HEIGHT + raw_y) * WIDTH + raw_x;
+    const u32 rawOddIndex  = (raw_row_odd  * SMALL_HEIGHT + raw_y) * WIDTH + raw_x;
+    const GF31 rawEven31 = in31[rawEvenIndex];
+    const GF31 rawOdd31  = in31[rawOddIndex];
+    const GF61 rawEven61 = in61[rawEvenIndex];
+    const GF61 rawOdd61  = in61[rawOddIndex];
+
+    // The inverse width result is component-swapped: even logical digits are
+    // in .y, odd logical digits in .x.  Build exactly SWAP_XY(canonical[p]).
+    const GF31 carryIn31 = U2(rawEven31.y, rawOdd31.x);
+    const GF61 carryIn61 = U2(rawEven61.y, rawOdd61.x);
+    out[p] = weightAndCarryPair(carryIn31, carryIn61, m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
+                                LL != 0 || i != 0, carry, biglit0, biglit1, &carry, &roundMax, &carryMax);
+
+    ++raw_y;
+    if (raw_y == SMALL_HEIGHT) {
+      raw_y = 0;
+      ++raw_x;
+      if (raw_x == WIDTH) raw_x = 0;
+    }
+    raw_row_even += 2u;
+    if (raw_row_even >= PFA_RADIX) raw_row_even -= PFA_RADIX;
+    raw_row_odd = raw_row_even + 1u;
+    if (raw_row_odd == PFA_RADIX) raw_row_odd = 0;
+#else
     out[p] = weightAndCarryPair(SWAP_XY(in31[p]), SWAP_XY(in61[p]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
                                 LL != 0 || i != 0, carry, biglit0, biglit1, &carry, &roundMax, &carryMax);
+#endif
 
     // Generate weight shifts and frac_bits for next pair
     m31_combo_counter += m31_combo_step;
