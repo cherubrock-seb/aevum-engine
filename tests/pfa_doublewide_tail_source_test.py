@@ -185,15 +185,17 @@ print(
 # Production policy remains exact-scope. The generic row-aware implementation
 # supports PFA3 and PFA7, but automatic TK3 is enabled only on validated gfx906
 # geometries. PFA3 also carries its separately validated companion defaults;
-# PFA7 changes only TAIL_KERNELS.
+# RTX 3080 PFA7 also carries validated width and height shuffle defaults.
 policy_tokens = (
     "const bool pfa3_doublewide_gfx906_geometry =",
     "const bool pfa7_doublewide_geometry =",
     "const bool pfa7_doublewide_gfx906_default =",
     "const bool pfa7_doublewide_rtx3080_opencl_default =",
     "const bool pfa7_shufl16_rtx3080_opencl_default =",
+    "const bool pfa7_height_shufl16_rtx3080_opencl_default =",
     'config["TAIL_KERNELS"] = "3"',
     'config["SHUFL_BYTES_W"] = "16"',
+    'config["SHUFL_BYTES_H"] = "16"',
     'config.try_emplace("TAIL_KERNELS", "1")',
 )
 
@@ -247,10 +249,13 @@ for token in (
     '#if !defined(CUDA_BACKEND)',
     'config["TAIL_KERNELS"] = "3"',
     'config["SHUFL_BYTES_W"] = "16"',
+    'config["SHUFL_BYTES_H"] = "16"',
     '!config.count("SHUFL_BYTES_W")',
+    '!config.count("SHUFL_BYTES_H")',
     "Validated RTX 3080 OpenCL PFA7 production default",
     "explicit TAIL_KERNELS retains priority",
     "explicit SHUFL_BYTES_W retains priority",
+    "explicit SHUFL_BYTES_H retains priority",
 ):
     if token not in pfa7_block:
         print("FAIL: gfx906 PFA7 TK3 policy missing", token)
@@ -368,6 +373,11 @@ def production_policy_model(device, radix, width, middle, height, variant,
         and device == "NVIDIA GeForce RTX 3080"
         and "SHUFL_BYTES_W" not in config
     )
+    pfa7_height_shufl16_auto = (
+        pfa7_auto
+        and device == "NVIDIA GeForce RTX 3080"
+        and "SHUFL_BYTES_H" not in config
+    )
 
     if pfa3_auto:
         config["TAIL_KERNELS"] = "3"
@@ -383,6 +393,8 @@ def production_policy_model(device, radix, width, middle, height, variant,
         config["TAIL_KERNELS"] = "3"
         if pfa7_shufl16_auto:
             config["SHUFL_BYTES_W"] = "16"
+        if pfa7_height_shufl16_auto:
+            config["SHUFL_BYTES_H"] = "16"
     else:
         config.setdefault("TAIL_KERNELS", "1")
 
@@ -414,6 +426,7 @@ qualified_rtx3080_pfa7 = production_policy_model(
 assert qualified_rtx3080_pfa7 == {
     "TAIL_KERNELS": "3",
     "SHUFL_BYTES_W": "16",
+    "SHUFL_BYTES_H": "16",
 }
 
 explicit_rtx3080_shufl = production_policy_model(
@@ -424,6 +437,18 @@ explicit_rtx3080_shufl = production_policy_model(
 assert explicit_rtx3080_shufl == {
     "SHUFL_BYTES_W": "8",
     "TAIL_KERNELS": "3",
+    "SHUFL_BYTES_H": "16",
+}
+
+explicit_rtx3080_height_shufl = production_policy_model(
+    "NVIDIA GeForce RTX 3080",
+    7, 512, 7, 512, 202,
+    explicit={"SHUFL_BYTES_H": "8"},
+)
+assert explicit_rtx3080_height_shufl == {
+    "SHUFL_BYTES_H": "8",
+    "TAIL_KERNELS": "3",
+    "SHUFL_BYTES_W": "16",
 }
 
 # Explicit per-key settings retain priority while the remaining PFA3 defaults
@@ -476,6 +501,6 @@ for cfg in (
     assert cfg == {"TAIL_KERNELS": "1"}
 
 print(
-    "ok: validated gfx906 PFA3/PFA7 and RTX 3080 OpenCL PFA7 TK3/SHUFL16 defaults are "
+    "ok: validated gfx906 PFA3/PFA7 and RTX 3080 OpenCL PFA7 TK3/width-height SHUFL16 defaults are "
     "exact-scope and preserve explicit configuration"
 )
