@@ -118,6 +118,7 @@ private:
   bool tail_single_kernel{true};         // TailSquare uses one kernel by default
   u32 in_place{0};                       // 0 = out-of-place
   u32 wmul{2};                           // Carry-fused width multiplier
+  u32 carry_len{8};                      // carryA/carryB segment length; production default is 8
   u32 pad_size{0};                       // Padding in bytes
   u32 in_wg{128}, in_sizex{16};          // IN_WG, IN_SIZEX: fftMiddleIn work-group size and x width.  They change the data layout.
   u32 out_wg{128}, out_sizex{16};        // OUT_WG, OUT_SIZEX: the same for fftMiddleOut.
