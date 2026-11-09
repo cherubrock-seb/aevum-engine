@@ -14,6 +14,20 @@ static inline u32 pfaWLogicalIndex(u32 row, u32 binary_index) {
   return binary_index + PFA_BINARY_LENGTH * t;
 }
 
+// Map the adjacent even/odd binary pair with one Good-Thomas division/modulo
+// sequence.  The odd row coordinate is exactly one step before the even
+// coordinate, so its CRT multiplier follows by subtracting PFA_L_INV modulo
+// PFA_RADIX instead of recomputing the full map.
+static inline uint2 pfaWLogicalPair(u32 row, u32 firstBinaryPair) {
+  const u32 binaryEven = firstBinaryPair * 2u;
+  const u32 deltaEven = (row + PFA_RADIX - binaryEven % PFA_RADIX) % PFA_RADIX;
+  const u32 tEven = (deltaEven * PFA_L_INV) % PFA_RADIX;
+  u32 tOdd = tEven + PFA_RADIX - PFA_L_INV;
+  if (tOdd >= PFA_RADIX) tOdd -= PFA_RADIX;
+  return (uint2)(binaryEven + PFA_BINARY_LENGTH * tEven,
+                 binaryEven + 1u + PFA_BINARY_LENGTH * tOdd);
+}
+
 static inline u32 pfaWCanonicalPairIndex(u32 logical) {
   const u32 pair = logical >> 1;
   const u32 x = pair / BIG_HEIGHT;
@@ -122,8 +136,9 @@ KERNEL(G_W) fftWGF31(P(T2) out, CP(T2) in, Trig smallTrig) {
 #if NVIDIAGPU
   // Keep the validated canonical scatter recurrence on NVIDIA.  Computing
   // the initial Good-Thomas mapping once avoids repeated div/mod work.
-  const u32 nEven = pfaWLogicalIndex(row, firstBinaryPair * 2u);
-  const u32 nOdd  = pfaWLogicalIndex(row, firstBinaryPair * 2u + 1u);
+  const uint2 firstLogical = pfaWLogicalPair(row, firstBinaryPair);
+  const u32 nEven = firstLogical.x;
+  const u32 nOdd  = firstLogical.y;
   const u32 pairEven = nEven >> 1;
   const u32 pairOdd  = nOdd >> 1;
   const u32 xEven = pairEven / BIG_HEIGHT;
@@ -191,8 +206,9 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
 #if NVIDIAGPU && (PFA_RADIX == 7 || PFA_RADIX == 9)
   // The validated recurrence is beneficial for the larger NVIDIA PFA rows.
   // PFA3 and non-NVIDIA devices retain the canonical mapping path below.
-  const u32 nEven = pfaWLogicalIndex(row, firstBinaryPair * 2u);
-  const u32 nOdd  = pfaWLogicalIndex(row, firstBinaryPair * 2u + 1u);
+  const uint2 firstLogical = pfaWLogicalPair(row, firstBinaryPair);
+  const u32 nEven = firstLogical.x;
+  const u32 nOdd  = firstLogical.y;
   const u32 pairEven = nEven >> 1;
   const u32 pairOdd  = nOdd >> 1;
   const u32 xEven = pairEven / BIG_HEIGHT;
