@@ -926,11 +926,29 @@ static inline Word pfaLoadCanonicalWordCarried(CP(Word2) in, CP(CarryABM) carryI
 // Reduce logical before multiplying: (logical*step) mod p equals
 // ((logical mod p)*step) mod p and avoids expensive 64-bit division.
 static inline uint2 pfaWeightShifts3161(u32 logical, u32 step31, u32 step61) {
+#if AEVUM_PFA7_FFTP_32BIT_WEIGHTS
+  // fftP only needs the high 32 bits after the historical -1 fixed-point
+  // bias and +0xFFFFFFFF carry seed. Reconstruct that high half with 32-bit
+  // multiply-high and explicit carries, avoiding comboFracBits' u64 product.
+  const u32 fracLo = logical * FRAC_BPW_HI;
+  const u32 fracHi = mul_hi(logical, FRAC_BPW_HI);
+  const u32 fracExtra = mul_hi(logical, FRAC_BPW_LO);
+  const u32 sum0 = fracLo + fracExtra;
+  const u32 carry0 = sum0 < fracLo;
+  const u32 sum1 = sum0 + 0xFFFFFFFEu;
+  const u32 carry1 = sum1 < sum0;
+  const u32 high = fracHi + carry0 + carry1;
+
+  const u32 q31 = ((logical % 31u) * step31) % 31u;
+  const u32 q61 = ((logical % 61u) * step61) % 61u;
+  return U2((high + q31) % 31u, (high + q61) % 61u);
+#else
   const u64 frac = comboFracBits(logical);
   union { uint2 a; u64 b; } c31, c61;
   c31.b = frac + make_u64(((logical % 31u) * step31) % 31u, 0xFFFFFFFFu);
   c61.b = frac + make_u64(((logical % 61u) * step61) % 61u, 0xFFFFFFFFu);
   return U2(c31.a[1] % 31u, c61.a[1] % 61u);
+#endif
 }
 
 #if PFA_RADIX == 7
