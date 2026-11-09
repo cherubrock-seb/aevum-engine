@@ -972,6 +972,38 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
   const u32 first_binary_pair = me * SMALL_HEIGHT + y;
   u32 n0 = pfaLogicalIndex(row, first_binary_pair * 2u);
   u32 n1 = pfaLogicalIndex(row, first_binary_pair * 2u + 1u);
+#if PFA_RADIX == 7 && EXP == 125000003u && NWORDS == 3670016u && WIDTH == 512u && SMALL_HEIGHT == 512u && PFA_BINARY_LENGTH == 524288u && PFA_L_INV == 4u && PFA_LOGICAL_STEP == 3211264u
+  // Exact production PFA7 workload: derive the second scalar's final CRT
+  // shifts from the first scalar with fixed pair/wrap deltas plus one
+  // dynamic rounding bit.  This avoids a second comboFracBits and second
+  // pair of logical modulo reductions inside the eight-lane gather.
+  const u32 weightPairDelta = 3u * PFA_BINARY_LENGTH + 1u;
+  const u32 weightWrapDistance = NWORDS - weightPairDelta;
+  const u64 weightPairProduct = (u64)weightPairDelta * (u64)FRAC_BPW_LO;
+  const u64 weightPairCombo =
+      (u64)weightPairDelta * (u64)FRAC_BPW_HI + (weightPairProduct >> 32);
+  const u64 weightWrapProduct = (u64)weightWrapDistance * (u64)FRAC_BPW_LO;
+  const u64 weightWrapCombo =
+      (u64)weightWrapDistance * (u64)FRAC_BPW_HI + (weightWrapProduct >> 32);
+  const u32 weightPairProductLo = (u32)weightPairProduct;
+  const u32 weightPairComboLo = (u32)weightPairCombo;
+  const u32 weightWrapProductLo = (u32)weightWrapProduct;
+  const u32 weightWrapComboLo = (u32)weightWrapCombo;
+  const u32 weightPairBase31 =
+      ((u32)(weightPairCombo >> 32) % 31u +
+       ((weightPairDelta % 31u) * m31_step) % 31u) % 31u;
+  const u32 weightPairBase61 =
+      ((u32)(weightPairCombo >> 32) % 61u +
+       ((weightPairDelta % 61u) * m61_step) % 61u) % 61u;
+  const u32 weightWrapRaw31 =
+      ((u32)(weightWrapCombo >> 32) % 31u +
+       ((weightWrapDistance % 31u) * m31_step) % 31u) % 31u;
+  const u32 weightWrapRaw61 =
+      ((u32)(weightWrapCombo >> 32) % 61u +
+       ((weightWrapDistance % 61u) * m61_step) % 61u) % 61u;
+  const u32 weightWrapBase31 = weightWrapRaw31 ? 31u - weightWrapRaw31 : 0u;
+  const u32 weightWrapBase61 = weightWrapRaw61 ? 61u - weightWrapRaw61 : 0u;
+#endif
 #if PFA_RADIX == 7 && ((PFA_LOGICAL_STEP % (2 * BIG_HEIGHT)) == 0)
   // PFA7 fftP canonical-load recurrence: this exact plan keeps the canonical
   // line fixed while x advances by one compile-time step modulo WIDTH.
@@ -996,8 +1028,53 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
     const Word word0 = pfaLoadCanonicalWord(in, n0);
     const Word word1 = pfaLoadCanonicalWord(in, n1);
 #endif
+#if PFA_RADIX == 7 && EXP == 125000003u && NWORDS == 3670016u && WIDTH == 512u && SMALL_HEIGHT == 512u && PFA_BINARY_LENGTH == 524288u && PFA_L_INV == 4u && PFA_LOGICAL_STEP == 3211264u
+    const u64 frac0 = comboFracBits(n0);
+    union { uint2 a; u64 b; } c31, c61;
+    c31.b = frac0 + make_u64(((n0 % 31u) * m31_step) % 31u, 0xFFFFFFFFu);
+    c61.b = frac0 + make_u64(((n0 % 61u) * m61_step) % 61u, 0xFFFFFFFFu);
+    const uint2 shifts0 = U2(c31.a[1] % 31u, c61.a[1] % 61u);
+
+    const u32 product0Lo = n0 * FRAC_BPW_LO;
+    const u32 frac0Lo = (u32)frac0;
+    u32 shift1_31, shift1_61;
+    if (n0 < weightWrapDistance) {
+      const u32 product1Lo = product0Lo + weightPairProductLo;
+      const u32 productCarry = product1Lo < product0Lo;
+      const u32 effectiveLo = weightPairComboLo + productCarry;
+      const u32 frac1Lo = frac0Lo + effectiveLo;
+      const u32 roundingBit =
+          (frac1Lo < frac0Lo) + (frac1Lo != 0u) - (frac0Lo != 0u);
+
+      shift1_31 = shifts0.x + weightPairBase31;
+      if (shift1_31 >= 31u) shift1_31 -= 31u;
+      shift1_61 = shifts0.y + weightPairBase61;
+      if (shift1_61 >= 61u) shift1_61 -= 61u;
+      if (roundingBit) {
+        if (++shift1_31 == 31u) shift1_31 = 0u;
+        if (++shift1_61 == 61u) shift1_61 = 0u;
+      }
+    } else {
+      const u32 productBorrow = product0Lo < weightWrapProductLo;
+      const u32 effectiveLo = weightWrapComboLo + productBorrow;
+      const u32 frac1Lo = frac0Lo - effectiveLo;
+      const u32 roundingBit =
+          (frac0Lo < effectiveLo) + (frac0Lo != 0u) - (frac1Lo != 0u);
+
+      shift1_31 = shifts0.x + weightWrapBase31;
+      if (shift1_31 >= 31u) shift1_31 -= 31u;
+      shift1_61 = shifts0.y + weightWrapBase61;
+      if (shift1_61 >= 61u) shift1_61 -= 61u;
+      if (roundingBit) {
+        shift1_31 = shift1_31 ? shift1_31 - 1u : 30u;
+        shift1_61 = shift1_61 ? shift1_61 - 1u : 60u;
+      }
+    }
+    const uint2 shifts1 = U2(shift1_31, shift1_61);
+#else
     const uint2 shifts0 = pfaWeightShifts3161(n0, m31_step, m61_step);
     const uint2 shifts1 = pfaWeightShifts3161(n1, m31_step, m61_step);
+#endif
     u31[i] = U2(shl(make_Z31(word0), shifts0.x), shl(make_Z31(word1), shifts1.x));
     u61[i] = U2(shl(make_Z61(word0), shifts0.y), shl(make_Z61(word1), shifts1.y));
     n0 += PFA_LOGICAL_STEP; if (n0 >= NWORDS) n0 -= NWORDS;
