@@ -11,7 +11,7 @@
 # make all DEBUG=1 CXX=g++-12
 
 HOST_OS = $(shell uname -s)
-AEVUM_VERSION ?= v0.3.111-pass5-prp-max
+AEVUM_VERSION ?= v0.3.112-pass5-prp-max
 MACOSX_DEPLOYMENT_TARGET ?= 12.0
 
 # Use the platform default C++20 compiler.  On macOS, /usr/bin/c++ is
@@ -261,6 +261,7 @@ test-host: $(MONOLITHIC_SOURCE_TEST) $(HOST_TEST) $(STATE_TEST) $(OPENCL_STANDAR
 	python3 tests/asm_string_braces_test.py
 	python3 tests/pfa7_separate_carryb_source_test.py
 	python3 tests/pfa7_nuss8_model_test.py
+	python3 tests/pfa_doublewide_tail_source_test.py
 	$(HOST_TEST)
 	$(STATE_TEST)
 	$(OPENCL_STANDARD_TEST)
@@ -861,6 +862,18 @@ $(PER_FFT_CONFIG_PARSE_TEST): tests/per_fft_config_parse_test.cpp $(ENGINE_OBJS)
 	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra -Isrc \
 		tests/per_fft_config_parse_test.cpp $(ENGINE_OBJS) \
 		$(OPENCL_LIBS) $(DL_LIBS) -o $@
+
+# Host-only Good-Thomas/PFA fftW scatter recurrence vs. canonical mapping.
+# Verify production guards, the mathematical permutation and collision freedom.
+PFA_SCATTER_RECURRENCE_MODEL_TEST := build-tests/aevum-pfa-scatter-recurrence-model-test
+.PHONY: test-pfa-scatter-recurrence-model
+test-host: test-pfa-scatter-recurrence-model
+test-pfa-scatter-recurrence-model: $(PFA_SCATTER_RECURRENCE_MODEL_TEST)
+	$(PFA_SCATTER_RECURRENCE_MODEL_TEST)
+
+$(PFA_SCATTER_RECURRENCE_MODEL_TEST): tests/pfa_scatter_recurrence_model_test.cpp src/cl/fftw.cl src/Gpu.cpp
+	@mkdir -p build-tests
+	$(CXX) -O2 -std=c++20 $(DARWIN_MIN_FLAGS) -Wall -Wextra tests/pfa_scatter_recurrence_model_test.cpp -o $@
 
 # PR260: compile the production GF61 tail reverse16 selection helper with
 # lightweight device/config stubs, covering explicit overrides and non-targets.
