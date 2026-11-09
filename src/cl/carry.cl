@@ -571,8 +571,18 @@ KERNEL(G_W) carry(P(Word2) out, CP(T2) in, u32 posROE, P(CarryABM) carryOut, P(u
     bool biglit1 = frac_bits >= -FRAC_BPW_HI;   // Same as frac_bits + FRAC_BPW_HI <= FRAC_BPW_HI;
 
     // Compute result
+#if AEVUM_PFA7_SLOPPY_CARRYA
+    // carryFused already uses the sloppy helper safely before carryFinal.
+    // This experiment asks whether the split PFA7 carry can keep the same
+    // exact numeric representation while avoiding strict first-word
+    // normalization in carryA.  At this workload the helper's second-word
+    // path remains strict; only the first word uses unsigned sloppy carry.
+    out[p] = weightAndCarryPairSloppy(SWAP_XY(in31[p]), SWAP_XY(in61[p]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
+                                      LL != 0 || i != 0, carry, biglit0, biglit1, &carry, &roundMax, &carryMax);
+#else
     out[p] = weightAndCarryPair(SWAP_XY(in31[p]), SWAP_XY(in61[p]), m31_weight_shift0, m31_weight_shift1, m61_weight_shift0, m61_weight_shift1,
                                 LL != 0 || i != 0, carry, biglit0, biglit1, &carry, &roundMax, &carryMax);
+#endif
 
     // Generate weight shifts and frac_bits for next pair
     m31_combo_counter += m31_combo_step;
