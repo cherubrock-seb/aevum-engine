@@ -2166,12 +2166,10 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
   const u64 m31_combo_bigstep = (comboFracBits(G_W * H * 2 - 1) + make_u64((G_W * H * 2 - 1) * m31_bigword_weight_shift_minus1, 0)) % (31ULL << 32);
   m31_combo_counter = comboFracBits(word_index) + make_u64(word_index * m31_bigword_weight_shift_minus1, 0xFFFFFFFF);
   m31_weight_shift = m31_weight_shift % 31;
-  u64 m31_starting_combo_counter = m31_combo_counter;     // Save starting counter before adding log2_NWORDS+1 for applying weights after carry propagation
   const u64 m61_combo_step = make_u64(m61_bigword_weight_shift_minus1, FRAC_BPW_HI);
   const u64 m61_combo_bigstep = (comboFracBits(G_W * H * 2 - 1) + make_u64((G_W * H * 2 - 1) * m61_bigword_weight_shift_minus1, 0)) % (61ULL << 32);
   m61_combo_counter = comboFracBits(word_index) + make_u64(word_index * m61_bigword_weight_shift_minus1, 0xFFFFFFFF);
   m61_weight_shift = m61_weight_shift % 61;
-  u64 m61_starting_combo_counter = m61_combo_counter;     // Save starting counter before adding log2_NWORDS+1 for applying weights after carry propagation
 
   // We also adjust shift amount for the fact that NTT returns results multiplied by 2*NWORDS.
   const u32 log2_NWORDS = (WIDTH == 256 ? 8 : WIDTH == 512 ? 9 : WIDTH == 1024 ? 10 : 12) +
@@ -2211,8 +2209,8 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
     m61_combo_counter += m61_combo_bigstep;
     m61_weight_shift = adjust_m61_weight_shift(m61_weight_shift);
   }
-  m31_combo_counter = m31_starting_combo_counter;     // Restore starting counter for applying weights after carry propagation
-  m61_combo_counter = m61_starting_combo_counter;
+  // Do not keep the output weight state live across the carry hand-off.  It is
+  // rematerialized immediately before final carry application below.
 
 #if ROE
   float fltRoundMax = (float) roundMax / (float) 0x1FFFFFFF;      // For speed, roundoff was computed as 32-bit integer.  Convert to float - divide by M61.
@@ -2336,6 +2334,13 @@ KERNEL(G_W * WMUL) carryFused(P(T2) out, CP(T2) in, u32 posROE, P(i64) carryShut
       }
     }
   }
+
+  // Rematerialize the base weight state here instead of keeping two 64-bit
+  // combo counters live across the carry shuttle wait.
+  m31_combo_counter = comboFracBits(word_index) + make_u64(word_index * m31_bigword_weight_shift_minus1, 0xFFFFFFFF);
+  m31_weight_shift = m31_weight_shift % 31;
+  m61_combo_counter = comboFracBits(word_index) + make_u64(word_index * m61_bigword_weight_shift_minus1, 0xFFFFFFFF);
+  m61_weight_shift = m61_weight_shift % 61;
 
   // Apply each 32 or 64 bit carry to the 2 words.  Apply weights.
   for (i32 i = 0; i < NW; ++i) {
