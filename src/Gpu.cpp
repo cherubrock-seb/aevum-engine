@@ -3605,7 +3605,18 @@ void Gpu::exponentiate(Buffer<Word>& bufInOut, u64 exp) {
 // Good-Thomas scatter directly and no longer needs a separate unpack kernel.
 // The stock fused carry remains byte-for-byte selected when PFA is disabled.
 void Gpu::doCarry(Buffer<double>& in, Buffer<Word>& wordBuf) {
-  if (useLongCarry || fft.isPfa()) {
+  // Diagnostic-only attempt to reuse the existing FFT3161 carryFused kernel
+  // for the validated RTX 3080 PFA7 geometry. Production remains unchanged
+  // unless the environment gate is explicitly enabled.
+  const char* pfa7_fused = std::getenv("AEVUM_PFA7_FUSED_CARRY");
+  const bool pfa7_fused_diag =
+      pfa7_fused && std::strcmp(pfa7_fused, "1") == 0 &&
+      isNvidiaGpu(shared.context->deviceId()) &&
+      fft.shape.fft_type == FFT3161 && fft.pfa_radix == 7 &&
+      fft.shape.width == 512 && fft.shape.middle == 7 &&
+      fft.shape.height == 512 && fft.variant == 202;
+
+  if (useLongCarry || (fft.isPfa() && !pfa7_fused_diag)) {
     fftW(buf3, in);
     carryA(wordBuf, buf3);
     carryB(wordBuf);
