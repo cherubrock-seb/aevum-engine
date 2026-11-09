@@ -925,13 +925,61 @@ static inline Word pfaLoadCanonicalWordCarried(CP(Word2) in, CP(CarryABM) carryI
 // Compute both CRT-plane shifts from one shared fixed-point fracBits product.
 // Reduce logical before multiplying: (logical*step) mod p equals
 // ((logical mod p)*step) mod p and avoids expensive 64-bit division.
-static inline uint2 pfaWeightShifts3161(u32 logical, u32 step31, u32 step61) {
-  const u64 frac = comboFracBits(logical);
+static inline uint2 pfaWeightShifts3161State(u64 frac, u32 residue31, u32 residue61) {
   union { uint2 a; u64 b; } c31, c61;
-  c31.b = frac + make_u64(((logical % 31u) * step31) % 31u, 0xFFFFFFFFu);
-  c61.b = frac + make_u64(((logical % 61u) * step61) % 61u, 0xFFFFFFFFu);
+  c31.b = frac + make_u64(residue31, 0xFFFFFFFFu);
+  c61.b = frac + make_u64(residue61, 0xFFFFFFFFu);
   return U2(c31.a[1] % 31u, c61.a[1] % 61u);
 }
+
+static inline uint2 pfaWeightShifts3161(u32 logical, u32 step31, u32 step61) {
+  return pfaWeightShifts3161State(
+      comboFracBits(logical),
+      ((logical % 31u) * step31) % 31u,
+      ((logical % 61u) * step61) % 61u);
+}
+
+#if PFA_RADIX == 7 && NWORDS == 3670016u && PFA_BINARY_LENGTH == 524288u && PFA_L_INV == 4u
+// For the exact production PFA7 plan, consecutive binary scalars map to
+// logical indices separated by a fixed delta modulo NWORDS.  Derive the
+// second scalar's weight state from the first without retaining lane state.
+static inline uint2 pfaWeightShifts3161PairSecond(
+    u32 logical0, u64 frac0, u32 residue310, u32 residue610,
+    u32 step31, u32 step61) {
+  const u32 pairDelta = 3u * PFA_BINARY_LENGTH + 1u;
+  const u32 wrapDistance = NWORDS - pairDelta;
+
+  u64 frac1;
+  u32 residue311, residue611;
+
+  if (logical0 < wrapDistance) {
+    const u32 low0 = logical0 * FRAC_BPW_LO;
+    const u32 deltaLo = pairDelta * FRAC_BPW_LO;
+    const u32 low1 = low0 + deltaLo;
+    const u64 deltaCombo =
+        (u64)pairDelta * FRAC_BPW_HI + mul_hi(pairDelta, FRAC_BPW_LO);
+    frac1 = frac0 + deltaCombo + (low1 < low0);
+
+    residue311 = residue310 + ((pairDelta % 31u) * step31) % 31u;
+    if (residue311 >= 31u) residue311 -= 31u;
+    residue611 = residue610 + ((pairDelta % 61u) * step61) % 61u;
+    if (residue611 >= 61u) residue611 -= 61u;
+  } else {
+    const u32 low0 = logical0 * FRAC_BPW_LO;
+    const u32 wrapLo = wrapDistance * FRAC_BPW_LO;
+    const u64 wrapCombo =
+        (u64)wrapDistance * FRAC_BPW_HI + mul_hi(wrapDistance, FRAC_BPW_LO);
+    frac1 = frac0 - wrapCombo - (low0 < wrapLo);
+
+    const u32 wrap31 = ((wrapDistance % 31u) * step31) % 31u;
+    const u32 wrap61 = ((wrapDistance % 61u) * step61) % 61u;
+    residue311 = residue310 >= wrap31 ? residue310 - wrap31 : residue310 + 31u - wrap31;
+    residue611 = residue610 >= wrap61 ? residue610 - wrap61 : residue610 + 61u - wrap61;
+  }
+
+  return pfaWeightShifts3161State(frac1, residue311, residue611);
+}
+#endif
 
 #if PFA_RADIX == 7
 // PFA7 paired noinline carried-load helper: keep one copy of the branch-heavy
@@ -996,8 +1044,17 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
     const Word word0 = pfaLoadCanonicalWord(in, n0);
     const Word word1 = pfaLoadCanonicalWord(in, n1);
 #endif
+#if PFA_RADIX == 7 && NWORDS == 3670016u && PFA_BINARY_LENGTH == 524288u && PFA_L_INV == 4u
+    const u64 frac0 = comboFracBits(n0);
+    const u32 residue310 = ((n0 % 31u) * m31_step) % 31u;
+    const u32 residue610 = ((n0 % 61u) * m61_step) % 61u;
+    const uint2 shifts0 = pfaWeightShifts3161State(frac0, residue310, residue610);
+    const uint2 shifts1 =
+        pfaWeightShifts3161PairSecond(n0, frac0, residue310, residue610, m31_step, m61_step);
+#else
     const uint2 shifts0 = pfaWeightShifts3161(n0, m31_step, m61_step);
     const uint2 shifts1 = pfaWeightShifts3161(n1, m31_step, m61_step);
+#endif
     u31[i] = U2(shl(make_Z31(word0), shifts0.x), shl(make_Z31(word1), shifts1.x));
     u61[i] = U2(shl(make_Z61(word0), shifts0.y), shl(make_Z61(word1), shifts1.y));
     n0 += PFA_LOGICAL_STEP; if (n0 >= NWORDS) n0 -= NWORDS;
@@ -1051,8 +1108,17 @@ KERNEL(G_W) fftPCarryB(P(T2) out, CP(Word2) in, CP(CarryABM) carryIn, Trig small
     const Word word0 = pfaLoadCanonicalWordCarried(in, carryIn, n0);
     const Word word1 = pfaLoadCanonicalWordCarried(in, carryIn, n1);
 #endif
+#if PFA_RADIX == 7 && NWORDS == 3670016u && PFA_BINARY_LENGTH == 524288u && PFA_L_INV == 4u
+    const u64 frac0 = comboFracBits(n0);
+    const u32 residue310 = ((n0 % 31u) * m31_step) % 31u;
+    const u32 residue610 = ((n0 % 61u) * m61_step) % 61u;
+    const uint2 shifts0 = pfaWeightShifts3161State(frac0, residue310, residue610);
+    const uint2 shifts1 =
+        pfaWeightShifts3161PairSecond(n0, frac0, residue310, residue610, m31_step, m61_step);
+#else
     const uint2 shifts0 = pfaWeightShifts3161(n0, m31_step, m61_step);
     const uint2 shifts1 = pfaWeightShifts3161(n1, m31_step, m61_step);
+#endif
     u31[i] = U2(shl(make_Z31(word0), shifts0.x), shl(make_Z31(word1), shifts1.x));
     u61[i] = U2(shl(make_Z61(word0), shifts0.y), shl(make_Z61(word1), shifts1.y));
     n0 += PFA_LOGICAL_STEP; if (n0 >= NWORDS) n0 -= NWORDS;
