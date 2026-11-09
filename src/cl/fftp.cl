@@ -925,12 +925,18 @@ static inline Word pfaLoadCanonicalWordCarried(CP(Word2) in, CP(CarryABM) carryI
 // Compute both CRT-plane shifts from one shared fixed-point fracBits product.
 // Reduce logical before multiplying: (logical*step) mod p equals
 // ((logical mod p)*step) mod p and avoids expensive 64-bit division.
-static inline uint2 pfaWeightShifts3161(u32 logical, u32 step31, u32 step61) {
-  const u64 frac = comboFracBits(logical);
+static inline uint2 pfaWeightShifts3161State(u64 frac, u32 residue31, u32 residue61) {
   union { uint2 a; u64 b; } c31, c61;
-  c31.b = frac + make_u64(((logical % 31u) * step31) % 31u, 0xFFFFFFFFu);
-  c61.b = frac + make_u64(((logical % 61u) * step61) % 61u, 0xFFFFFFFFu);
+  c31.b = frac + make_u64(residue31, 0xFFFFFFFFu);
+  c61.b = frac + make_u64(residue61, 0xFFFFFFFFu);
   return U2(c31.a[1] % 31u, c61.a[1] % 61u);
+}
+
+static inline uint2 pfaWeightShifts3161(u32 logical, u32 step31, u32 step61) {
+  return pfaWeightShifts3161State(
+      comboFracBits(logical),
+      ((logical % 31u) * step31) % 31u,
+      ((logical % 61u) * step61) % 61u);
 }
 
 #if PFA_RADIX == 7
@@ -972,6 +978,33 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
   const u32 first_binary_pair = me * SMALL_HEIGHT + y;
   u32 n0 = pfaLogicalIndex(row, first_binary_pair * 2u);
   u32 n1 = pfaLogicalIndex(row, first_binary_pair * 2u + 1u);
+
+#if PFA_RADIX == 7 && NWORDS == 3670016u && PFA_LOGICAL_STEP == 3211264u
+  // Exact validated PFA7 plan: retain the fixed-point weight state across the
+  // eight register lanes instead of rebuilding it from each logical index.
+  const u32 weightForwardFracLo = PFA_LOGICAL_STEP * FRAC_BPW_LO;
+  const u64 weightForwardCombo =
+      (u64)PFA_LOGICAL_STEP * FRAC_BPW_HI + mul_hi(PFA_LOGICAL_STEP, FRAC_BPW_LO);
+  const u32 weightWrapDistance = NWORDS - PFA_LOGICAL_STEP;
+  const u32 weightWrapFracLo = weightWrapDistance * FRAC_BPW_LO;
+  const u64 weightWrapCombo =
+      (u64)weightWrapDistance * FRAC_BPW_HI + mul_hi(weightWrapDistance, FRAC_BPW_LO);
+
+  const u32 weightForward31 = ((PFA_LOGICAL_STEP % 31u) * m31_step) % 31u;
+  const u32 weightForward61 = ((PFA_LOGICAL_STEP % 61u) * m61_step) % 61u;
+  const u32 weightWrap31 = ((weightWrapDistance % 31u) * m31_step) % 31u;
+  const u32 weightWrap61 = ((weightWrapDistance % 61u) * m61_step) % 61u;
+
+  u32 weightFracLo0 = n0 * FRAC_BPW_LO;
+  u32 weightFracLo1 = n1 * FRAC_BPW_LO;
+  u64 weightCombo0 = comboFracBits(n0);
+  u64 weightCombo1 = comboFracBits(n1);
+  u32 weightResidue310 = ((n0 % 31u) * m31_step) % 31u;
+  u32 weightResidue311 = ((n1 % 31u) * m31_step) % 31u;
+  u32 weightResidue610 = ((n0 % 61u) * m61_step) % 61u;
+  u32 weightResidue611 = ((n1 % 61u) * m61_step) % 61u;
+#endif
+
 #if PFA_RADIX == 7 && ((PFA_LOGICAL_STEP % (2 * BIG_HEIGHT)) == 0)
   // PFA7 fftP canonical-load recurrence: this exact plan keeps the canonical
   // line fixed while x advances by one compile-time step modulo WIDTH.
@@ -996,10 +1029,43 @@ KERNEL(G_W) fftP(P(T2) out, CP(Word2) in, Trig smallTrig) {
     const Word word0 = pfaLoadCanonicalWord(in, n0);
     const Word word1 = pfaLoadCanonicalWord(in, n1);
 #endif
+#if PFA_RADIX == 7 && NWORDS == 3670016u && PFA_LOGICAL_STEP == 3211264u
+    const uint2 shifts0 = pfaWeightShifts3161State(weightCombo0, weightResidue310, weightResidue610);
+    const uint2 shifts1 = pfaWeightShifts3161State(weightCombo1, weightResidue311, weightResidue611);
+#else
     const uint2 shifts0 = pfaWeightShifts3161(n0, m31_step, m61_step);
     const uint2 shifts1 = pfaWeightShifts3161(n1, m31_step, m61_step);
+#endif
     u31[i] = U2(shl(make_Z31(word0), shifts0.x), shl(make_Z31(word1), shifts1.x));
     u61[i] = U2(shl(make_Z61(word0), shifts0.y), shl(make_Z61(word1), shifts1.y));
+#if PFA_RADIX == 7 && NWORDS == 3670016u && PFA_LOGICAL_STEP == 3211264u
+    if (n0 < weightWrapDistance) {
+      const u32 oldFracLo = weightFracLo0;
+      weightFracLo0 += weightForwardFracLo;
+      weightCombo0 += weightForwardCombo + (weightFracLo0 < oldFracLo);
+      weightResidue310 += weightForward31; if (weightResidue310 >= 31u) weightResidue310 -= 31u;
+      weightResidue610 += weightForward61; if (weightResidue610 >= 61u) weightResidue610 -= 61u;
+    } else {
+      const u32 borrow = weightFracLo0 < weightWrapFracLo;
+      weightFracLo0 -= weightWrapFracLo;
+      weightCombo0 -= weightWrapCombo + borrow;
+      weightResidue310 = weightResidue310 >= weightWrap31 ? weightResidue310 - weightWrap31 : weightResidue310 + 31u - weightWrap31;
+      weightResidue610 = weightResidue610 >= weightWrap61 ? weightResidue610 - weightWrap61 : weightResidue610 + 61u - weightWrap61;
+    }
+    if (n1 < weightWrapDistance) {
+      const u32 oldFracLo = weightFracLo1;
+      weightFracLo1 += weightForwardFracLo;
+      weightCombo1 += weightForwardCombo + (weightFracLo1 < oldFracLo);
+      weightResidue311 += weightForward31; if (weightResidue311 >= 31u) weightResidue311 -= 31u;
+      weightResidue611 += weightForward61; if (weightResidue611 >= 61u) weightResidue611 -= 61u;
+    } else {
+      const u32 borrow = weightFracLo1 < weightWrapFracLo;
+      weightFracLo1 -= weightWrapFracLo;
+      weightCombo1 -= weightWrapCombo + borrow;
+      weightResidue311 = weightResidue311 >= weightWrap31 ? weightResidue311 - weightWrap31 : weightResidue311 + 31u - weightWrap31;
+      weightResidue611 = weightResidue611 >= weightWrap61 ? weightResidue611 - weightWrap61 : weightResidue611 + 61u - weightWrap61;
+    }
+#endif
     n0 += PFA_LOGICAL_STEP; if (n0 >= NWORDS) n0 -= NWORDS;
     n1 += PFA_LOGICAL_STEP; if (n1 >= NWORDS) n1 -= NWORDS;
 #if PFA_RADIX == 7 && ((PFA_LOGICAL_STEP % (2 * BIG_HEIGHT)) == 0)
