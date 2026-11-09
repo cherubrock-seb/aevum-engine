@@ -191,6 +191,26 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
 #if NVIDIAGPU && (PFA_RADIX == 7 || PFA_RADIX == 9)
   // The validated recurrence is beneficial for the larger NVIDIA PFA rows.
   // PFA3 and non-NVIDIA devices retain the canonical mapping path below.
+#if PFA_RADIX == 7 && PFA_BINARY_LENGTH == 524288u && PFA_L_INV == 4u && PFA_LOGICAL_STEP == 3211264u && BIG_HEIGHT == 3584u && WIDTH == 512u
+  // Exact production PFA7 geometry: derive the odd canonical coordinate from
+  // the even coordinate. This removes the second Good-Thomas mapping and the
+  // second BIG_HEIGHT division while preserving the existing scatter walk.
+  const u32 nEven = pfaWLogicalIndex(row, firstBinaryPair * 2u);
+  const u32 pairEven = nEven >> 1;
+  const u32 xEven = pairEven / BIG_HEIGHT;
+  const u32 lineEven = pairEven - xEven * BIG_HEIGHT;
+  u32 lineOdd = lineEven + 1536u;
+  u32 xOdd = xEven + 219u;
+  if (lineOdd >= BIG_HEIGHT) {
+    lineOdd -= BIG_HEIGHT;
+    ++xOdd;
+  }
+  if (xOdd >= WIDTH) xOdd -= WIDTH;
+  const u32 baseEven = lineEven * WIDTH;
+  const u32 baseOdd = lineOdd * WIDTH;
+  u32 outEven = baseEven + xEven;
+  u32 outOdd = baseOdd + xOdd;
+#else
   const u32 nEven = pfaWLogicalIndex(row, firstBinaryPair * 2u);
   const u32 nOdd  = pfaWLogicalIndex(row, firstBinaryPair * 2u + 1u);
   const u32 pairEven = nEven >> 1;
@@ -201,6 +221,7 @@ KERNEL(G_W) fftWGF61(P(T2) out, CP(T2) in, Trig smallTrig) {
   const u32 baseOdd  = (pairOdd  - xOdd  * BIG_HEIGHT) * WIDTH;
   u32 outEven = baseEven + xEven;
   u32 outOdd  = baseOdd + xOdd;
+#endif
   const u32 endEven = baseEven + WIDTH;
   const u32 endOdd  = baseOdd + WIDTH;
   const u32 outStep = PFA_LOGICAL_STEP / (2u * BIG_HEIGHT);
