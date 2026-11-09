@@ -434,6 +434,28 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
     if (doLog) log("AEVUM_PFA7_INPLACE=1: in-place transform interior, separate canonical fftW scatter.\n");
   }
 
+  if (const auto it = config.find("AEVUM_PFA7_FFTP_PLANE_STAGE"); it != config.end()) {
+    if (it->second != "0" && it->second != "1")
+      throw std::runtime_error("AEVUM_PFA7_FFTP_PLANE_STAGE must be 0 or 1");
+    if (it->second == "1") {
+#if defined(__APPLE__)
+      throw std::runtime_error("AEVUM_PFA7_FFTP_PLANE_STAGE does not support Apple staged kernels");
+#endif
+      if (!isNvidiaGpu(id) || fft.shape.fft_type != FFT3161 ||
+          !fft.isPfa() || fft.pfa_radix != 7 || fft.shape.width != 512 ||
+          fft.shape.middle != 7 || fft.shape.height != 512 || fft.variant != 202)
+        throw std::runtime_error("AEVUM_PFA7_FFTP_PLANE_STAGE requires NVIDIA pfa7:1:512:7:512:202");
+      for (const auto& setting : {KeyVal{"INPLACE", "0"}, KeyVal{"TAIL_KERNELS", "1"}}) {
+        const auto sit = config.find(setting.first);
+        if (sit != config.end() && sit->second != setting.second)
+          throw std::runtime_error("AEVUM_PFA7_FFTP_PLANE_STAGE requires " + setting.first + "=" + setting.second);
+        config[setting.first] = setting.second;
+      }
+      if (doLog)
+        log("AEVUM_PFA7_FFTP_PLANE_STAGE=1: stage GF31/GF61 fftP live state with repeated canonical loads.\n");
+    }
+  }
+
   if (const char* value = std::getenv("AEVUM_PFA_GF31_COSBASE")) {
     const auto it = config.find("AEVUM_PFA_GF31_COSBASE");
     if (it != config.end() && it->second != value)
