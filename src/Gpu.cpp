@@ -55,7 +55,6 @@
 #define M_LN2 0.69314718055994530941723212145818
 #endif
 
-#define CARRY_LEN 8
 
 namespace {
 
@@ -304,12 +303,20 @@ static u32 aevumHeightRadix(const Args& args, cl_device_id id, const FFTConfig& 
 }
 
 string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadix, u32 heightRadix, const vector<KeyVal>& extraConf, u64 E, bool doLog,
-                 bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul,
+                 bool &tail_single_wide, bool &tail_single_kernel, u32 &in_place, u32 &pad_size, u32 &wmul, u32 &carry_len,
                  bool &cuda_graph_squares, bool &cuda_reg_ptx_cache, u32 &in_wg, u32 &in_sizex, u32 &out_wg, u32 &out_sizex) {
   map<string, string> config;
 
   // Highest priority is the requested "extra" conf
   config.insert(extraConf.begin(), extraConf.end());
+
+  // Use the validated longer carry partition only on the exact NVIDIA PFA7 geometry.
+  // All other devices and FFT shapes retain the historical length of 8.
+  carry_len = 8;
+  if (isNvidiaGpu(id) && fft.isPfa() && fft.pfa_radix == 7 &&
+      fft.shape.fft_type == FFT3161 && fft.shape.width == 512 &&
+      fft.shape.middle == 7 && fft.shape.height == 512 && fft.variant == 202)
+    carry_len = 16;
 
   // Next, args config
   config.insert(args.flags.begin(), args.flags.end());
@@ -835,7 +842,7 @@ string clDefines(const Args& args, cl_device_id id, FFTConfig fft, u32 widthRadi
                     {"WIDTH", fft.shape.width},
                     {"SMALL_HEIGHT", fft.shape.height},
                     {"MIDDLE", fft.shape.middle},
-                    {"CARRY_LEN", CARRY_LEN},
+                    {"CARRY_LEN", carry_len},
                     {"NW", fft.shape.nW()},
                     {"NH", heightRadix},
                     {"PFA_RADIX", fft.pfa_radix}
@@ -1437,7 +1444,7 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   useLongCarry{args.carry == CARRY_64},
   queue{*shared.context, args.profile},
   auxQueues{},    
-  compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, nW, nH, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul,
+  compiler{args, shared.context, clDefines(args, shared.context->deviceId(), fft, nW, nH, extraConf, E, logFftSize, tail_single_wide, tail_single_kernel, in_place, pad_size, wmul, carry_len,
                                           cuda_graph_squares_, cuda_reg_ptx_cache_, in_wg, in_sizex, out_wg, out_sizex)},
 
 #define K(name, ...) name(#name, &compiler, profile.make(#name), &queue, __VA_ARGS__)
@@ -1631,18 +1638,18 @@ Gpu::Gpu(GpuCommon s, FFTConfig fft, u64 E, const vector<KeyVal>& extraConf, boo
   K(kfftP61WidthStageFused256Apple, "fftp.cl", "fftP61WidthStageFused256Apple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
   K(kfftP61WidthStageFused512Apple, "fftp.cl", "fftP61WidthStageFused512Apple", hN / nW, (kernelDefines(KALL) + "-DAEVUM_APPLE_SPLIT_FFTP=1").c_str()),
 #endif
-  K(kCarryA,               "carry.cl", "carry", hN / CARRY_LEN, kernelDefines(KALL).c_str()),
-  K(kCarryAROE,            "carry.cl", "carry", hN / CARRY_LEN, (kernelDefines(KALL) + "-DROE=1").c_str()),
-  K(kCarryM,               "carry.cl", "carry", hN / CARRY_LEN, (kernelDefines(KALL) + "-DMUL3=1").c_str()),
-  K(kCarryMROE,            "carry.cl", "carry", hN / CARRY_LEN, (kernelDefines(KALL) + "-DMUL3=1 -DROE=1").c_str()),
-  K(kCarryLL,              "carry.cl", "carry", hN / CARRY_LEN, (kernelDefines(KALL) + "-DLL=1").c_str()),
+  K(kCarryA,               "carry.cl", "carry", hN / carry_len, kernelDefines(KALL).c_str()),
+  K(kCarryAROE,            "carry.cl", "carry", hN / carry_len, (kernelDefines(KALL) + "-DROE=1").c_str()),
+  K(kCarryM,               "carry.cl", "carry", hN / carry_len, (kernelDefines(KALL) + "-DMUL3=1").c_str()),
+  K(kCarryMROE,            "carry.cl", "carry", hN / carry_len, (kernelDefines(KALL) + "-DMUL3=1 -DROE=1").c_str()),
+  K(kCarryLL,              "carry.cl", "carry", hN / carry_len, (kernelDefines(KALL) + "-DLL=1").c_str()),
   K(kCarryFused,           "carryfused.cl", "carryFused", WIDTH * (BIG_H + wmul) / nW, (kernelDefines(KALL) + numCudaRegisters(CARRYFUSED)).c_str()),
   K(kCarryFusedROE,        "carryfused.cl", "carryFused", WIDTH * (BIG_H + wmul) / nW, (kernelDefines(KALL) + numCudaRegisters(CARRYFUSED) + "-DROE=1").c_str()),
   K(kCarryFusedMul,        "carryfused.cl", "carryFused", WIDTH * (BIG_H + wmul) / nW, (kernelDefines(KALL) + numCudaRegisters(CARRYFUSED) + "-DMUL3=1").c_str()),
   K(kCarryFusedMulROE,     "carryfused.cl", "carryFused", WIDTH * (BIG_H + wmul) / nW, (kernelDefines(KALL) + numCudaRegisters(CARRYFUSED) + "-DMUL3=1 -DROE=1").c_str()),
   K(kCarryFusedLL,         "carryfused.cl", "carryFused", WIDTH * (BIG_H + wmul) / nW, (kernelDefines(KALL) + numCudaRegisters(CARRYFUSED) + "-DLL=1").c_str()),
 
-  K(carryB,                "carryb.cl", "carryB",   hN / CARRY_LEN, kernelDefines(KALL).c_str()),
+  K(carryB,                "carryb.cl", "carryB",   hN / carry_len, kernelDefines(KALL).c_str()),
 
   // 64
 #if defined(__APPLE__)
